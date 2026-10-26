@@ -30,7 +30,10 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
-      - run: npm run build:lambda
+      # A fixed signing key, so session tokens verify on every Lambda instance.
+      - run: npm run build:lambda -- --define:process.env.SESSION_SECRET="\"$SESSION_SECRET\""
+        env:
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:

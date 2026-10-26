@@ -7,4 +7,5 @@ const schema = z.object({
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
 })
 
-export const env = schema.parse(process.env)
+// SESSION_SECRET is read explicitly so the Lambda build can inline it (esbuild --define).
+export const env = schema.parse({ ...process.env, SESSION_SECRET: process.env.SESSION_SECRET })

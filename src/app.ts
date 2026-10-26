@@ -11,16 +11,16 @@ import { createMemoryRepository, type Repository } from './store.js'
 
 function send<T>(res:Response,schema:z.ZodType<T>,value:unknown,status=200){const parsed=schema.safeParse(value);if(!parsed.success)throw new Error('API response did not match its schema');res.status(status).json(parsed.data)}
 export function createApp(repository:Repository=createMemoryRepository()){
-  const app=express();const sessions=new Map<string,User>();const signingKey=env.SESSION_SECRET??randomBytes(32).toString('hex')
+  const app=express();const signingKey=env.SESSION_SECRET??randomBytes(32).toString('hex')
   const signature=(value:string)=>createHmac('sha256',signingKey).update(value).digest('base64url')
   // The deployed app and API sit on different domains, so the session cookie must be cross-site there.
   const cookieOptions={httpOnly:true,sameSite:env.NODE_ENV==='production'?'none' as const:'lax' as const,secure:env.NODE_ENV==='production',path:'/'}
   app.use(helmet());app.use(cors({origin:env.CORS_ORIGIN,credentials:true}));app.use(express.json({limit:'128kb'}))
   app.get(['/health','/api/health'],(_req,res)=>send(res,healthResponseSchema,{status:'ok'}))
   app.get('/api/demo-accounts',(_req,res)=>send(res,accountsResponseSchema,{accounts:repository.read().users.filter(u=>u.active).map(u=>({id:u.id,name:u.name,email:u.email,roles:u.roles,description:u.id==='DEMO-STU-RESTRICTED'?'Posting, commenting, and anonymous reporting paused. Essential access remains available.':u.roles.length>1?'Multi-role account: permissions combine across roles.':u.program??u.office??'CCS pilot account'})),sampleData:true}))
-  app.post('/api/auth/sign-in',(req,res)=>{const {accountId}=signInSchema.parse(req.body);const user=repository.read().users.find(u=>u.id===accountId&&u.active&&u.email.endsWith('@qcu.edu.ph'));if(!user)throw new ApiError(401,'Sign-in could not be completed. Choose an available demo account.','UNAUTHENTICATED');const id=randomBytes(24).toString('base64url');const snapshot=structuredClone(user);sessions.set(id,snapshot);res.cookie('accs_session',`${id}.${signature(id)}`,cookieOptions);send(res,sessionResponseSchema,sessionView(refreshRestrictions(repository.read(),snapshot)))})
-  app.post('/api/auth/sign-out',(req,res)=>{emptyBodySchema.parse(req.body??{});const value=req.headers.cookie?.split(';').map(part=>part.trim()).find(part=>part.startsWith('accs_session='))?.slice('accs_session='.length);if(value)sessions.delete(value.split('.')[0]!);res.clearCookie('accs_session',cookieOptions);send(res,actionResponseSchema,{ok:true,message:'Signed out.'})})
-  app.use('/api',(req,res,next)=>{const value=req.headers.cookie?.split(';').map(part=>part.trim()).find(part=>part.startsWith('accs_session='))?.slice('accs_session='.length);const [id,signed]=value?.split('.')??[];let valid=false;if(id&&signed){const expected=Buffer.from(signature(id));const actual=Buffer.from(signed);valid=actual.length===expected.length&&timingSafeEqual(actual,expected)}const snapshot=valid&&id?sessions.get(id):undefined;const account=snapshot?repository.read().users.find(u=>u.id===snapshot.id&&u.active):undefined;if(!snapshot||!account)return send(res,errorResponseSchema,{error:'Sign in to continue.',code:'UNAUTHENTICATED'},401);res.locals.user=refreshRestrictions(repository.read(),{...snapshot,name:account.name,email:account.email,title:account.title,bio:account.bio,education:account.education,officeHours:account.officeHours});next()})
+  app.post('/api/auth/sign-in',(req,res)=>{const {accountId}=signInSchema.parse(req.body);const user=repository.read().users.find(u=>u.id===accountId&&u.active&&u.email.endsWith('@qcu.edu.ph'));if(!user)throw new ApiError(401,'Sign-in could not be completed. Choose an available demo account.','UNAUTHENTICATED');const snapshot=structuredClone(user);const id=encodeSession(snapshot);res.cookie('accs_session',`${id}.${signature(id)}`,cookieOptions);send(res,sessionResponseSchema,sessionView(refreshRestrictions(repository.read(),snapshot)))})
+  app.post('/api/auth/sign-out',(req,res)=>{emptyBodySchema.parse(req.body??{});const value=req.headers.cookie?.split(';').map(part=>part.trim()).find(part=>part.startsWith('accs_session='))?.slice('accs_session='.length);res.clearCookie('accs_session',cookieOptions);send(res,actionResponseSchema,{ok:true,message:'Signed out.'})})
+  app.use('/api',(req,res,next)=>{const value=req.headers.cookie?.split(';').map(part=>part.trim()).find(part=>part.startsWith('accs_session='))?.slice('accs_session='.length);const [id,signed]=value?.split('.')??[];let valid=false;if(id&&signed){const expected=Buffer.from(signature(id));const actual=Buffer.from(signed);valid=actual.length===expected.length&&timingSafeEqual(actual,expected)}const claims=valid&&id?decodeSession(id):undefined;const account=claims?repository.read().users.find(u=>u.id===claims.id&&u.active):undefined;const snapshot=account&&claims?{...account,roles:claims.roles}:undefined;if(!snapshot||!account)return send(res,errorResponseSchema,{error:'Sign in to continue.',code:'UNAUTHENTICATED'},401);res.locals.user=refreshRestrictions(repository.read(),{...snapshot,name:account.name,email:account.email,title:account.title,bio:account.bio,education:account.education,officeHours:account.officeHours});next()})
   app.get('/api/session',(_req,res)=>send(res,sessionResponseSchema,sessionView(res.locals.user as User)))
   app.get('/api/pages/:pageId',(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const query=pageQuerySchema.parse(req.query);send(res,pageResponseSchema,getPage(repository,res.locals.user as User,pageId,query))})
   app.post('/api/pages/:pageId/actions',(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const body=actionRequestSchema.parse(req.body);send(res,actionResponseSchema,performAction(repository,res.locals.user as User,pageId,body))})
@@ -29,3 +29,18 @@ export function createApp(repository:Repository=createMemoryRepository()){
   app.use(errors);return app
 }
 export const app=createApp()
+
+// Sessions are self-contained signed tokens (user id and the roles loaded at sign-in), so every
+// Lambda instance can verify them without shared session storage.
+function encodeSession(user: User) {
+  return Buffer.from(JSON.stringify({ id: user.id, roles: user.roles })).toString('base64url')
+}
+
+function decodeSession(token: string): Pick<User, 'id' | 'roles'> | undefined {
+  try {
+    const claims = JSON.parse(Buffer.from(token, 'base64url').toString('utf8'))
+    return typeof claims?.id === 'string' && Array.isArray(claims.roles) ? claims : undefined
+  } catch {
+    return undefined
+  }
+}
