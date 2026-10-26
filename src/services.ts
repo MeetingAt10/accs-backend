@@ -61,14 +61,81 @@ function caseActions(user:User,r:Report) { if(!canActCase(user,r))return[]; if(r
 function consultationView(db:Database,c:Database['consultations'][number]) { return {...c,student:person(find(db.users,c.studentId)),faculty:person(find(db.users,c.facultyId)),slot:find(db.slots,c.slotId)} }
 function assignmentView(db:Database,a:Assignment,receipt=false) { const cycle=find(db.cycles,a.cycleId); return {id:a.id,faculty:person(find(db.users,a.facultyId)),cycleId:a.cycleId,cycleTitle:cycle.title,relation:a.relation,subject:a.subject,due:cycle.closes,status:a.submittedAt?'Submitted':'Not started',submittedAt:a.submittedAt,questions:receipt?cycle.questions:undefined,instructions:receipt?cycle.instructions:undefined,cycleStatus:cycle.status,answers:receipt?a.answers:undefined,comment:receipt?a.comment:undefined} }
 function resultViews(db:Database,user:User,cycleId?:string) { return db.users.filter(u=>hasRole(u,'professor','chair','dean')&&canFacultyResult(user,u)).map(faculty=>{const entries=db.assignments.filter(a=>a.facultyId===faculty.id&&a.submittedAt&&(!cycleId||a.cycleId===cycleId)&&find(db.cycles,a.cycleId).resultsPublished);const ratings=entries.flatMap(a=>Object.values(a.answers??{}).filter((v):v is number=>typeof v==='number'));const criteria=['Q1','Q2','Q3'].map((id,index)=>{const values=entries.map(a=>a.answers?.[id]).filter((v):v is number=>typeof v==='number');return {label:['Clarity','Support','Fairness'][index],value:values.length?Number((values.reduce((s,n)=>s+n,0)/values.length).toFixed(2)):0}});return {id:faculty.id,faculty:person(faculty),responses:entries.length,average:ratings.length?Number((ratings.reduce((s,n)=>s+n,0)/ratings.length).toFixed(2)):0,completion:entries.length?100:0,criteria,themes:entries.length?[{title:'Clear guidance',count:entries.length,summary:'The synthetic feedback describes clear requirements and useful learning support.'}]:[]}}) }
+function programResultCriteria(db:Database,program?:string,cycleId?:string) {
+  const facultyIds = db.users
+    .filter(user => hasRole(user,'professor','chair','dean') && (!program || user.program === program))
+    .map(user => user.id)
+  const responses = db.assignments.filter(assignment =>
+    facultyIds.includes(assignment.facultyId)
+    && assignment.submittedAt
+    && (!cycleId || assignment.cycleId === cycleId)
+    && find(db.cycles,assignment.cycleId).resultsPublished,
+  )
+  return ['Q1','Q2','Q3'].map((questionId,index) => {
+    const values = responses
+      .map(assignment => assignment.answers?.[questionId])
+      .filter((value): value is number => typeof value === 'number')
+    return {
+      label: ['Clarity','Support','Fairness'][index],
+      value: values.length
+        ? Number((values.reduce((sum,value) => sum + value,0) / values.length).toFixed(2))
+        : 0,
+    }
+  })
+}
 function audit(repo:Repository,user:User,action:string,module:string,reference:string,purpose?:string,reason?:string) { const entry={id:repo.nextId('AUDIT'),at:now(),actorId:user.id,action,module,reference,result:'Recorded',...(purpose?{purpose}:{}),...(reason?{reason}:{})};repo.read().audit.push(entry);return entry }
-function notify(repo:Repository,recipientId:string,kind:string,pageId:string,recordId?:string) { const preference=repo.read().settings[recipientId]?.priorities[kind];if(preference==='muted')return;const titles:Record<string,string>={announcement:'College announcement available',message:'New message available',consultation:'Consultation request updated',report:'Report update available',case:'Case milestone available',evaluation:'Evaluation update available',restriction:'Account feature update available',role:'Account assignment updated',moderation:'Content review update available'};repo.read().notifications.push({id:repo.nextId('NOTIF'),recipientId,kind,title:titles[kind]??'An update is available',body:'Open the source to view the information available to you.',priority:preference??(['report','case','restriction'].includes(kind)?'high':'normal'),pageId,recordId,at:now(),read:false}) }
+function notify(repo:Repository,recipientId:string,kind:string,pageId:string,recordId?:string) {
+  const db = repo.read()
+  const preference = db.settings[recipientId]?.priorities[kind]
+  if (preference === 'muted') return
+  if (kind === 'message' && db.threads.find(thread => thread.id === recordId)?.mutedBy.includes(recipientId)) return
+  const titles:Record<string,string> = {
+    announcement: 'College announcement available',
+    message: 'New message available',
+    consultation: 'Consultation request updated',
+    report: 'Report update available',
+    case: 'Case milestone available',
+    evaluation: 'Evaluation update available',
+    restriction: 'Account feature update available',
+    role: 'Account assignment updated',
+    moderation: 'Content review update available',
+  }
+  db.notifications.push({
+    id: repo.nextId('NOTIF'),
+    recipientId,
+    kind,
+    title: titles[kind] ?? 'An update is available',
+    body: 'Open the source to view the information available to you.',
+    priority: preference ?? (['report', 'case', 'restriction'].includes(kind) ? 'high' : 'normal'),
+    pageId,
+    recordId,
+    at: now(),
+    read: false,
+  })
+}
+function unreadMessages(thread:Thread,userId:string) {
+  const readCount = Math.min(thread.messages.length, thread.readMessageCounts[userId] ?? 0)
+  return thread.messages.slice(readCount).filter(message => message.authorId !== userId).length
+}
 function handlerIds(db:Database,r:Report) { return db.users.filter(u=>canActCase(u,r)).map(u=>u.id) }
 const faq=[{id:'FAQ-1',question:'How do I request a consultation?',answer:'Open Consultations, choose a professor you are assigned to, and request an open time. Wait for the professor to confirm.',href:'/consultations',roles:['student']},{id:'FAQ-2',question:'What does anonymous reporting mean here?',answer:'A report remains linked to your verified account. Handlers see an alias until you explicitly share your name with their office.',href:'/reports/new',roles:['student']},{id:'FAQ-3',question:'How are reports routed?',answer:'Reports usually begin with an adviser. A report involving that adviser bypasses them. Authorized personnel review and decide the next steps.',href:'/cases',roles:['professor','chair','dean','guidance','osas','president']},{id:'FAQ-4',question:'What can the assistant do?',answer:'It can explain ACCS pages, permitted schedules and your public-safe milestones. People make decisions about cases and restrictions.',href:'/assistant',roles:roles as readonly string[]},{id:'FAQ-5',question:'Where do I find official contact details?',answer:'The personnel directory lists approved professional information and QCU email addresses.',href:'/directory',roles:roles as readonly string[]},{id:'FAQ-6',question:'What remains available when features are paused?',answer:'Announcements, academic information, the assistant, and permitted messages with professors remain available.',href:'/standing',roles:['student']},{id:'FAQ-7',question:'What does a moderation flag mean?',answer:'A flag asks a person to review context. It does not establish wrongdoing or automatically apply a restriction.',href:'/admin/moderation',roles:['administrator']}]
 function notificationCategories(user:User){return ['announcement',...(hasPermission(user,'message.send')?['message']:[]),...(hasRole(user,'student','professor')?['consultation']:[]),...(hasRole(user,'student','professor','chair','dean','guidance','osas','president')?['report','case']:[]),...(hasPermission(user,'evaluation.fill')||hasPermission(user,'evaluation.configure')?['evaluation']:[]),...(hasRole(user,'administrator')?['moderation']:[])]}
 function filteredFaq(user:User){return faq.filter(entry=>entry.roles.some(role=>user.roles.includes(role as User['roles'][number])))}
-function restrictionViews(db:Database,user:User,studentId?:string) { return db.restrictions.filter(r=>(!studentId||r.studentId===studentId)&&(hasRole(user,'administrator')||r.studentId===user.id||canStudentRecord(db,user,find(db.users,r.studentId)))).map(r=>({...r,student:person(find(db.users,r.studentId)),authorizer:author(db,r.actorId)})) }
+function restrictionViews(db:Database,user:User,studentId?:string) {
+  const today = now().slice(0, 10)
+  return db.restrictions
+    .filter(r => (!studentId || r.studentId === studentId) && (hasRole(user,'administrator') || r.studentId === user.id || canStudentRecord(db,user,find(db.users,r.studentId))))
+    .map(r => ({ ...r, active: r.active && r.until >= today, student: person(find(db.users,r.studentId)), authorizer: author(db,r.actorId) }))
+}
 function safeAudit(db:Database,entries:Database['audit']) {return entries.map(entry=>{const confidentialStudent=['Identity disclosed','Report submitted'].includes(entry.action);return {...entry,actorId:confidentialStudent?undefined:entry.actorId,reason:['cases','reports','records'].includes(entry.module)?undefined:entry.reason,actor:confidentialStudent?{name:'Verified student',roles:['student']}:author(db,entry.actorId)}})}
+function defaultSettings(user: User) {
+  const compactRoles: User['roles'] = ['administrator', 'chair', 'dean', 'guidance', 'osas', 'president']
+  return {
+    theme: 'system',
+    density: hasRole(user, ...compactRoles) ? 'compact' : 'comfortable',
+    priorities: { report: 'high', case: 'high', message: 'normal', consultation: 'normal', evaluation: 'normal', announcement: 'normal' },
+  }
+}
 function visiblePosts(db:Database,user:User,q?:string) { return db.posts.filter(post=>canAudience(db,user,post.audience,post.private)&&(!q||`${post.title} ${post.body}`.toLowerCase().includes(q.toLowerCase()))) }
 function visibleEvents(db: Database, user: User) {
   return db.events.filter(event => {
@@ -242,7 +309,37 @@ export function getPage(repo:Repository,user:User,pageId:string,query:PageQuery=
       }
       break
     }
-    case'P11':case'P12':{const threads=db.threads.filter(t=>canThread(db,user,t));data.threads=threads.filter(t=>match(t.title)).map(t=>({id:t.id,title:t.title,kind:t.spaceId?'group':'direct',members:t.memberIds.map(id=>person(find(db.users,id))),lastMessage:t.messages.at(-1)?.body??'',updatedAt:t.messages.at(-1)?.at,unread:0}));data.recipients=db.users.filter(u=>canReach(db,user,u)).map(person);if(pageId==='P12'){const t=pick(threads,query.id);if(t)data.record={id:t.id,title:t.title,members:t.memberIds.map(id=>person(find(db.users,id))),messages:t.messages.map(m=>messageView(db,m)),muted:t.mutedBy.includes(user.id),kind:t.spaceId?'group':'direct'}}break}
+    case 'P11':
+    case 'P12': {
+      const threads = db.threads.filter(thread => canThread(db, user, thread))
+      data.threads = threads
+        .filter(thread => match(thread.title))
+        .map(thread => ({
+          id: thread.id,
+          title: thread.title,
+          kind: thread.spaceId ? 'group' : 'direct',
+          members: thread.memberIds.map(memberId => person(find(db.users, memberId))),
+          lastMessage: thread.messages.at(-1)?.body ?? '',
+          updatedAt: thread.messages.at(-1)?.at,
+          unread: unreadMessages(thread, user.id),
+        }))
+      data.recipients = db.users.filter(target => canReach(db, user, target)).map(person)
+      if (pageId === 'P12') {
+        const thread = pick(threads, query.id)
+        if (thread) {
+          data.record = {
+            id: thread.id,
+            title: thread.title,
+            members: thread.memberIds.map(memberId => person(find(db.users, memberId))),
+            messages: thread.messages.map(message => messageView(db, message)),
+            muted: thread.mutedBy.includes(user.id),
+            unread: unreadMessages(thread, user.id),
+            kind: thread.spaceId ? 'group' : 'direct',
+          }
+        }
+      }
+      break
+    }
     case'P13':Object.assign(data,{events:visibleEvents(db,user).filter(e=>!hasRole(user,'organization')||!e.organizationId||e.organizationId===user.organizationId),slots:hasRole(user,'organization')?[]:visibleSlots(db,user),todos:db.todos.filter(t=>t.ownerId===user.id),consultations:visibleConsultations(db,user).map(c=>consultationView(db,c))});break
     case'P14':Object.assign(data,{consultations:visibleConsultations(db,user).map(c=>consultationView(db,c)),faculty:faculty.filter(u=>match(u.name)).map(u=>({...person(u),nextSlot:db.slots.find(s=>s.facultyId===u.id&&s.state==='open')}))});break
     case'P15':{const f=pick(faculty,query.id);if(f){data.record=person(f);data.slots=db.slots.filter(s=>s.facultyId===f.id)}break}
@@ -254,25 +351,189 @@ export function getPage(repo:Repository,user:User,pageId:string,query:PageQuery=
     case'P21':data.cases=cases.filter(r=>(!query.q||r.id.toLowerCase().includes(query.q.toLowerCase()))&&(!query.status||r.status===query.status)&&(!query.category||r.category===query.category)&&(!query.severity||r.severity===query.severity)).map(r=>reportView(db,r,user));break
     case'P22':{const r=pick(cases,query.id);if(r)data.record=reportView(db,r,user);break}
     case'P23':case'P24':{const clusters=db.clusters.filter(c=>c.program===user.program);data.clusters=clusters.map(c=>({...c,reportIds:undefined,reportCount:c.reportIds.length}));data.threshold=80;if(pageId==='P24'){const c=pick(clusters,query.id);if(c){data.record={...c,reportIds:undefined};data.reports=db.reports.filter(r=>c.reportIds.includes(r.id)&&canViewCase(user,r)).map(r=>reportView(db,r,user))}}break}
-    case'P25':{if(query.program&&hasRole(user,'chair')&&query.program!==user.program)throw unavailable();let records=db.reports.filter(r=>(!hasRole(user,'chair')||r.program===user.program)&&(!query.program||r.program===query.program)&&(!query.stage||r.stage===query.stage)&&(!query.category||r.category===query.category)&&(!query.from||r.createdAt>=query.from)&&(!query.to||r.createdAt<=`${query.to}T23:59:59.999Z`));if(query.period==='none')records=[];data.stats=[{label:'Open',value:records.filter(r=>!['Resolved','Closed'].includes(r.status)).length,note:'Counts only'},{label:'Escalated',value:records.filter(r=>r.stage!=='adviser').length,note:'Within scope'},{label:'Resolved',value:records.filter(r=>['Resolved','Closed'].includes(r.status)).length,note:'This term'},{label:'Median days to resolve',value:0,note:'No completed sample records'},{label:'Adviser bypassed',value:records.filter(r=>r.bypassed).length,note:'Routing only'}];data.byStage=Object.keys(offices).map(stage=>({label:offices[stage as Stage],value:records.filter(r=>r.stage===stage).length}));data.trend=[{label:'20 Oct',opened:records.length,resolved:records.filter(r=>['Resolved','Closed'].includes(r.status)).length}];data.byCategory=[...new Set(records.map(r=>r.category))].map(label=>({label,value:records.filter(r=>r.category===label).length>=5?records.filter(r=>r.category===label).length:null,suppressed:records.filter(r=>r.category===label).length<5}));data.cases=records.filter(r=>canViewCase(user,r)).map(r=>({id:r.id,stage:r.stage,status:statusFor(r),createdAt:r.createdAt}));break}
+    case 'P25': {
+      if (query.program && hasRole(user, 'chair') && query.program !== user.program) {
+        throw unavailable()
+      }
+      let records = db.reports.filter((report) =>
+        (!hasRole(user, 'chair') || report.program === user.program)
+        && (!query.program || report.program === query.program)
+        && (!query.q || report.id.toLowerCase().includes(query.q.toLowerCase()))
+        && (!query.stage || report.stage === query.stage)
+        && (!query.category || report.category === query.category)
+        && (!query.from || report.createdAt >= query.from)
+        && (!query.to || report.createdAt <= `${query.to}T23:59:59.999Z`),
+      )
+      if (query.period === 'none') records = []
+      data.stats = [
+        { label: 'Open', value: records.filter((report) => !['Resolved', 'Closed'].includes(report.status)).length, note: 'Counts only' },
+        { label: 'Escalated', value: records.filter((report) => report.stage !== 'adviser').length, note: 'Within scope' },
+        { label: 'Resolved', value: records.filter((report) => ['Resolved', 'Closed'].includes(report.status)).length, note: 'This term' },
+        { label: 'Median days to resolve', value: 0, note: 'No completed sample records' },
+        { label: 'Adviser bypassed', value: records.filter((report) => report.bypassed).length, note: 'Routing only' },
+      ]
+      data.byStage = Object.keys(offices).map((stage) => ({
+        label: offices[stage as Stage],
+        value: records.filter((report) => report.stage === stage).length,
+      }))
+      data.trend = [{
+        label: '20 Oct',
+        opened: records.length,
+        resolved: records.filter((report) => ['Resolved', 'Closed'].includes(report.status)).length,
+      }]
+      data.byCategory = [...new Set(records.map((report) => report.category))].map((label) => {
+        const count = records.filter((report) => report.category === label).length
+        return { label, value: count >= 5 ? count : null, suppressed: count < 5 }
+      })
+      data.cases = records.filter((report) => canViewCase(user, report)).map((report) => ({
+        id: report.id,
+        stage: report.stage,
+        status: statusFor(report),
+        createdAt: report.createdAt,
+      }))
+      break
+    }
     case'P26':Object.assign(data,{assignments:db.assignments.filter(a=>a.evaluatorId===user.id&&['Published','Closed'].includes(find(db.cycles,a.cycleId).status)).map(a=>assignmentView(db,a)),reviewCycles:hasRole(user,'professor')?db.cycles.filter(c=>c.status==='In review'&&db.assignments.some(a=>a.cycleId===c.id&&a.facultyId===user.id)):[],canConfigure:hasRole(user,'dean'),canViewResults:hasPermission(user,'evaluation.results')});break
     case'P27':{const a=pick(db.assignments.filter(a=>a.evaluatorId===user.id),query.id);if(a)data.record=assignmentView(db,a,true);break}
-    case'P28':case'P29':{if(query.program&&hasRole(user,'chair')&&query.program!==user.program)throw unavailable();const results=resultViews(db,user,query.cycle).filter(r=>!query.program||r.faculty.program===query.program);data.results=results;data.cycles=db.cycles.filter(c=>c.resultsPublished);data.stats=[{label:'Responses',value:results.reduce((n,r)=>n+r.responses,0),note:'Combined answers only'},{label:'Faculty evaluated',value:results.filter(r=>r.responses>0).length,note:scopeLabel(user)},{label:'Overall average',value:results.length?Number((results.reduce((n,r)=>n+r.average,0)/results.length).toFixed(2)):0,note:'Rating scale 1–5'}];if(pageId==='P29'){const r=pick(results,query.id);if(r)data.record=r}break}
+    case 'P28':
+    case 'P29': {
+      if (query.program && hasRole(user,'chair') && query.program !== user.program) {
+        throw unavailable()
+      }
+      const results = resultViews(db,user,query.cycle)
+        .filter(result => !query.program || result.faculty.program === query.program)
+      data.results = results
+      data.cycles = db.cycles.filter(cycle => cycle.resultsPublished)
+      data.stats = [
+        {
+          label: 'Responses',
+          value: results.reduce((total,result) => total + result.responses,0),
+          note: 'Combined answers only',
+        },
+        {
+          label: 'Faculty evaluated',
+          value: results.filter(result => result.responses > 0).length,
+          note: scopeLabel(user),
+        },
+        {
+          label: 'Overall average',
+          value: results.length
+            ? Number((results.reduce((total,result) => total + result.average,0) / results.length).toFixed(2))
+            : 0,
+          note: 'Rating scale 1–5',
+        },
+      ]
+      if (pageId === 'P29') {
+        const result = pick(results,query.id)
+        if (result) {
+          data.record = result
+          // TBD(D-08): QCU must approve a minimum release threshold for program aggregates.
+          data.programAverage = {
+            program: result.faculty.program ?? 'College',
+            criteria: programResultCriteria(db,result.faculty.program,query.cycle),
+          }
+        }
+      }
+      break
+    }
     case'P30':data.cycles=db.cycles.map(c=>({...c,completion:db.assignments.filter(a=>a.cycleId===c.id&&a.submittedAt).length,assigned:db.assignments.filter(a=>a.cycleId===c.id).length}));break
-    case'P31':{const c=pick(db.cycles,query.id);if(c){data.record={...c,reviews:c.reviews.map(r=>({...r,person:person(find(db.users,r.userId))}))};data.completion=db.spaces.map(s=>({id:s.id,title:s.title,program:s.program,assigned:db.assignments.filter(a=>a.cycleId===c.id&&s.studentIds.includes(a.evaluatorId)).length,submitted:db.assignments.filter(a=>a.cycleId===c.id&&s.studentIds.includes(a.evaluatorId)&&a.submittedAt).length}));data.stats=[{label:'Assigned',value:db.assignments.filter(a=>a.cycleId===c.id).length,note:'Synthetic pilot assignments'},{label:'Submitted',value:db.assignments.filter(a=>a.cycleId===c.id&&a.submittedAt).length,note:'Counts only'}]}break}
+    case 'P31': {
+      const cycle = pick(db.cycles,query.id)
+      if (cycle) {
+        data.record = {
+          ...cycle,
+          reviews: cycle.reviews.map(review => ({
+            ...review,
+            person: person(find(db.users,review.userId)),
+          })),
+        }
+        data.completion = db.spaces.map(space => ({
+          id: space.id,
+          title: space.title,
+          program: space.program,
+          assigned: db.assignments.filter(assignment =>
+            assignment.cycleId === cycle.id && space.studentIds.includes(assignment.evaluatorId),
+          ).length,
+          submitted: db.assignments.filter(assignment =>
+            assignment.cycleId === cycle.id
+            && space.studentIds.includes(assignment.evaluatorId)
+            && assignment.submittedAt,
+          ).length,
+        }))
+        data.facultyCompletion = db.users
+          .filter(faculty => hasRole(faculty,'professor','chair','dean'))
+          .map(faculty => {
+            const assignments = db.assignments.filter(assignment =>
+              assignment.cycleId === cycle.id && assignment.facultyId === faculty.id,
+            )
+            return {
+              id: faculty.id,
+              name: faculty.name,
+              program: faculty.program,
+              assigned: assignments.length,
+              submitted: assignments.filter(assignment => assignment.submittedAt).length,
+            }
+          })
+          .filter(faculty => faculty.assigned > 0)
+        data.facultyReviews = db.users
+          .filter(faculty => hasRole(faculty,'professor') && db.assignments.some(assignment =>
+            assignment.cycleId === cycle.id && assignment.facultyId === faculty.id,
+          ))
+          .map(faculty => {
+            const review = cycle.reviews.find(item => item.userId === faculty.id)
+            return {
+              id: faculty.id,
+              name: faculty.name,
+              program: faculty.program,
+              status: review
+                ? review.decision === 'changes' ? 'Commented' : 'Reviewed'
+                : 'Not yet',
+              note: review?.note ?? '',
+            }
+          })
+        data.stats = [
+          {
+            label: 'Assigned',
+            value: db.assignments.filter(assignment => assignment.cycleId === cycle.id).length,
+            note: 'Synthetic pilot assignments',
+          },
+          {
+            label: 'Submitted',
+            value: db.assignments.filter(assignment => assignment.cycleId === cycle.id && assignment.submittedAt).length,
+            note: 'Counts only',
+          },
+        ]
+      }
+      break
+    }
     case'P32':{const c=pick(db.cycles.filter(c=>db.assignments.some(a=>a.cycleId===c.id&&a.facultyId===user.id)),query.id);if(c){data.record={...c,reviews:c.reviews.filter(r=>r.userId===user.id)};data.canReview=c.status==='In review'&&!c.reviews.some(r=>r.userId===user.id)}break}
     case'P33':data.students=db.users.filter(u=>canStudentRecord(db,user,u)&&match(`${u.name} ${u.studentId}`)).map(u=>person(refreshRestrictions(db,u)));break
     case'P34':{if(!query.purpose){data.purposeRequired=true;break}const students=db.users.filter(u=>canStudentRecord(db,user,u));const s=pick(students,query.id);if(s){const entry=audit(repo,user,'Record opened','records',s.studentId??s.id,query.purpose);data.record={...person(refreshRestrictions(db,s)),offenses:db.offenses.filter(o=>o.studentId===s.id),restrictions:restrictionViews(db,user,s.id),goodMoral:hasPermission(user,'goodmoral.review')?db.goodMoral.find(g=>g.studentId===s.id):undefined,openedAt:entry.at,accessHistory:hasRole(user,'dean')?safeAudit(db,db.audit.filter(a=>a.action==='Record opened'&&a.reference===(s.studentId??s.id))):undefined}}break}
     case'P35':{const students=db.users.filter(u=>hasRole(u,'student')&&(hasRole(user,'administrator')||canStudentRecord(db,user,u)));data.students=students.map(u=>person(refreshRestrictions(db,u)));data.restrictions=restrictionViews(db,user);data.referrals=db.referrals.filter(r=>hasRole(user,'administrator')||r.actorId===user.id).map(r=>({...r,student:person(find(db.users,r.studentId)),actor:author(db,r.actorId)}));data.canApply=hasRole(user,'administrator');break}
-    case'P36':data.record={standing:user.restrictions.length?'Some features paused':'Good standing',restrictions:db.restrictions.filter(r=>r.studentId===user.id&&r.active).map(r=>({id:r.id,features:r.features,until:r.until,starts:r.starts})),essentialAccess:['Announcements','Classes and academic information','Assistant','Messages with your professors']};break
+    case 'P36': {
+      const activeRestrictions = restrictionViews(db, user, user.id).filter(restriction => restriction.active)
+      const standing = refreshRestrictions(db, user).restrictions.length ? 'Some features paused' : 'Good standing'
+      data.record = {
+        standing,
+        restrictions: activeRestrictions.map(restriction => ({ id: restriction.id, features: restriction.features, until: restriction.until, starts: restriction.starts })),
+        essentialAccess: ['Announcements', 'Classes and academic information', 'Assistant', 'Messages with your professors'],
+      }
+      break
+    }
     case'P37':data.people=db.users.filter(u=>!hasRole(u,'student','organization')&&match(`${u.name} ${u.office} ${u.program} ${u.email}`)).map(person);break
     case'P38':{const u=pick(db.users.filter(u=>u.active),query.id);if(u){const {studentId: _studentId,...profile}=person(refreshRestrictions(db,u));data.record=profile}break}
     case'P39':data.record=person(user);break
     case'P40':data.notifications=db.notifications.filter(n=>n.recipientId===user.id);break
     case'P41':data.faq=filteredFaq(user);data.suggestions=['What can you help me with?',...(hasRole(user,'student')?['Show my schedule','Explain my report milestones']:[])];break
     case'P42':data.faq=filteredFaq(user).filter(f=>match(`${f.question} ${f.answer}`));break
-    case'P43':case'P44':data.settings=db.settings[user.id]??{theme:'system',density:'comfortable',priorities:{report:'high',case:'high',message:'normal',consultation:'normal',evaluation:'normal',announcement:'normal'}};data.record=person(user);data.categories=notificationCategories(user);break
-    case'P45':data.stats=[{label:'Active accounts',value:db.users.filter(u=>u.active).length,note:'Synthetic pilot users'},{label:'Pending reviews',value:db.moderation.filter(m=>m.status==='Pending').length,note:'Human review required'},{label:'Active restrictions',value:db.restrictions.filter(r=>r.active).length,note:'Feature-specific decisions'},{label:'Assistant sessions',value:db.telemetry.length,note:'No chat content'}];data.moderation=db.moderation.slice(0,5).map(m=>({id:m.id,itemType:m.itemType,source:m.source,status:m.status,at:m.at}));data.audit=safeAudit(db,db.audit.slice(-5).reverse());data.systemStatus={api:'Operational',assistant:'Demo provider',storage:'In-memory prototype'};data.adoption=roles.map(role=>({label:roleLabels[role],value:db.users.filter(u=>u.roles.includes(role)).length}));break
+    case 'P43':
+    case 'P44': {
+      data.settings = db.settings[user.id] ?? defaultSettings(user)
+      data.record = person(user)
+      data.categories = notificationCategories(user)
+      break
+    }
+    case'P45':data.stats=[{label:'Active accounts',value:db.users.filter(u=>u.active).length,note:'Synthetic pilot users'},{label:'Pending reviews',value:db.moderation.filter(m=>m.status==='Pending').length,note:'Human review required'},{label:'Active restrictions',value:db.restrictions.filter(r=>r.active&&r.until>=now().slice(0,10)).length,note:'Feature-specific decisions'},{label:'Assistant sessions',value:db.telemetry.length,note:'No chat content'}];data.moderation=db.moderation.slice(0,5).map(m=>({id:m.id,itemType:m.itemType,source:m.source,status:m.status,at:m.at}));data.audit=safeAudit(db,db.audit.slice(-5).reverse());data.systemStatus={api:'Operational',assistant:'Demo provider',storage:'In-memory prototype'};data.adoption=roles.map(role=>({label:roleLabels[role],value:db.users.filter(u=>u.roles.includes(role)).length}));break
     case'P46':data.users=db.users.filter(u=>match(`${u.name} ${u.email} ${u.id}`)).map(u=>({...person(refreshRestrictions(db,u)),active:u.active}));break
     case'P47':{const u=pick(db.users,query.id);if(u){data.record={...person(refreshRestrictions(db,u)),active:u.active};data.audit=safeAudit(db,db.audit.filter(a=>a.reference===u.id))}data.roles=roles.map(role=>({id:role,label:roleLabels[role]}));break}
     case'P48':data.permissionMatrix=Object.entries(permissionRoles).map(([key,grantedRoles])=>({key,roles:grantedRoles}));data.permissionProposals=db.permissionOverrides;data.roles=roles.map(role=>({id:role,label:roleLabels[role]}));break
@@ -314,6 +575,7 @@ const actionPages: Record<string, string[]> = {
   createThread: ['P11'],
   sendMessage: ['P12'],
   muteThread: ['P12'],
+  markThreadRead: ['P12'],
   markNotification: ['P40'],
   markAllNotifications: ['P40'],
   openNotification: ['P40'],
@@ -409,9 +671,78 @@ export function performAction(repo:Repository,user:User,pageId:string,request:Ac
     case'deleteAvailability':{actionPayloads.deleteAvailability.parse(request.payload);requirePermission(user,'consultation.decide');const s=find(db.slots,id);if(s.facultyId!==user.id)throw unavailable();if(['booked','requested'].includes(s.state))throw conflict('Cancel the consultation before removing this time.');db.slots=db.slots.filter(slot=>slot.id!==s.id);message='Availability removed.';break}
     case'createTodo':{requirePermission(user,'todo.manage');const p=actionPayloads.createTodo.parse(request.payload);const todo={id:repo.nextId('TODO'),ownerId:user.id,...p,done:false};db.todos.push(todo);record=todo;message='To-do added.';break}
     case'toggleTodo':case'deleteTodo':{requirePermission(user,'todo.manage');const todo=find(db.todos,id);if(todo.ownerId!==user.id)throw unavailable();if(request.action==='toggleTodo')todo.done=actionPayloads.toggleTodo.parse(request.payload).done;else{actionPayloads.deleteTodo.parse(request.payload);db.todos=db.todos.filter(t=>t.id!==todo.id)}record=todo;message='To-do updated.';break}
-    case'createThread':{requirePermission(user,'message.send');const p=actionPayloads.createThread.parse(request.payload);const recipient=find(db.users,p.recipientId);if(!canReach(db,user,recipient))throw unavailable();const existing=db.threads.find(t=>!t.spaceId&&t.memberIds.includes(user.id)&&t.memberIds.includes(recipient.id));const thread:Thread=existing??{id:repo.nextId('THREAD'),title:recipient.name,memberIds:[user.id,recipient.id],messages:[],mutedBy:[],readMessageCounts:{}};if(!existing)db.threads.push(thread);addMessage(thread.messages,p.body);notify(repo,recipient.id,'message','P12',thread.id);record={id:thread.id,title:thread.title};message='Message sent.';break}
-    case'sendMessage':{const p=actionPayloads.sendMessage.parse(request.payload);const thread=find(db.threads,id);if(!canThread(db,user,thread))throw unavailable();const m=addMessage(thread.messages,p.body);for(const recipientId of thread.memberIds.filter(memberId=>memberId!==user.id))notify(repo,recipientId,'message','P12',thread.id);if(/\b(idiot|stupid|hate)\b/i.test(p.body))db.moderation.push({id:repo.nextId('MOD'),itemType:'message',itemId:m.id,parentId:thread.id,authorId:user.id,source:'Filter',reason:'Draft word filter match; human review required',excerpt:p.body.slice(0,160),status:'Pending',at:now(),history:[]});record=messageView(db,m);message='Message sent.';break}
-    case'muteThread':{const p=actionPayloads.muteThread.parse(request.payload);const thread=find(db.threads,id);if(!canThread(db,user,thread))throw unavailable();thread.mutedBy=p.muted?[...new Set([...thread.mutedBy,user.id])]:thread.mutedBy.filter(v=>v!==user.id);message='Conversation preference saved.';break}
+    case 'createThread': {
+      requirePermission(user, 'message.send')
+      const payload = actionPayloads.createThread.parse(request.payload)
+      const recipient = find(db.users, payload.recipientId)
+      if (!canReach(db, user, recipient)) throw unavailable()
+      const existing = db.threads.find(thread =>
+        !thread.spaceId
+        && thread.memberIds.includes(user.id)
+        && thread.memberIds.includes(recipient.id),
+      )
+      const thread: Thread = existing ?? {
+        id: repo.nextId('THREAD'),
+        title: recipient.name,
+        memberIds: [user.id, recipient.id],
+        messages: [],
+        mutedBy: [],
+        readMessageCounts: {},
+      }
+      if (!existing) db.threads.push(thread)
+      addMessage(thread.messages, payload.body)
+      thread.readMessageCounts[user.id] = thread.messages.length
+      notify(repo, recipient.id, 'message', 'P12', thread.id)
+      record = { id: thread.id, title: thread.title }
+      message = 'Message sent.'
+      break
+    }
+    case 'sendMessage': {
+      const payload = actionPayloads.sendMessage.parse(request.payload)
+      const thread = find(db.threads, id)
+      if (!canThread(db, user, thread)) throw unavailable()
+      const sent = addMessage(thread.messages, payload.body)
+      thread.readMessageCounts[user.id] = thread.messages.length
+      for (const recipientId of thread.memberIds.filter(memberId => memberId !== user.id)) {
+        notify(repo, recipientId, 'message', 'P12', thread.id)
+      }
+      if (/\b(idiot|stupid|hate)\b/i.test(payload.body)) {
+        db.moderation.push({
+          id: repo.nextId('MOD'),
+          itemType: 'message',
+          itemId: sent.id,
+          parentId: thread.id,
+          authorId: user.id,
+          source: 'Filter',
+          reason: 'Draft word filter match; human review required',
+          excerpt: payload.body.slice(0, 160),
+          status: 'Pending',
+          at: now(),
+          history: [],
+        })
+      }
+      record = messageView(db, sent)
+      message = 'Message sent.'
+      break
+    }
+    case 'muteThread': {
+      const payload = actionPayloads.muteThread.parse(request.payload)
+      const thread = find(db.threads, id)
+      if (!canThread(db, user, thread)) throw unavailable()
+      thread.mutedBy = payload.muted
+        ? [...new Set([...thread.mutedBy, user.id])]
+        : thread.mutedBy.filter(memberId => memberId !== user.id)
+      message = 'Conversation preference saved.'
+      break
+    }
+    case 'markThreadRead': {
+      actionPayloads.markThreadRead.parse(request.payload)
+      const thread = find(db.threads, id)
+      if (!canThread(db, user, thread)) throw unavailable()
+      thread.readMessageCounts[user.id] = thread.messages.length
+      message = 'Conversation marked as read.'
+      break
+    }
     case'markNotification':case'openNotification':{const n=find(db.notifications,id);if(n.recipientId!==user.id)throw unavailable();if(request.action==='openNotification'){actionPayloads.openNotification.parse(request.payload);getPage(repo,user,n.pageId,n.recordId?{id:n.recordId}:{});n.read=true;record={pageId:n.pageId,recordId:n.recordId}}else n.read=actionPayloads.markNotification.parse(request.payload).read;message='Notification updated.';break}
     case'markAllNotifications':actionPayloads.markAllNotifications.parse(request.payload);db.notifications.filter(n=>n.recipientId===user.id).forEach(n=>{n.read=true});message='Notifications marked as read.';break
     case'assistantAsk':{requirePermission(user,'assistant.use');const p=actionPayloads.assistantAsk.parse(request.payload);const started=Date.now();record=assistantAnswer(db,user,p.question);db.telemetry.push({at:now(),category:'demo-provider',durationMs:Date.now()-started,success:true});message='Assistant response ready.';break}
@@ -424,11 +755,11 @@ export function performAction(repo:Repository,user:User,pageId:string,request:Ac
     case'openRecord':{const p=actionPayloads.openRecord.parse(request.payload);record=getPage(repo,user,'P34',{id,...p}).data.record;message='Record opened and logged.';break}
     case'reviewGoodMoral':{requirePermission(user,'goodmoral.review');const p=actionPayloads.reviewGoodMoral.parse(request.payload);const student=find(db.users,id);if(!canStudentRecord(db,user,student))throw unavailable();const review={studentId:student.id,...p,actorId:user.id,at:now()};db.goodMoral=db.goodMoral.filter(g=>g.studentId!==student.id);db.goodMoral.push(review);audit(repo,user,'Good Moral prerequisite reviewed','records',student.studentId??student.id);record=review;message='Review saved. Certificate rules need QCU approval.';break}
     case'applyRestriction':{requireRole(user,'administrator');const p=actionPayloads.applyRestriction.parse(request.payload);reasonOf(request);const student=find(db.users,p.studentId);if(!hasRole(student,'student'))throw unavailable();if(p.until<now().slice(0,10))throw new ApiError(400,'The end date must be today or later.','VALIDATION_ERROR');const r={id:repo.nextId('RST'),...p,starts:now(),actorId:user.id,active:true};db.restrictions.push(r);audit(repo,user,'Restriction applied','restrictions',r.id);notify(repo,student.id,'restriction','P36');record=r;message='Selected features paused.';break}
-    case'liftRestriction':{requireRole(user,'administrator');actionPayloads.liftRestriction.parse(request.payload);reasonOf(request);const r=find(db.restrictions,id);if(!r.active)throw conflict('This restriction has already ended.');r.active=false;audit(repo,user,'Restriction lifted','restrictions',r.id);notify(repo,r.studentId,'restriction','P36');record=r;message='Restriction lifted.';break}
+    case'liftRestriction':{requireRole(user,'administrator');actionPayloads.liftRestriction.parse(request.payload);reasonOf(request);const r=find(db.restrictions,id);if(!r.active||r.until<now().slice(0,10))throw conflict('This restriction has already ended.');r.active=false;audit(repo,user,'Restriction lifted','restrictions',r.id);notify(repo,r.studentId,'restriction','P36');record=r;message='Restriction lifted.';break}
     case'referRestriction':{requireRole(user,'guidance','osas');const p=actionPayloads.referRestriction.parse(request.payload);const reason=reasonOf(request);const student=find(db.users,p.studentId);if(!canStudentRecord(db,user,student))throw unavailable();const referral={id:repo.nextId('REF'),studentId:student.id,change:p.change,decisionReference:p.decisionReference??'',reason,actorId:user.id,at:now(),status:'Awaiting administrator review'};db.referrals.push(referral);audit(repo,user,'Restriction change requested','restrictions',referral.id);for(const admin of db.users.filter(u=>hasRole(u,'administrator')))notify(repo,admin.id,'restriction','P35');record=referral;message='Request sent. Existing restrictions are unchanged.';break}
     case'saveProfile':{const p=actionPayloads.saveProfile.parse(request.payload);const saved=find(db.users,user.id);Object.assign(saved,p);Object.assign(user,p);record=person(user);message='Profile saved.';break}
-    case'saveSettings':{const p=actionPayloads.saveSettings.parse(request.payload);db.settings[user.id]={...(db.settings[user.id]??{priorities:{}}),...p};record=db.settings[user.id];message='Settings saved.';break}
-    case'saveNotificationPreferences':{const p=actionPayloads.saveNotificationPreferences.parse(request.payload);if(Object.keys(p.priorities).some(key=>!notificationCategories(user).includes(key)))throw new ApiError(400,'That notification category is not available to this account.','VALIDATION_ERROR');/* TBD(D-06): required categories await policy; saved preferences do not change source access. */db.settings[user.id]={...(db.settings[user.id]??{theme:'system',density:'comfortable'}),priorities:p.priorities};record=db.settings[user.id];message='Notification priorities saved.';break}
+    case'saveSettings':{const p=actionPayloads.saveSettings.parse(request.payload);db.settings[user.id]={...(db.settings[user.id]??defaultSettings(user)),...p};record=db.settings[user.id];message='Settings saved.';break}
+    case'saveNotificationPreferences':{const p=actionPayloads.saveNotificationPreferences.parse(request.payload);if(Object.keys(p.priorities).some(key=>!notificationCategories(user).includes(key)))throw new ApiError(400,'That notification category is not available to this account.','VALIDATION_ERROR');/* TBD(D-06): required categories await policy; saved preferences do not change source access. */db.settings[user.id]={...(db.settings[user.id]??defaultSettings(user)),priorities:p.priorities};record=db.settings[user.id];message='Notification priorities saved.';break}
     case'updateRoles':{requirePermission(user,'role.manage');const p=actionPayloads.updateRoles.parse(request.payload);reasonOf(request);const account=find(db.users,id);if(p.roles.some(r=>['student','chair'].includes(r))&&!p.program&&!account.program)throw new ApiError(400,'A program is required for that role.','VALIDATION_ERROR');account.roles=p.roles;if(p.program)account.program=p.program;if(p.section)account.section=p.section;if(p.active!==undefined)account.active=p.active;audit(repo,user,'Role assignment changed','identity',account.id,undefined,reasonOf(request));notify(repo,account.id,'role','P43');record={...person(account),active:account.active};message='Assignment saved. Roles take effect at the next sign-in.';break}
     case'updatePermission':{requirePermission(user,'role.manage');const p=actionPayloads.updatePermission.parse(request.payload);reasonOf(request);if(!permissionRoles[p.permission])throw new ApiError(400,'That permission key is not defined.','VALIDATION_ERROR');/* TBD(D-06): approval workflow is undefined; save proposed cells without granting new runtime powers. */db.permissionOverrides[`${p.role}:${p.permission}`]=p.allowed;audit(repo,user,'Permission change proposed','identity',`${p.role}:${p.permission}`,undefined,reasonOf(request));record={...p,status:'Pending CCS approval'};message='Permission proposal saved for CCS approval.';break}
     case'moderate':{requirePermission(user,'moderation.review');const p=actionPayloads.moderate.parse(request.payload);const reason=reasonOf(request);const m=find(db.moderation,id);if(m.status!=='Pending')throw conflict('This item has already been reviewed.');if(p.decision==='refer'&&m.source!=='User')throw deny();/* TBD(D-04): a referral requires an approved routing policy; record it for human review without creating a case automatically. */m.status=p.decision==='keep'?'Kept':p.decision==='refer'?'Referred for authorized review':p.decision==='warn'?'Removed and warned':'Removed';m.history.push({at:now(),actorId:user.id,decision:p.decision,reason});if(['remove','warn'].includes(p.decision)){if(m.itemType==='post')find(db.posts,m.parentId).removed=true;else if(m.itemType==='comment'){const comment=find(find(db.posts,m.parentId).comments,m.itemId);comment.body='This content was removed after review.'}else{const message=find(find(db.threads,m.parentId).messages,m.itemId);message.body='This content was removed after review.'}}audit(repo,user,'Moderation decision','moderation',m.id);if(p.notifyAuthor)notify(repo,m.authorId,'moderation','P40');record={id:m.id,status:m.status,history:m.history};message='Decision recorded.';break}
