@@ -8,7 +8,7 @@ export const programs = ['BSIT', 'BSCS', 'BSIS'] as const
 export const userSchema = z.object({ id: z.string(), name: z.string(), email: z.email(), roles: z.array(roleSchema), program: z.string().optional(), section: z.string().optional(), office: z.string().optional(), organizationId: z.string().optional(), restrictions: z.array(z.string()), title: z.string(), bio: z.string(), education: z.string(), officeHours: z.string(), year: z.number().optional(), studentId: z.string().optional(), spaceIds: z.array(z.string()), organizationIds: z.array(z.string()), adviserId: z.string().optional(), active: z.boolean() })
 export type User = z.infer<typeof userSchema>
 export const pageIdSchema = z.string().regex(/^P(0[1-9]|[1-4][0-9]|5[0-2])$/)
-export const pageQuerySchema = z.object({ id: z.string().max(100).optional(), q: z.string().max(200).optional(), tab: z.string().max(50).optional(), status: z.string().max(50).optional(), program: z.string().max(20).optional(), category: z.string().max(80).optional(), stage: z.string().max(40).optional(), period: z.string().max(40).optional(), from: z.string().max(40).optional(), to: z.string().max(40).optional(), severity: z.enum(['low','medium','high']).optional(), cycle: z.string().max(100).optional(), label: z.string().max(80).optional(), scope: z.string().max(100).optional(), space: z.string().max(100).optional(), priority: z.string().max(30).optional(), type: z.string().max(40).optional(), source: z.string().max(30).optional(), role: roleSchema.optional(), office: z.string().max(100).optional(), view: z.enum(['month','week','list']).optional(), date: z.string().max(40).optional(), layers: z.string().max(200).optional(), sort: z.string().max(40).optional(), received: z.string().max(40).optional(), unread: z.enum(['true','false']).optional(), standing: z.string().max(60).optional(), hasRestriction: z.enum(['true','false']).optional(), purpose: z.enum(['Case handling', 'Good Moral review', 'Restriction review', 'Program oversight']).optional(), page: z.coerce.number().int().min(1).max(10000).optional() }).strict()
+export const pageQuerySchema = z.object({ id: z.string().max(100).optional(), q: z.string().max(200).optional(), tab: z.string().max(50).optional(), status: z.string().max(50).optional(), program: z.string().max(20).optional(), category: z.string().max(80).optional(), stage: z.string().max(40).optional(), period: z.string().max(40).optional(), from: z.string().max(40).optional(), to: z.string().max(40).optional(), severity: z.enum(['low','medium','high']).optional(), cycle: z.string().max(100).optional(), label: z.string().max(80).optional(), scope: z.string().max(100).optional(), space: z.string().max(100).optional(), priority: z.string().max(30).optional(), type: z.string().max(40).optional(), source: z.string().max(30).optional(), role: roleSchema.optional(), office: z.string().max(100).optional(), view: z.enum(['month','week','list']).optional(), date: z.string().max(40).optional(), layers: z.string().max(200).optional(), sort: z.string().max(40).optional(), received: z.string().max(40).optional(), unread: z.enum(['true','false']).optional(), standing: z.string().max(60).optional(), recipient: z.string().max(100).optional(), hasRestriction: z.enum(['true','false']).optional(), purpose: z.enum(['Case handling', 'Good Moral review', 'Restriction review', 'Program oversight']).optional(), page: z.coerce.number().int().min(1).max(10000).optional() }).strict()
 export type PageQuery = z.infer<typeof pageQuerySchema>
 export const jsonObjectSchema = z.record(z.string(), z.json())
 export const pageResponseSchema = z.object({ pageId: pageIdSchema, title: z.string(), scope: z.string(), sampleData: z.literal(true), data: jsonObjectSchema })
@@ -27,9 +27,44 @@ const text = z.string().trim().min(1).max(4000)
 const reason = z.string().trim().min(1).max(2000)
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+export const postLabels = ['Discussion', 'Rant', 'Assistance', 'Support'] as const
+export const announcementPriorities = ['general', 'important', 'urgent'] as const
+const postContent = {
+  title: text.max(160),
+  body: z.string().trim().min(1).max(5000),
+  label: z.string().trim().max(80).optional(),
+  priority: z.enum(announcementPriorities).default('general'),
+}
+const createPostSchema = z.object({
+  ...postContent,
+  audience: z.string().trim().min(1).max(100),
+  kind: z.enum(['discussion', 'announcement']).default('discussion'),
+  anonymous: z.boolean().default(false),
+  private: z.boolean().default(false),
+  eventDate: date.optional(),
+  eventTime: time.optional(),
+  eventPlace: z.string().trim().max(200).optional(),
+  eventContact: z.string().trim().max(200).optional(),
+  notifyMembers: z.boolean().default(false),
+}).strict().superRefine((post, context) => {
+  if (post.kind === 'discussion' && !postLabels.includes(post.label as typeof postLabels[number])) {
+    context.addIssue({ code: 'custom', path: ['label'], message: 'Choose a post label.' })
+  }
+  const eventRequired = post.kind === 'announcement'
+    && (post.audience.startsWith('space:') || post.audience.startsWith('organization:'))
+  if (eventRequired) {
+    for (const field of ['eventDate', 'eventTime', 'eventPlace', 'eventContact'] as const) {
+      if (!post[field]) {
+        context.addIssue({ code: 'custom', path: [field], message: 'Complete the event details.' })
+      }
+    }
+  }
+})
 export const questionSchema = z.object({ id: z.string(), criterion: text, text, type: z.enum(['rating', 'text']), required: z.boolean() })
 export const actionPayloads = {
-  createPost: z.object({ title: text.max(160), body: text, audience: z.string().default('college'), kind: z.enum(['discussion', 'announcement']).default('discussion'), label: text.max(80), anonymous: z.boolean().default(false), priority: z.enum(['general', 'important']).default('general'), private: z.boolean().default(false) }).strict(),
+  createPost: createPostSchema,
+  updatePost: z.object(postContent).strict(),
+  deletePost: z.object({}).strict(),
   comment: z.object({ body: text, anonymous: z.boolean().default(false) }).strict(),
   react: z.object({}).strict(),
   flag: z.object({ reason, itemType: z.enum(['post', 'comment', 'message']).default('post'), itemId: z.string().optional() }).strict(),
@@ -50,6 +85,7 @@ export const actionPayloads = {
   createThread: z.object({ recipientId: z.string().min(1), body: text }).strict(),
   sendMessage: z.object({ body: text }).strict(),
   muteThread: z.object({ muted: z.boolean() }).strict(),
+  markThreadRead: z.object({}).strict(),
   markNotification: z.object({ read: z.boolean().default(true) }).strict(),
   markAllNotifications: z.object({}).strict(),
   openNotification: z.object({}).strict(),

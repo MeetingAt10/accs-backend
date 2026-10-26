@@ -1,7 +1,7 @@
 import { z } from 'zod'
-import { actionPayloads, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
+import { actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
 import { allowedPages, canActCase, canAudience, canFacultyResult, canPage, canPublish, canReach, canSpace, canStudentRecord, canThread, canViewCase, hasPermission, hasRole, isOrganizationMember, pageTitles, permissionRoles, permissions, scopeLabel } from './access.js'
-import type { Assignment, Cycle, Database, Message, Post, Report, Repository, Stage } from './store.js'
+import type { Assignment, Cycle, Database, Message, Post, Report, Repository, Stage, Thread } from './store.js'
 
 export class ApiError extends Error { constructor(public status: number, message: string, public code = 'FORBIDDEN') { super(message) } }
 export const unavailable = () => new ApiError(404, "This record isn't available to you.", 'UNAVAILABLE')
@@ -21,7 +21,36 @@ export function sessionView(user:User) { return { user, permissions:permissions(
 function person(user:User) { return { id:user.id,name:user.name,email:user.email,roles:user.roles,program:user.program,section:user.section,office:user.office,title:user.title,bio:user.bio,education:user.education,officeHours:user.officeHours,studentId:user.studentId,year:user.year,standing:user.restrictions.length?'Some features paused':'Good standing' } }
 function author(db:Database,id:string,anonymous=false,alias='Student A-12') { const u=db.users.find(item=>item.id===id); return anonymous ? {name:alias,roles:['student'],anonymous:true} : u?{id:u.id,name:u.name,roles:u.roles,email:u.email}:{name:'College office',roles:[]} }
 function messageView(db:Database,message:Message,report?:Report) { return {id:message.id,body:message.body,at:message.at,author:author(db,message.authorId,!!report&&message.authorId===report.ownerId&&report.identity==='anonymous'&&!report.disclosedTo.includes(report.stage),report?.alias)} }
-function postView(db:Database,post:Post,user:User) { return {id:post.id,title:post.title,body:post.removed?'This content was removed after review.':post.body,audience:post.audience,kind:post.kind,label:post.label,priority:post.priority,anonymous:post.anonymous,private:post.private,at:post.at,author:author(db,post.authorId,post.anonymous),owned:post.authorId===user.id,reactionCount:post.reactions.length,reacted:post.reactions.includes(user.id),commentCount:post.comments.length,comments:post.removed?[]:post.comments.map(comment=>({...messageView(db,comment),author:author(db,comment.authorId,comment.anonymous)})),removed:post.removed} }
+function postView(db: Database, post: Post, user: User) {
+  return {
+    id: post.id,
+    title: post.title,
+    body: post.removed ? 'This content was removed.' : post.body,
+    audience: post.audience,
+    kind: post.kind,
+    label: post.label,
+    priority: post.priority,
+    anonymous: post.anonymous,
+    private: post.private,
+    at: post.at,
+    updatedAt: post.updatedAt,
+    eventDate: post.eventDate,
+    eventTime: post.eventTime,
+    eventPlace: post.eventPlace,
+    eventContact: post.eventContact,
+    notifyMembers: post.notifyMembers,
+    author: author(db, post.authorId, post.anonymous),
+    owned: post.authorId === user.id,
+    reactionCount: post.reactions.length,
+    reacted: post.reactions.includes(user.id),
+    commentCount: post.comments.length,
+    comments: post.removed ? [] : post.comments.map(comment => ({
+      ...messageView(db, comment),
+      author: author(db, comment.authorId, comment.anonymous),
+    })),
+    removed: post.removed,
+  }
+}
 function reportView(db:Database,report:Report,user:User,owner=false) {
   const current=canActCase(user,report)
   if(!owner&&!current) return {id:report.id,caseFileId:report.caseFileId,category:report.category,severity:report.severity,status:statusFor(report),stage:report.stage,office:offices[report.stage],program:report.program,createdAt:report.createdAt,updatedAt:report.updatedAt,historyOnly:true,history:report.history.filter(h=>h.actorId===user.id).map(h=>({...h,actor:author(db,h.actorId)})),historyNotice:'Earlier handlers retain only their own entries while this policy is reviewed (D-04/D-08).'}
@@ -41,11 +70,96 @@ function filteredFaq(user:User){return faq.filter(entry=>entry.roles.some(role=>
 function restrictionViews(db:Database,user:User,studentId?:string) { return db.restrictions.filter(r=>(!studentId||r.studentId===studentId)&&(hasRole(user,'administrator')||r.studentId===user.id||canStudentRecord(db,user,find(db.users,r.studentId)))).map(r=>({...r,student:person(find(db.users,r.studentId)),authorizer:author(db,r.actorId)})) }
 function safeAudit(db:Database,entries:Database['audit']) {return entries.map(entry=>{const confidentialStudent=['Identity disclosed','Report submitted'].includes(entry.action);return {...entry,actorId:confidentialStudent?undefined:entry.actorId,reason:['cases','reports','records'].includes(entry.module)?undefined:entry.reason,actor:confidentialStudent?{name:'Verified student',roles:['student']}:author(db,entry.actorId)}})}
 function visiblePosts(db:Database,user:User,q?:string) { return db.posts.filter(post=>canAudience(db,user,post.audience,post.private)&&(!q||`${post.title} ${post.body}`.toLowerCase().includes(q.toLowerCase()))) }
+function visibleEvents(db: Database, user: User) {
+  return db.events.filter(event => {
+    const source = event.postId ? db.posts.find(post => post.id === event.postId) : undefined
+    return (!event.postId || !!source && !source.removed)
+      && (!event.audience || canAudience(db, user, event.audience, event.private))
+  })
+}
+function validateFeedScope(db: Database, user: User, scope?: string) {
+  if (!scope) return
+  const parts = scope.split(':')
+  const [kind, id] = parts
+  const resourceScope = parts.length === 2
+  const exists = scope === 'college'
+    || scope === 'faculty'
+    || resourceScope && kind === 'program' && programs.includes(id as typeof programs[number])
+    || resourceScope && kind === 'space' && db.spaces.some(space => space.id === id)
+    || resourceScope && kind === 'organization' && db.organizations.some(organization => organization.id === id)
+  if (!exists || !canAudience(db, user, scope, kind === 'organization')) throw unavailable()
+}
+function spaceThreadId(db: Database, user: User, spaceId: string) {
+  return db.threads.find(thread => thread.spaceId === spaceId && canThread(db, user, thread))?.id
+}
+function syncPostEvent(repo: Repository, post: Post) {
+  const db = repo.read()
+  const previous = db.events.find(event => event.postId === post.id)
+  db.events = db.events.filter(event => event.postId !== post.id)
+  if (post.removed || post.kind !== 'announcement' || !post.eventDate || !post.eventTime) return
+  db.events.push({
+    id: previous?.id ?? repo.nextId('EVENT'),
+    postId: post.id,
+    title: post.title,
+    description: post.body,
+    date: post.eventDate,
+    start: post.eventTime,
+    type: post.audience.startsWith('organization:') ? 'Organization' : 'Class',
+    contactId: post.authorId,
+    audience: post.audience,
+    private: post.private,
+    organizationId: post.audience.startsWith('organization:') ? post.audience.split(':')[1] : undefined,
+    place: post.eventPlace,
+    contact: post.eventContact,
+  })
+}
+function notifyAnnouncementMembers(repo: Repository, post: Post) {
+  if (post.kind !== 'announcement' || !post.notifyMembers) return
+  const db = repo.read()
+  const [kind, id] = post.audience.split(':')
+  const space = db.spaces.find(item => item.id === id)
+  for (const recipient of db.users.filter(user => user.active)) {
+    const member = post.audience === 'college'
+      || post.audience === 'faculty' && hasRole(recipient, 'professor', 'chair', 'dean')
+      || kind === 'program' && recipient.program === id
+      || kind === 'space' && !!space && [...space.studentIds, ...space.professorIds].includes(recipient.id)
+      || kind === 'organization' && isOrganizationMember(db, recipient, id!)
+    if (member && canAudience(db, recipient, post.audience, post.private)) {
+      notify(repo, recipient.id, 'announcement', 'P06', post.id)
+    }
+  }
+}
+function queuePostReview(repo: Repository, post: Post) {
+  if (!/\b(idiot|stupid|hate)\b/i.test(post.body)) return
+  const db = repo.read()
+  if (db.moderation.some(item => item.itemId === post.id && item.status === 'Pending')) return
+  db.moderation.push({
+    id: repo.nextId('MOD'),
+    itemType: 'post',
+    itemId: post.id,
+    parentId: post.id,
+    authorId: post.authorId,
+    source: 'Filter',
+    reason: 'Draft word filter match; human review required',
+    excerpt: post.body.slice(0, 160),
+    status: 'Pending',
+    at: now(),
+    history: [],
+  })
+}
 function visibleConsultations(db:Database,user:User){return db.consultations.filter(c=>c.studentId===user.id&&hasRole(user,'student')||c.facultyId===user.id&&hasRole(user,'professor'))}
 function visibleSlots(db:Database,user:User){return db.slots.filter(s=>s.facultyId===user.id||hasRole(user,'dean','chair')||canReach(db,user,find(db.users,s.facultyId)))}
 export function getPage(repo:Repository,user:User,pageId:string,query:PageQuery={},internalRole=false) {
   if(!canPage(user,pageId))throw new ApiError(403,"This page isn't available to your role.")
-  const db=repo.read(); const data:Record<string,unknown>={}; const ownReports=db.reports.filter(r=>r.ownerId===user.id);const cases=db.reports.filter(r=>canViewCase(user,r));const posts=visiblePosts(db,user,query.q).filter(p=>(!query.label||p.label===query.label)&&(!query.scope||p.audience===query.scope)&&(!query.type||p.kind===query.type));const spaces=db.spaces.filter(s=>canSpace(user,s));const faculty=db.users.filter(u=>hasRole(u,'professor')&&canReach(db,user,u));
+  const db=repo.read(); const data:Record<string,unknown>={}; const ownReports=db.reports.filter(r=>r.ownerId===user.id);const cases=db.reports.filter(r=>canViewCase(user,r));
+  if (pageId === 'P04') validateFeedScope(db, user, query.scope)
+  const labels = query.label?.split(',').map(label => label.trim()).filter(Boolean) ?? []
+  const posts = visiblePosts(db, user, query.q).filter(post => (
+    (!labels.length || labels.includes(post.label) || labels.includes('Announcements') && post.kind === 'announcement')
+    && (!query.scope || post.audience === query.scope)
+    && (!query.type || post.kind === query.type)
+  ))
+  const spaces=db.spaces.filter(s=>canSpace(user,s));const faculty=db.users.filter(u=>hasRole(u,'professor')&&canReach(db,user,u));
   const match=(value:string)=>!query.q||value.toLowerCase().includes(query.q.toLowerCase())
   switch(pageId){
     case'P01':data.redirect='/home';break
@@ -54,16 +168,82 @@ export function getPage(repo:Repository,user:User,pageId:string,query:PageQuery=
       if(hasRole(user,'administrator'))data.redirect='/admin'
       const consultations=visibleConsultations(db,user);const assignments=db.assignments.filter(a=>a.evaluatorId===user.id&&['Published','Closed'].includes(find(db.cycles,a.cycleId).status))
       data.stats=[{label:hasRole(user,'student')?'Active reports':'Reports in your queue',value:(hasRole(user,'student')?ownReports:cases).filter(r=>!['Resolved','Closed'].includes(r.status)).length,note:'Within your access scope'},{label:'Consultations',value:consultations.filter(c=>!['Completed','Declined','Cancelled'].includes(c.status)).length,note:'Your requests and appointments'},{label:'Evaluations due',value:assignments.filter(a=>!a.submittedAt).length,note:'Assigned forms only'},{label:'Unread updates',value:db.notifications.filter(n=>n.recipientId===user.id&&!n.read).length,note:'Your notification inbox'}]
-      Object.assign(data,{announcements:posts.filter(p=>p.kind==='announcement').slice(0,3).map(p=>postView(db,p,user)),posts:posts.slice(0,3).map(p=>postView(db,p,user)),events:db.events, reports:hasRole(user,'student')?ownReports.slice(0,4).map(r=>reportView(db,r,user,true)):[],cases:cases.slice(0,4).map(r=>reportView(db,r,user)),consultations:consultations.map(c=>consultationView(db,c)),assignments:assignments.map(a=>assignmentView(db,a)),todos:db.todos.filter(t=>t.ownerId===user.id),notifications:db.notifications.filter(n=>n.recipientId===user.id).slice(0,5),sections:spaces.map(s=>({id:s.id,title:s.title,program:s.program,subject:s.subject})),roleSections:internalRole?[]:user.roles.map(role=>({role,title:roleLabels[role],description:scopeLabel({...user,roles:[role]}),...getPage(repo,{...user,roles:[role]},'P03',{},true).data}))});break}
+      Object.assign(data,{announcements:posts.filter(p=>p.kind==='announcement').slice(0,3).map(p=>postView(db,p,user)),posts:posts.slice(0,3).map(p=>postView(db,p,user)),events:visibleEvents(db,user), reports:hasRole(user,'student')?ownReports.slice(0,4).map(r=>reportView(db,r,user,true)):[],cases:cases.slice(0,4).map(r=>reportView(db,r,user)),consultations:consultations.map(c=>consultationView(db,c)),assignments:assignments.map(a=>assignmentView(db,a)),todos:db.todos.filter(t=>t.ownerId===user.id),notifications:db.notifications.filter(n=>n.recipientId===user.id).slice(0,5),sections:spaces.map(s=>({id:s.id,title:s.title,program:s.program,subject:s.subject})),roleSections:internalRole?[]:user.roles.map(role=>({role,title:roleLabels[role],description:scopeLabel({...user,roles:[role]}),...getPage(repo,{...user,roles:[role]},'P03',{},true).data}))});break}
     case'P04':Object.assign(data,{posts:posts.map(p=>postView(db,p,user)),spaces:spaces.map(s=>({id:s.id,title:s.title})),canPost:hasPermission(user,'post.create')});break
-    case'P05':Object.assign(data,{audiences:['college','faculty',...(user.program?[`program:${user.program}`]:[]),...spaces.map(s=>`space:${s.id}`),...db.organizations.filter(o=>isOrganizationMember(db,user,o.id)).map(o=>`organization:${o.id}`)].filter(a=>canPublish(db,user,a,false)),announcementAudiences:['college','faculty',...(user.program?[`program:${user.program}`]:[]),...spaces.map(s=>`space:${s.id}`),...db.organizations.map(o=>`organization:${o.id}`)].filter(a=>canPublish(db,user,a,true)),anonymityAllowed:hasRole(user,'student')&&!user.restrictions.includes('post.create'),labels:['Question','Discussion','Academic update','Event']});break
+    case 'P05':
+      Object.assign(data, {
+        audiences: ['college', 'faculty', ...(user.program ? [`program:${user.program}`] : []), ...spaces.map(space => `space:${space.id}`), ...db.organizations.filter(organization => isOrganizationMember(db, user, organization.id)).map(organization => `organization:${organization.id}`)].filter(audience => canPublish(db, user, audience, false)),
+        announcementAudiences: ['college', 'faculty', ...(user.program ? [`program:${user.program}`] : []), ...spaces.map(space => `space:${space.id}`), ...db.organizations.map(organization => `organization:${organization.id}`)].filter(audience => canPublish(db, user, audience, true)),
+        anonymityAllowed: hasRole(user, 'student') && !user.restrictions.includes('post.create'),
+        labels: postLabels,
+        priorities: announcementPriorities,
+      })
+      break
     case'P06':{const p=pick(posts,query.id);if(p)data.record=postView(db,p,user);data.canComment=!!p&&canPublish(db,user,p.audience,false,'comment');data.canReact=!!p&&canPublish(db,user,p.audience,false,'react');data.ownedReports=ownReports.map(r=>({id:r.id,sourcePostId:r.sourcePostId}));break}
-    case'P07':data.spaces=spaces.filter(s=>match(`${s.title} ${s.subject}`)).map(s=>({...s,professors:s.professorIds.map(id=>person(find(db.users,id))),studentCount:s.studentIds.length}));break
-    case'P08':{const s=pick(spaces,query.id);if(s){data.record={...s,professors:s.professorIds.map(id=>person(find(db.users,id))),students:s.studentIds.map(id=>person(refreshRestrictions(db,find(db.users,id))))};data.posts=posts.filter(p=>p.audience===`space:${s.id}`).map(p=>postView(db,p,user));data.canPost=hasPermission(user,'post.create')&&(hasRole(user,'student')&&s.studentIds.includes(user.id)||hasRole(user,'professor')&&s.professorIds.includes(user.id))}break}
+    case 'P07':
+      data.spaces = spaces.filter(space => match(`${space.title} ${space.subject}`)).map(space => ({
+        id: space.id,
+        title: space.title,
+        program: space.program,
+        section: space.section,
+        subject: space.subject,
+        professors: space.professorIds.map(id => person(find(db.users, id))),
+        studentCount: space.studentIds.length,
+        threadId: spaceThreadId(db, user, space.id),
+      }))
+      break
+    case 'P08': {
+      const space = pick(spaces, query.id)
+      if (space) {
+        const academicRoster = hasRole(user, 'dean')
+          || hasRole(user, 'chair') && user.program === space.program
+          || hasRole(user, 'professor') && space.professorIds.includes(user.id)
+        data.record = {
+          id: space.id,
+          title: space.title,
+          program: space.program,
+          section: space.section,
+          subject: space.subject,
+          professors: space.professorIds.map(id => person(find(db.users, id))),
+          studentCount: space.studentIds.length,
+          threadId: spaceThreadId(db, user, space.id),
+          students: space.studentIds.map(id => {
+            const student = refreshRestrictions(db, find(db.users, id))
+            // TBD(D-08): classmate visibility awaits approval; the demo exposes names and roles only.
+            return academicRoster ? { ...person(student), enrollmentStatus: 'Enrolled' } : { name: student.name, roles: student.roles }
+          }),
+          academicRoster,
+        }
+        data.posts = posts.filter(post => post.audience === `space:${space.id}`).map(post => postView(db, post, user))
+        data.canPost = canPublish(db, user, `space:${space.id}`, false)
+      }
+      break
+    }
     case'P09':data.organizations=db.organizations.filter(o=>match(o.name)).map(o=>({id:o.id,name:o.name,description:o.description,member:isOrganizationMember(db,user,o.id),memberCount:o.memberIds.length}));break
-    case'P10':{const org=pick(db.organizations,query.id);if(org){const member=isOrganizationMember(db,user,org.id);data.record={id:org.id,name:org.name,description:org.description,member,representative:person(find(db.users,org.representativeId)),members:member&&hasPermission(user,'roster.view')?org.memberIds.map(id=>person(refreshRestrictions(db,find(db.users,id)))):[]};data.posts=posts.filter(p=>p.audience===`organization:${org.id}`||p.authorId===org.representativeId&&!p.private).map(p=>postView(db,p,user));data.events=db.events.filter(e=>e.organizationId===org.id);data.canPublish=org.representativeId===user.id}break}
+    case 'P10': {
+      const organization = pick(db.organizations, query.id)
+      if (organization) {
+        const member = isOrganizationMember(db, user, organization.id)
+        data.record = {
+          id: organization.id,
+          name: organization.name,
+          description: organization.description,
+          member,
+          representative: person(find(db.users, organization.representativeId)),
+          members: member ? [
+            { name: find(db.users, organization.representativeId).name, organizationRole: 'Officer' },
+            ...organization.memberIds.map(id => ({ name: find(db.users, id).name, organizationRole: 'Member' })),
+          ] : [],
+        }
+        data.posts = posts.filter(post => post.audience === `organization:${organization.id}` || post.authorId === organization.representativeId && !post.private).map(post => postView(db, post, user))
+        data.events = visibleEvents(db, user).filter(event => event.organizationId === organization.id)
+        data.canPublish = organization.representativeId === user.id
+        data.canPost = canPublish(db, user, `organization:${organization.id}`, false)
+      }
+      break
+    }
     case'P11':case'P12':{const threads=db.threads.filter(t=>canThread(db,user,t));data.threads=threads.filter(t=>match(t.title)).map(t=>({id:t.id,title:t.title,kind:t.spaceId?'group':'direct',members:t.memberIds.map(id=>person(find(db.users,id))),lastMessage:t.messages.at(-1)?.body??'',updatedAt:t.messages.at(-1)?.at,unread:0}));data.recipients=db.users.filter(u=>canReach(db,user,u)).map(person);if(pageId==='P12'){const t=pick(threads,query.id);if(t)data.record={id:t.id,title:t.title,members:t.memberIds.map(id=>person(find(db.users,id))),messages:t.messages.map(m=>messageView(db,m)),muted:t.mutedBy.includes(user.id),kind:t.spaceId?'group':'direct'}}break}
-    case'P13':Object.assign(data,{events:db.events.filter(e=>!hasRole(user,'organization')||!e.organizationId||e.organizationId===user.organizationId),slots:hasRole(user,'organization')?[]:visibleSlots(db,user),todos:db.todos.filter(t=>t.ownerId===user.id),consultations:visibleConsultations(db,user).map(c=>consultationView(db,c))});break
+    case'P13':Object.assign(data,{events:visibleEvents(db,user).filter(e=>!hasRole(user,'organization')||!e.organizationId||e.organizationId===user.organizationId),slots:hasRole(user,'organization')?[]:visibleSlots(db,user),todos:db.todos.filter(t=>t.ownerId===user.id),consultations:visibleConsultations(db,user).map(c=>consultationView(db,c))});break
     case'P14':Object.assign(data,{consultations:visibleConsultations(db,user).map(c=>consultationView(db,c)),faculty:faculty.filter(u=>match(u.name)).map(u=>({...person(u),nextSlot:db.slots.find(s=>s.facultyId===u.id&&s.state==='open')}))});break
     case'P15':{const f=pick(faculty,query.id);if(f){data.record=person(f);data.slots=db.slots.filter(s=>s.facultyId===f.id)}break}
     case'P16':{const c=pick(visibleConsultations(db,user),query.id);if(c)data.record=consultationView(db,c);break}
@@ -110,7 +290,52 @@ function ensureCycleAssignments(repo:Repository,cycle:Cycle){
   for(const student of db.users.filter(u=>hasRole(u,'student'))){if(cycle.forms.includes('student'))for(const facultyId of [...new Set(db.spaces.filter(s=>s.studentIds.includes(student.id)).flatMap(s=>s.professorIds))])add(student.id,facultyId,'Student to faculty',student.program??'CCS')}
   for(const professor of db.users.filter(u=>hasRole(u,'professor'))){if(cycle.forms.includes('peer')){const target=db.users.find(u=>u.id!==professor.id&&hasRole(u,'professor')&&u.program===professor.program);if(target)add(professor.id,target.id,'Peer','Faculty peer review')}for(const[form,role]of [['upward-chair','chair'],['upward-dean','dean']] as const){const target=db.users.find(u=>hasRole(u,role)&&(role==='dean'||u.program===professor.program));if(cycle.forms.includes(form)&&target&&target.id!==professor.id)add(professor.id,target.id,form,'Leadership feedback')}}
 }
-const actionPages:Record<string,string[]>={createPost:['P05','P08','P10'],comment:['P06'],react:['P06'],flag:['P06','P12'],createReport:['P19'],saveDraft:['P19'],sendReportMessage:['P20','P22'],discloseIdentity:['P20'],caseAction:['P22'],addNote:['P22'],reviewCluster:['P24'],createConsultation:['P15'],decideConsultation:['P16'],saveAvailability:['P17'],deleteAvailability:['P17'],createTodo:['P13'],toggleTodo:['P13'],deleteTodo:['P13'],createThread:['P11'],sendMessage:['P12'],muteThread:['P12'],markNotification:['P40'],markAllNotifications:['P40'],openNotification:['P40'],assistantAsk:['P41','P19'],submitEvaluation:['P27'],createCycle:['P30'],saveCycle:['P31'],cycleAction:['P31'],reviewQuestions:['P32'],saveFollowUp:['P29'],openRecord:['P34'],reviewGoodMoral:['P34'],applyRestriction:['P35'],liftRestriction:['P35'],referRestriction:['P34','P35'],saveProfile:['P39'],saveSettings:['P43'],saveNotificationPreferences:['P44'],updateRoles:['P46','P47'],updatePermission:['P48'],moderate:['P50']}
+const actionPages: Record<string, string[]> = {
+  createPost: ['P05', 'P08', 'P10'],
+  updatePost: ['P06'],
+  deletePost: ['P06'],
+  comment: ['P06'],
+  react: ['P06'],
+  flag: ['P06', 'P12'],
+  createReport: ['P19'],
+  saveDraft: ['P19'],
+  sendReportMessage: ['P20', 'P22'],
+  discloseIdentity: ['P20'],
+  caseAction: ['P22'],
+  addNote: ['P22'],
+  reviewCluster: ['P24'],
+  createConsultation: ['P15'],
+  decideConsultation: ['P16'],
+  saveAvailability: ['P17'],
+  deleteAvailability: ['P17'],
+  createTodo: ['P13'],
+  toggleTodo: ['P13'],
+  deleteTodo: ['P13'],
+  createThread: ['P11'],
+  sendMessage: ['P12'],
+  muteThread: ['P12'],
+  markNotification: ['P40'],
+  markAllNotifications: ['P40'],
+  openNotification: ['P40'],
+  assistantAsk: ['P41', 'P19'],
+  submitEvaluation: ['P27'],
+  createCycle: ['P30'],
+  saveCycle: ['P31'],
+  cycleAction: ['P31'],
+  reviewQuestions: ['P32'],
+  saveFollowUp: ['P29'],
+  openRecord: ['P34'],
+  reviewGoodMoral: ['P34'],
+  applyRestriction: ['P35'],
+  liftRestriction: ['P35'],
+  referRestriction: ['P34', 'P35'],
+  saveProfile: ['P39'],
+  saveSettings: ['P43'],
+  saveNotificationPreferences: ['P44'],
+  updateRoles: ['P46', 'P47'],
+  updatePermission: ['P48'],
+  moderate: ['P50'],
+}
 export function performAction(repo:Repository,user:User,pageId:string,request:ActionRequest){
   if(!canPage(user,pageId)||!actionPages[request.action]?.includes(pageId))throw deny()
   const db=repo.read();const id=request.recordId;let record:unknown;let message='Changes saved.'
@@ -118,7 +343,56 @@ export function performAction(repo:Repository,user:User,pageId:string,request:Ac
   const getCase=()=>{const r=find(db.reports,id);if(!canActCase(user,r))throw unavailable();return r}
   const addMessage=(list:Message[],body:string)=>{const m={id:repo.nextId('MESSAGE'),authorId:user.id,body,at:now()};list.push(m);return m}
   switch(request.action){
-    case'createPost':{const p=actionPayloads.createPost.parse(request.payload);if(!canPublish(db,user,p.audience,p.kind==='announcement'))throw deny();if(p.anonymous&&(!hasRole(user,'student')||user.restrictions.includes('post.create')))throw deny();const post:Post={...p,id:repo.nextId('POST'),authorId:user.id,at:now(),reactions:[],comments:[],removed:false};db.posts.push(post);if(/\b(idiot|stupid|hate)\b/i.test(p.body))db.moderation.push({id:repo.nextId('MOD'),itemType:'post',itemId:post.id,parentId:post.id,authorId:user.id,source:'Filter',reason:'Draft word filter match; human review required',excerpt:p.body.slice(0,160),status:'Pending',at:now(),history:[]});if(p.kind==='announcement')for(const recipient of db.users.filter(u=>canAudience(db,u,p.audience,p.private)))notify(repo,recipient.id,'announcement','P06',post.id);record=postView(db,post,user);message='Post published.';break}
+    case 'createPost': {
+      const payload = actionPayloads.createPost.parse(request.payload)
+      if (!canPublish(db, user, payload.audience, payload.kind === 'announcement')) throw deny()
+      if (payload.anonymous && (!hasRole(user, 'student') || payload.kind === 'announcement' || user.restrictions.includes('post.create'))) throw deny()
+      const post: Post = {
+        ...payload,
+        label: payload.kind === 'announcement' ? 'Announcement' : payload.label!,
+        id: repo.nextId('POST'),
+        authorId: user.id,
+        at: now(),
+        reactions: [],
+        comments: [],
+        removed: false,
+      }
+      db.posts.push(post)
+      queuePostReview(repo, post)
+      syncPostEvent(repo, post)
+      notifyAnnouncementMembers(repo, post)
+      record = postView(db, post, user)
+      message = 'Post published.'
+      break
+    }
+    case 'updatePost': {
+      const payload = actionPayloads.updatePost.parse(request.payload)
+      const post = find(db.posts, id)
+      if (post.authorId !== user.id || !canAudience(db, user, post.audience, post.private)) throw unavailable()
+      if (post.removed) throw conflict('This post has been removed.')
+      if (!canPublish(db, user, post.audience, post.kind === 'announcement')) throw deny()
+      const label = post.kind === 'announcement'
+        ? 'Announcement'
+        : z.object({ label: z.enum(postLabels) }).parse({ label: payload.label }).label
+      Object.assign(post, payload, { label, updatedAt: now() })
+      queuePostReview(repo, post)
+      syncPostEvent(repo, post)
+      record = postView(db, post, user)
+      message = 'Post updated.'
+      break
+    }
+    case 'deletePost': {
+      actionPayloads.deletePost.parse(request.payload)
+      const post = find(db.posts, id)
+      if (post.authorId !== user.id || !canAudience(db, user, post.audience, post.private)) throw unavailable()
+      if (post.removed) throw conflict('This post has already been removed.')
+      post.removed = true
+      post.updatedAt = now()
+      syncPostEvent(repo, post)
+      record = postView(db, post, user)
+      message = 'Post deleted.'
+      break
+    }
     case'comment':{if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();if(user.restrictions.includes('post.comment'))throw deny();const p=actionPayloads.comment.parse(request.payload);const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'comment'))throw deny();if(p.anonymous&&!hasRole(user,'student'))throw deny();post.comments.push({...addMessage([],p.body),anonymous:p.anonymous});record=postView(db,post,user);message='Comment added.';break}
     case'react':{actionPayloads.react.parse(request.payload);if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'react'))throw deny();post.reactions=post.reactions.includes(user.id)?post.reactions.filter(v=>v!==user.id):[...post.reactions,user.id];record=postView(db,post,user);message='Reaction updated.';break}
     case'flag':{const p=actionPayloads.flag.parse(request.payload);let authorId:string,body:string,parentId:string,itemId:string;if(p.itemType==='message'){const thread=find(db.threads,id);if(!canThread(db,user,thread))throw unavailable();const m=find(thread.messages,p.itemId);authorId=m.authorId;body=m.body;parentId=thread.id;itemId=m.id}else{const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private))throw unavailable();const item=p.itemType==='comment'?find(post.comments,p.itemId):post;authorId=item.authorId;body=item.body;parentId=post.id;itemId=item.id}const mod={id:repo.nextId('MOD'),itemType:p.itemType,itemId,parentId,authorId,reporterId:user.id,source:'User' as const,reason:p.reason,excerpt:body.slice(0,160),status:'Pending',at:now(),history:[]};db.moderation.push(mod);audit(repo,user,'Content reported','moderation',mod.id);record={id:mod.id,status:mod.status};message='Sent for human review.';break}
@@ -135,7 +409,7 @@ export function performAction(repo:Repository,user:User,pageId:string,request:Ac
     case'deleteAvailability':{actionPayloads.deleteAvailability.parse(request.payload);requirePermission(user,'consultation.decide');const s=find(db.slots,id);if(s.facultyId!==user.id)throw unavailable();if(['booked','requested'].includes(s.state))throw conflict('Cancel the consultation before removing this time.');db.slots=db.slots.filter(slot=>slot.id!==s.id);message='Availability removed.';break}
     case'createTodo':{requirePermission(user,'todo.manage');const p=actionPayloads.createTodo.parse(request.payload);const todo={id:repo.nextId('TODO'),ownerId:user.id,...p,done:false};db.todos.push(todo);record=todo;message='To-do added.';break}
     case'toggleTodo':case'deleteTodo':{requirePermission(user,'todo.manage');const todo=find(db.todos,id);if(todo.ownerId!==user.id)throw unavailable();if(request.action==='toggleTodo')todo.done=actionPayloads.toggleTodo.parse(request.payload).done;else{actionPayloads.deleteTodo.parse(request.payload);db.todos=db.todos.filter(t=>t.id!==todo.id)}record=todo;message='To-do updated.';break}
-    case'createThread':{requirePermission(user,'message.send');const p=actionPayloads.createThread.parse(request.payload);const recipient=find(db.users,p.recipientId);if(!canReach(db,user,recipient))throw unavailable();let thread=db.threads.find(t=>!t.spaceId&&t.memberIds.includes(user.id)&&t.memberIds.includes(recipient.id));if(!thread){thread={id:repo.nextId('THREAD'),title:recipient.name,memberIds:[user.id,recipient.id],messages:[],mutedBy:[]};db.threads.push(thread)}addMessage(thread.messages,p.body);notify(repo,recipient.id,'message','P12',thread.id);record={id:thread.id,title:thread.title};message='Message sent.';break}
+    case'createThread':{requirePermission(user,'message.send');const p=actionPayloads.createThread.parse(request.payload);const recipient=find(db.users,p.recipientId);if(!canReach(db,user,recipient))throw unavailable();const existing=db.threads.find(t=>!t.spaceId&&t.memberIds.includes(user.id)&&t.memberIds.includes(recipient.id));const thread:Thread=existing??{id:repo.nextId('THREAD'),title:recipient.name,memberIds:[user.id,recipient.id],messages:[],mutedBy:[],readMessageCounts:{}};if(!existing)db.threads.push(thread);addMessage(thread.messages,p.body);notify(repo,recipient.id,'message','P12',thread.id);record={id:thread.id,title:thread.title};message='Message sent.';break}
     case'sendMessage':{const p=actionPayloads.sendMessage.parse(request.payload);const thread=find(db.threads,id);if(!canThread(db,user,thread))throw unavailable();const m=addMessage(thread.messages,p.body);for(const recipientId of thread.memberIds.filter(memberId=>memberId!==user.id))notify(repo,recipientId,'message','P12',thread.id);if(/\b(idiot|stupid|hate)\b/i.test(p.body))db.moderation.push({id:repo.nextId('MOD'),itemType:'message',itemId:m.id,parentId:thread.id,authorId:user.id,source:'Filter',reason:'Draft word filter match; human review required',excerpt:p.body.slice(0,160),status:'Pending',at:now(),history:[]});record=messageView(db,m);message='Message sent.';break}
     case'muteThread':{const p=actionPayloads.muteThread.parse(request.payload);const thread=find(db.threads,id);if(!canThread(db,user,thread))throw unavailable();thread.mutedBy=p.muted?[...new Set([...thread.mutedBy,user.id])]:thread.mutedBy.filter(v=>v!==user.id);message='Conversation preference saved.';break}
     case'markNotification':case'openNotification':{const n=find(db.notifications,id);if(n.recipientId!==user.id)throw unavailable();if(request.action==='openNotification'){actionPayloads.openNotification.parse(request.payload);getPage(repo,user,n.pageId,n.recordId?{id:n.recordId}:{});n.read=true;record={pageId:n.pageId,recordId:n.recordId}}else n.read=actionPayloads.markNotification.parse(request.payload).read;message='Notification updated.';break}
@@ -163,5 +437,5 @@ export function performAction(repo:Repository,user:User,pageId:string,request:Ac
   return JSON.parse(JSON.stringify({ok:true,message,...(record===undefined?{}:{record})})) as {ok:true;message:string;record?:unknown}
 }
 export interface AssistantProvider { answer(db:Database,user:User,question:string):{reply:string;sources:{title:string;href:string}[]} }
-export const demoAssistant:AssistantProvider={answer(db,user,question){const q=question.toLowerCase();const fallback={reply:'I can explain ACCS pages, permitted schedules, and your report milestones. I do not have enough approved information to answer that question. Please contact the responsible office.',sources:[{title:'Help',href:'/help'}]};if(/guilt|guilty|verdict|punish|decide|restrict|another student|reveal|identity|who reported/.test(q))return fallback;const mentioned:string[]=question.match(/RPT-\d+/g)??[];if(mentioned.some(id=>!db.reports.some(r=>r.id===id&&r.ownerId===user.id)))return fallback;if(/schedule|calendar|appointment|consultation/.test(q)){if(!canPage(user,'P13'))return fallback;const own=visibleConsultations(db,user);const tasks=db.todos.filter(t=>t.ownerId===user.id);return {reply:`Your ACCS calendar has ${db.events.length} institutional events${hasRole(user,'student')?`, ${tasks.length} personal to-dos`:''} and ${own.length} consultation request${own.length===1?'':'s'}. Open the calendar or consultation list for dates and current states.`,sources:[{title:'Calendar',href:'/calendar'},...(canPage(user,'P14')?[{title:'Consultations',href:'/consultations'}]:[])]}}if(/report|milestone|stage/.test(q)&&hasRole(user,'student')){const reports=db.reports.filter(r=>r.ownerId===user.id&&(!mentioned.length||mentioned.includes(r.id)));return {reply:reports.length?reports.map(r=>`${r.id}: ${statusFor(r)}. ${r.history.filter(h=>h.public).at(-1)?.update??'No public update yet.'}`).join('\n'):'You have no submitted reports in this demo account.',sources:[{title:'My reports',href:'/reports'}]}}if(/draft|write|word/.test(q)){return{reply:'Describe what happened, when and where, and the information you want the office to review. Include only names needed for the review. Check the wording before you submit; the assistant does not decide what happened.',sources:[{title:'Report guidance',href:'/help'}]}}const entry=filteredFaq(user).find(f=>f.question.toLowerCase().split(/\W+/).filter(w=>w.length>4).some(w=>q.includes(w)));if(entry)return{reply:entry.answer,sources:[{title:entry.question,href:entry.href}]};if(/help|can you|what can/.test(q))return{reply:'I can explain ACCS pages and process steps using approved help content and information available to your account. People decide case outcomes and restrictions.',sources:[{title:'Help',href:'/help'}]};return fallback}}
+export const demoAssistant:AssistantProvider={answer(db,user,question){const q=question.toLowerCase();const fallback={reply:'I can explain ACCS pages, permitted schedules, and your report milestones. I do not have enough approved information to answer that question. Please contact the responsible office.',sources:[{title:'Help',href:'/help'}]};if(/guilt|guilty|verdict|punish|decide|restrict|another student|reveal|identity|who reported/.test(q))return fallback;const mentioned:string[]=question.match(/RPT-\d+/g)??[];if(mentioned.some(id=>!db.reports.some(r=>r.id===id&&r.ownerId===user.id)))return fallback;if(/schedule|calendar|appointment|consultation/.test(q)){if(!canPage(user,'P13'))return fallback;const own=visibleConsultations(db,user);const tasks=db.todos.filter(t=>t.ownerId===user.id);return {reply:`Your ACCS calendar has ${visibleEvents(db,user).length} institutional events${hasRole(user,'student')?`, ${tasks.length} personal to-dos`:''} and ${own.length} consultation request${own.length===1?'':'s'}. Open the calendar or consultation list for dates and current states.`,sources:[{title:'Calendar',href:'/calendar'},...(canPage(user,'P14')?[{title:'Consultations',href:'/consultations'}]:[])]}}if(/report|milestone|stage/.test(q)&&hasRole(user,'student')){const reports=db.reports.filter(r=>r.ownerId===user.id&&(!mentioned.length||mentioned.includes(r.id)));return {reply:reports.length?reports.map(r=>`${r.id}: ${statusFor(r)}. ${r.history.filter(h=>h.public).at(-1)?.update??'No public update yet.'}`).join('\n'):'You have no submitted reports in this demo account.',sources:[{title:'My reports',href:'/reports'}]}}if(/draft|write|word/.test(q)){return{reply:'Describe what happened, when and where, and the information you want the office to review. Include only names needed for the review. Check the wording before you submit; the assistant does not decide what happened.',sources:[{title:'Report guidance',href:'/help'}]}}const entry=filteredFaq(user).find(f=>f.question.toLowerCase().split(/\W+/).filter(w=>w.length>4).some(w=>q.includes(w)));if(entry)return{reply:entry.answer,sources:[{title:entry.question,href:entry.href}]};if(/help|can you|what can/.test(q))return{reply:'I can explain ACCS pages and process steps using approved help content and information available to your account. People decide case outcomes and restrictions.',sources:[{title:'Help',href:'/help'}]};return fallback}}
 function assistantAnswer(db:Database,user:User,question:string){return demoAssistant.answer(db,user,question)}

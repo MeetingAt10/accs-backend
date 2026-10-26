@@ -75,3 +75,194 @@ it('ADM-03-V/B pauses Posting and Commenting independently while retaining essen
  expect((await student.get('/api/pages/P05')).status).toBe(200)
  expect((await student.post('/api/pages/P06/actions').send({action:'comment',recordId:'POST-0101',payload:{body:'A blocked comment.'}})).status).toBe(403)
 })
+
+describe('community publication and roster contracts', () => {
+  const eventDetails = {
+    eventDate: '2026-11-12',
+    eventTime: '13:00',
+    eventPlace: 'Demo computer laboratory',
+    eventContact: 'Computing Society office',
+  }
+
+  it('STU-02-V/I uses the required labels and accepts a 5,000-character post body', async () => {
+    const student = await login('DEMO-STU-IT-A')
+    const options = (await student.get('/api/pages/P05')).body.data
+    expect(options.labels).toEqual(['Discussion', 'Rant', 'Assistance', 'Support'])
+    expect(options.priorities).toEqual(['general', 'important', 'urgent'])
+    const payload = {
+      title: 'A complete discussion',
+      body: 'a'.repeat(5000),
+      audience: 'college',
+      kind: 'discussion',
+      label: 'Support',
+    }
+    const created = await student.post('/api/pages/P05/actions').send({ action: 'createPost', payload })
+    expect(created.status).toBe(200)
+    expect(created.body.record.body).toHaveLength(5000)
+    const before = repo.read().posts.length
+    expect((await student.post('/api/pages/P05/actions').send({
+      action: 'createPost',
+      payload: { ...payload, label: 'Question' },
+    })).status).toBe(400)
+    const { audience: _audience, ...withoutAudience } = payload
+    expect((await student.post('/api/pages/P05/actions').send({
+      action: 'createPost',
+      payload: withoutAudience,
+    })).status).toBe(400)
+    expect(repo.read().posts).toHaveLength(before)
+  })
+
+  it('ORG-02-I / PRO-02-I rejects incomplete organization and class event announcements without partial writes', async () => {
+    const organization = await login('DEMO-ORG')
+    const professor = await login('DEMO-PROF-IT')
+    const before = {
+      posts: repo.read().posts.length,
+      events: repo.read().events.length,
+      notifications: repo.read().notifications.length,
+    }
+    for (const [agent, audience] of [
+      [organization, 'organization:ORG-COMPUTING'],
+      [professor, 'space:SUBJECT-IT-DS'],
+    ] as const) {
+      const result = await agent.post('/api/pages/P05/actions').send({
+        action: 'createPost',
+        payload: { title: 'An event announcement', body: 'Review the event details.', audience, kind: 'announcement', priority: 'urgent' },
+      })
+      expect(result.status).toBe(400)
+      expect(result.body.fields.map((field: { path: string }) => field.path)).toEqual(expect.arrayContaining(['eventDate', 'eventTime', 'eventPlace', 'eventContact']))
+    }
+    expect(repo.read().posts).toHaveLength(before.posts)
+    expect(repo.read().events).toHaveLength(before.events)
+    expect(repo.read().notifications).toHaveLength(before.notifications)
+  })
+
+  it('ORG-02-V/B creates a scoped event and sends neutral member notices only when selected', async () => {
+    const organization = await login('DEMO-ORG')
+    const payload = {
+      title: 'A member workshop',
+      body: 'A private planning session for verified members.',
+      audience: 'organization:ORG-COMPUTING',
+      kind: 'announcement',
+      priority: 'urgent',
+      private: true,
+      ...eventDetails,
+    }
+    const before = repo.read().notifications.length
+    const quiet = await organization.post('/api/pages/P05/actions').send({ action: 'createPost', payload })
+    expect(quiet.status).toBe(200)
+    expect(quiet.body.record.priority).toBe('urgent')
+    expect(repo.read().notifications).toHaveLength(before)
+    const announced = await organization.post('/api/pages/P05/actions').send({
+      action: 'createPost',
+      payload: { ...payload, title: 'A notified member workshop', notifyMembers: true },
+    })
+    expect(announced.status).toBe(200)
+    const notices = repo.read().notifications.slice(before)
+    expect(notices.map(notice => notice.recipientId).sort()).toEqual(['DEMO-ORG', 'DEMO-STU-IT-A'])
+    expect(JSON.stringify(notices)).not.toContain(payload.body)
+    const member = await login('DEMO-STU-IT-A')
+    const outsider = await login('DEMO-STU-IT-B')
+    const memberEvents = (await member.get('/api/pages/P13')).body.data.events
+    expect(memberEvents.find((event: { postId: string }) => event.postId === announced.body.record.id)).toMatchObject({
+      date: eventDetails.eventDate,
+      start: eventDetails.eventTime,
+      place: eventDetails.eventPlace,
+      contact: eventDetails.eventContact,
+    })
+    const outsiderEvents = (await outsider.get('/api/pages/P13')).body.data.events
+    expect(outsiderEvents.some((event: { postId: string }) => event.postId === announced.body.record.id)).toBe(false)
+  })
+
+  it('PRO-02-V/B scopes class events and restricts post edits and deletion to the current author', async () => {
+    const professor = await login('DEMO-PROF-IT')
+    const created = await professor.post('/api/pages/P05/actions').send({
+      action: 'createPost',
+      payload: {
+        title: 'A class review',
+        body: 'Review the sample practice set.',
+        audience: 'space:SUBJECT-IT-DS',
+        kind: 'announcement',
+        priority: 'important',
+        ...eventDetails,
+      },
+    })
+    expect(created.status).toBe(200)
+    const id = created.body.record.id
+    const student = await login('DEMO-STU-IT-A')
+    const outsider = await login('DEMO-STU-IT-B')
+    expect((await student.get('/api/pages/P13')).body.data.events.some((event: { postId: string }) => event.postId === id)).toBe(true)
+    expect((await outsider.get('/api/pages/P13')).body.data.events.some((event: { postId: string }) => event.postId === id)).toBe(false)
+    const edit = { title: 'An updated class review', body: 'b'.repeat(5000), priority: 'urgent' }
+    expect((await student.post('/api/pages/P06/actions').send({ action: 'updatePost', recordId: id, payload: edit })).status).toBe(404)
+    expect((await student.post('/api/pages/P06/actions').send({ action: 'deletePost', recordId: id, payload: {} })).status).toBe(404)
+    expect((await professor.post('/api/pages/P06/actions').send({ action: 'updatePost', recordId: id, payload: { ...edit, audience: 'college' } })).status).toBe(400)
+    const updated = await professor.post('/api/pages/P06/actions').send({ action: 'updatePost', recordId: id, payload: edit })
+    expect(updated.status).toBe(200)
+    expect(updated.body.record).toMatchObject({ title: edit.title, priority: 'urgent', audience: 'space:SUBJECT-IT-DS' })
+    expect(repo.read().events.find(event => event.postId === id)?.title).toBe(edit.title)
+    expect((await professor.post('/api/pages/P06/actions').send({ action: 'deletePost', recordId: id, payload: {} })).status).toBe(200)
+    expect(repo.read().events.some(event => event.postId === id)).toBe(false)
+    expect((await student.get(`/api/pages/P06?id=${id}`)).body.data.record.removed).toBe(true)
+  })
+
+  it('ALL-03-I/B rejects private and unknown feed scopes and applies multi-label URL filters', async () => {
+    const student = await login('DEMO-STU-IT-B')
+    for (const scope of ['organization:ORG-COMPUTING', 'space:SPACE-IT-A', 'space:UNKNOWN', 'faculty']) {
+      const result = await student.get('/api/pages/P04').query({ scope })
+      expect(result.status).toBe(404)
+      expect(result.body).not.toHaveProperty('data')
+    }
+    const created = await student.post('/api/pages/P05/actions').send({
+      action: 'createPost',
+      payload: { title: 'A support discussion', body: 'Help with academic planning.', audience: 'college', label: 'Support' },
+    })
+    expect(created.status).toBe(200)
+    const selected = (await student.get('/api/pages/P04').query({ label: 'Discussion,Support' })).body.data.posts
+    expect(selected.some((post: { id: string }) => post.id === created.body.record.id)).toBe(true)
+    expect(selected.every((post: { label: string; kind: string }) => ['Discussion', 'Support'].includes(post.label) && post.kind === 'discussion')).toBe(true)
+    const announcements = (await student.get('/api/pages/P04').query({ label: 'Announcements' })).body.data.posts
+    expect(announcements.length).toBeGreaterThan(0)
+    expect(announcements.every((post: { kind: string }) => post.kind === 'announcement')).toBe(true)
+  })
+
+  it('STU-02-B rechecks current space membership before editing or deleting an authored post', async () => {
+    const student = await login('DEMO-STU-IT-A')
+    const created = await student.post('/api/pages/P05/actions').send({
+      action: 'createPost',
+      payload: { title: 'A class discussion', body: 'A class planning question.', audience: 'space:SPACE-IT-A', label: 'Discussion' },
+    })
+    expect(created.status).toBe(200)
+    repo.read().spaces.find(space => space.id === 'SPACE-IT-A')!.studentIds = []
+    expect((await student.post('/api/pages/P06/actions').send({
+      action: 'updatePost',
+      recordId: created.body.record.id,
+      payload: { title: 'A changed discussion', body: 'A changed question.', label: 'Discussion', priority: 'general' },
+    })).status).toBe(404)
+    expect((await student.post('/api/pages/P06/actions').send({
+      action: 'deletePost',
+      recordId: created.body.record.id,
+      payload: {},
+    })).status).toBe(404)
+    expect(repo.read().posts.find(post => post.id === created.body.record.id)?.removed).toBe(false)
+  })
+
+  it('STU-01-B / ORG-01-B limits member fields and exposes only permitted group-thread links', async () => {
+    const student = await login('DEMO-STU-IT-A')
+    const spaces = (await student.get('/api/pages/P07')).body.data.spaces
+    expect(spaces.find((space: { id: string }) => space.id === 'SPACE-IT-A').threadId).toBe('THREAD-IT-A')
+    expect(spaces[0]).not.toHaveProperty('studentIds')
+    const members = (await student.get('/api/pages/P08?id=SPACE-IT-A')).body.data.record.students
+    expect(members[0]).toHaveProperty('name')
+    for (const member of members) {
+      expect(Object.keys(member).sort()).toEqual(['name', 'roles'])
+    }
+    const professor = await login('DEMO-PROF-IT')
+    expect((await professor.get('/api/pages/P08?id=SPACE-IT-A')).body.data.record.students[0].studentId).toBe('DEMO-2024-0101')
+    const dean = await login('DEMO-DEAN')
+    expect((await dean.get('/api/pages/P08?id=SPACE-IT-A')).body.data.record).not.toHaveProperty('threadId')
+    const organizationMembers = (await student.get('/api/pages/P10?id=ORG-COMPUTING')).body.data.record.members
+    expect(organizationMembers.every((member: object) => Object.keys(member).sort().join(',') === 'name,organizationRole')).toBe(true)
+    expect(JSON.stringify(organizationMembers)).not.toContain('@qcu.edu.ph')
+    expect(JSON.stringify(organizationMembers)).not.toContain('DEMO-2024-0101')
+  })
+})

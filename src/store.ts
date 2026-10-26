@@ -4,10 +4,55 @@ export type Stage = 'adviser' | 'chair' | 'dean' | 'guidance' | 'osas' | 'execut
 export type Message = { id: string; authorId: string; body: string; at: string }
 export type History = { id: string; at: string; actorId: string; actorRole: string; action: string; reason: string; update: string; public: boolean; stage: Stage }
 export type Report = { id: string; ownerId: string; program: string; adviserId: string; stage: Stage; status: string; narrative: string; category: string; severity: 'low' | 'medium' | 'high'; identity: 'named' | 'anonymous'; alias: string; disclosedTo: string[]; involvedUserIds: string[]; bypassed: boolean; createdAt: string; updatedAt: string; caseFileId?: string; sourcePostId?: string; location?: string; occurredOn?: string; history: History[]; notes: Message[]; messages: Message[] }
-export type Post = { id: string; authorId: string; title: string; body: string; audience: string; kind: 'discussion' | 'announcement'; label: string; anonymous: boolean; priority: string; private: boolean; at: string; reactions: string[]; comments: (Message & { anonymous: boolean })[]; removed: boolean }
+export type Post = {
+  id: string
+  authorId: string
+  title: string
+  body: string
+  audience: string
+  kind: 'discussion' | 'announcement'
+  label: string
+  anonymous: boolean
+  priority: string
+  private: boolean
+  at: string
+  updatedAt?: string
+  eventDate?: string
+  eventTime?: string
+  eventPlace?: string
+  eventContact?: string
+  notifyMembers?: boolean
+  reactions: string[]
+  comments: (Message & { anonymous: boolean })[]
+  removed: boolean
+}
+export type Event = {
+  id: string
+  title: string
+  date: string
+  start: string
+  end?: string
+  type: string
+  description: string
+  contactId: string
+  organizationId?: string
+  audience?: string
+  private?: boolean
+  postId?: string
+  place?: string
+  contact?: string
+}
 export type Space = { id: string; title: string; program: string; section: string; subject: string; professorIds: string[]; studentIds: string[] }
 export type Organization = { id: string; name: string; description: string; representativeId: string; memberIds: string[] }
-export type Thread = { id: string; title: string; memberIds: string[]; spaceId?: string; messages: Message[]; mutedBy: string[] }
+export type Thread = {
+  id: string
+  title: string
+  memberIds: string[]
+  spaceId?: string
+  messages: Message[]
+  mutedBy: string[]
+  readMessageCounts: Record<string, number>
+}
 export type Slot = { id: string; facultyId: string; date: string; start: string; end: string; state: 'open' | 'requested' | 'booked' | 'unavailable' }
 export type Consultation = { id: string; studentId: string; facultyId: string; slotId: string; purpose: string; status: 'Requested' | 'Approved' | 'Booked' | 'Completed' | 'Declined' | 'Cancelled'; createdAt: string; updatedAt: string; history: { at: string; status: string; note: string; actorId: string }[] }
 export type Question = { id: string; criterion: string; text: string; type: 'rating' | 'text'; required: boolean }
@@ -20,7 +65,7 @@ export type Audit = { id: string; at: string; actorId: string; action: string; m
 export type Moderation = { id: string; itemType: 'post' | 'comment' | 'message'; itemId: string; parentId: string; authorId: string; reporterId?: string; source: 'Filter' | 'User'; reason: string; excerpt: string; status: string; at: string; history: { at: string; actorId: string; decision: string; reason: string }[] }
 export type Database = {
   sequence: number; users: User[]; spaces: Space[]; organizations: Organization[]; posts: Post[]; threads: Thread[]; slots: Slot[]; consultations: Consultation[]; reports: Report[]; drafts: Record<string, Record<string, unknown>>; todos: { id: string; ownerId: string; title: string; date: string; done: boolean }[];
-  events: { id: string; title: string; date: string; start: string; end: string; type: string; description: string; contactId: string; organizationId?: string }[]; cycles: Cycle[]; assignments: Assignment[]; restrictions: Restriction[]; referrals: Referral[]; offenses: { id: string; studentId: string; level: number; summary: string; decisionReference: string; actorRole: string; at: string; status: string }[]; goodMoral: { studentId: string; status: string; decisionSource: string; notes: string; actorId: string; at: string }[]; clusters: { id: string; program: string; title: string; reportIds: string[]; similarity: number; supporting: string; dissenting: string; phrases: string[]; status: string; history: { at: string; actorId: string; decision: string; reason: string }[] }[]; notifications: Notification[]; audit: Audit[]; moderation: Moderation[]; settings: Record<string, { theme: string; density: string; priorities: Record<string, string> }>; permissionOverrides: Record<string, boolean>; telemetry: { at: string; category: string; durationMs: number; success: boolean }[]; followUps: { facultyId: string; actorId: string; note: string; at: string }[];
+  events: Event[]; cycles: Cycle[]; assignments: Assignment[]; restrictions: Restriction[]; referrals: Referral[]; offenses: { id: string; studentId: string; level: number; summary: string; decisionReference: string; actorRole: string; at: string; status: string }[]; goodMoral: { studentId: string; status: string; decisionSource: string; notes: string; actorId: string; at: string }[]; clusters: { id: string; program: string; title: string; reportIds: string[]; similarity: number; supporting: string; dissenting: string; phrases: string[]; status: string; history: { at: string; actorId: string; decision: string; reason: string }[] }[]; notifications: Notification[]; audit: Audit[]; moderation: Moderation[]; settings: Record<string, { theme: string; density: string; priorities: Record<string, string> }>; permissionOverrides: Record<string, boolean>; telemetry: { at: string; category: string; durationMs: number; success: boolean }[]; followUps: { facultyId: string; actorId: string; note: string; at: string }[];
 }
 export interface Repository { read(): Database; nextId(prefix: string): string }
 // one process owns this prototype state; replace this repository when persistent storage is chosen.
@@ -53,7 +98,7 @@ function seed(): Database {
     { id: 'SPACE-IT-B', title: 'BSIT 3B', program: 'BSIT', section: 'B', subject: 'Section space', professorIds: ['DEMO-PROF-OTHER'], studentIds: ['DEMO-STU-IT-B'] },
     { id: 'SPACE-CS-A', title: 'BSCS 2A', program: 'BSCS', section: 'A', subject: 'Section space', professorIds: ['DEMO-PROF-CS'], studentIds: ['DEMO-STU-CS'] },
   ]
-  const post = (id: string, authorId: string, title: string, body: string, audience = 'college', anonymous = false, kind: Post['kind'] = 'discussion'): Post => ({ id, authorId, title, body, audience, anonymous, kind, label: kind === 'announcement' ? 'Academic update' : 'Question', priority: 'general', private: audience.startsWith('organization:'), at, reactions: [], comments: [], removed: false })
+  const post = (id: string, authorId: string, title: string, body: string, audience = 'college', anonymous = false, kind: Post['kind'] = 'discussion'): Post => ({ id, authorId, title, body, audience, anonymous, kind, label: kind === 'announcement' ? 'Announcement' : 'Discussion', priority: 'general', private: audience.startsWith('organization:'), at, reactions: [], comments: [], removed: false })
   const posts = [post('POST-0101', 'DEMO-DEAN', 'CCS academic consultation week', 'Faculty consultation times are available in the calendar. Request a time and wait for confirmation.', 'college', false, 'announcement'), post('POST-0102', 'DEMO-STU-IT-A', 'Lab schedule changes', 'Could we confirm which lab times are open for the upcoming group activity?', 'program:BSIT', true), post('POST-0103', 'DEMO-PROF-IT', 'Data Structures review materials', 'The practice set is ready. Bring your questions to the next class.', 'space:SUBJECT-IT-DS', false, 'announcement'), post('POST-0104', 'DEMO-ORG', 'Computing Society planning notes', 'Members can review the draft workshop agenda here.', 'organization:ORG-COMPUTING'), post('POST-0105', 'DEMO-ORG', 'Open coding workshop', 'All CCS students are welcome to the introductory workshop. Check the event calendar for details.')]
   posts[4]!.audience = 'organization:ORG-COMPUTING'
   posts[4]!.private = false
@@ -86,7 +131,33 @@ function seed(): Database {
   const restrictions: Restriction[] = [{ id: 'RST-0101', studentId: 'DEMO-STU-RESTRICTED', features: ['post.create', 'post.comment', 'report.anonymous'], basis: 'Approved demo decision reference only', decisionReference: 'DEMO-DEC-001', starts: at, until: '2026-12-01', actorId: 'DEMO-ADMIN', active: true }]
   return {
     sequence: 1000, users, spaces, organizations: [{ id: 'ORG-COMPUTING', name: 'CCS Computing Society', description: 'A sample CCS student organization for computing workshops and peer activities.', representativeId: 'DEMO-ORG', memberIds: ['DEMO-STU-IT-A'] }], posts, reports, drafts: {},
-    threads: [{ id: 'THREAD-IT-A', title: 'BSIT 3A class group', memberIds: ['DEMO-STU-IT-A', 'DEMO-STU-RESTRICTED', 'DEMO-PROF-IT'], spaceId: 'SPACE-IT-A', messages: [{ id: 'MESSAGE-0101', authorId: 'DEMO-PROF-IT', body: 'Please use this group for class coordination.', at }], mutedBy: [] }, { id: 'THREAD-DIRECT-1', title: 'Academic consultation', memberIds: ['DEMO-STU-IT-A', 'DEMO-PROF-IT'], messages: [{ id: 'MESSAGE-0102', authorId: 'DEMO-STU-IT-A', body: 'May I ask about the next consultation time?', at }], mutedBy: [] }, { id: 'THREAD-FACULTY-1', title: 'Faculty coordination', memberIds: ['DEMO-CHAIR-IT', 'DEMO-PROF-IT'], messages: [{ id: 'MESSAGE-0103', authorId: 'DEMO-CHAIR-IT', body: 'Please review the program announcement.', at }], mutedBy: [] }],
+    threads: [
+      {
+        id: 'THREAD-IT-A',
+        title: 'BSIT 3A class group',
+        memberIds: ['DEMO-STU-IT-A', 'DEMO-STU-RESTRICTED', 'DEMO-PROF-IT'],
+        spaceId: 'SPACE-IT-A',
+        messages: [{ id: 'MESSAGE-0101', authorId: 'DEMO-PROF-IT', body: 'Please use this group for class coordination.', at }],
+        mutedBy: [],
+        readMessageCounts: { 'DEMO-PROF-IT': 1 },
+      },
+      {
+        id: 'THREAD-DIRECT-1',
+        title: 'Academic consultation',
+        memberIds: ['DEMO-STU-IT-A', 'DEMO-PROF-IT'],
+        messages: [{ id: 'MESSAGE-0102', authorId: 'DEMO-STU-IT-A', body: 'May I ask about the next consultation time?', at }],
+        mutedBy: [],
+        readMessageCounts: { 'DEMO-STU-IT-A': 1 },
+      },
+      {
+        id: 'THREAD-FACULTY-1',
+        title: 'Faculty coordination',
+        memberIds: ['DEMO-CHAIR-IT', 'DEMO-PROF-IT'],
+        messages: [{ id: 'MESSAGE-0103', authorId: 'DEMO-CHAIR-IT', body: 'Please review the program announcement.', at }],
+        mutedBy: [],
+        readMessageCounts: { 'DEMO-CHAIR-IT': 1 },
+      },
+    ],
     slots: [{ id: 'SLOT-0101', facultyId: 'DEMO-PROF-IT', date: '2026-10-29', start: '10:00', end: '10:30', state: 'open' }, { id: 'SLOT-0102', facultyId: 'DEMO-PROF-IT', date: '2026-10-29', start: '10:30', end: '11:00', state: 'requested' }, { id: 'SLOT-0103', facultyId: 'DEMO-PROF-IT', date: '2026-10-30', start: '13:00', end: '14:00', state: 'unavailable' }, { id: 'SLOT-0104', facultyId: 'DEMO-PROF-OTHER', date: '2026-10-29', start: '09:00', end: '09:30', state: 'open' }, { id: 'SLOT-0105', facultyId: 'DEMO-PROF-CS', date: '2026-10-29', start: '11:00', end: '11:30', state: 'open' }, { id: 'SLOT-0106', facultyId: 'DEMO-CHAIR-IT', date: '2026-10-30', start: '10:00', end: '10:30', state: 'open' }],
     consultations: [{ id: 'CONSULT-0101', studentId: 'DEMO-STU-IT-A', facultyId: 'DEMO-PROF-IT', slotId: 'SLOT-0102', purpose: 'Clarify the project rubric', status: 'Requested', createdAt: at, updatedAt: at, history: [{ at, status: 'Requested', note: 'Request received', actorId: 'DEMO-STU-IT-A' }] }],
     todos: [{ id: 'TODO-0101', ownerId: 'DEMO-STU-IT-A', title: 'Prepare consultation questions', date: '2026-10-29', done: false }], events: [{ id: 'EVENT-0101', title: 'CCS consultation week', date: '2026-10-29', start: '08:00', end: '17:00', type: 'CCS', description: 'Review faculty availability and request a time through ACCS.', contactId: 'DEMO-STAFF' }, { id: 'EVENT-0102', title: 'Computing workshop', date: '2026-11-05', start: '13:00', end: '15:00', type: 'Organization', description: 'Introductory workshop open to CCS students.', contactId: 'DEMO-ORG', organizationId: 'ORG-COMPUTING' }, { id: 'EVENT-0103', title: 'Academic term checkpoint', date: '2026-11-09', start: '08:00', end: '09:00', type: 'Academic year', description: 'Review course requirements with your faculty.', contactId: 'DEMO-STAFF' }], cycles, assignments, restrictions, referrals: [], offenses: [{ id: 'OFF-0101', studentId: 'DEMO-STU-RESTRICTED', level: 1, summary: 'Synthetic recorded decision for a prototype workflow.', decisionReference: 'DEMO-DEC-001', actorRole: 'osas', at, status: 'Recorded' }], goodMoral: [],
