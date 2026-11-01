@@ -26,12 +26,13 @@ function fakeClient() {
         if (!item) throw new ConditionalCheckFailedException({ message: 'missing', $metadata: {} })
         if (input.ConditionExpression === '#status = :active' && item.status.S !== 'active') throw new ConditionalCheckFailedException({ message: 'inactive', $metadata: {} })
         if (input.ExpressionAttributeValues[':revoked']) item.status = input.ExpressionAttributeValues[':revoked']
-        if (input.ExpressionAttributeValues[':at']) item.lastSeenAt = input.ExpressionAttributeValues[':at']
+        if (input.ExpressionAttributeValues[':at']) item.last_seen_at = input.ExpressionAttributeValues[':at']
         return {}
       }
       if (name === 'QueryCommand') {
         const value = input.ExpressionAttributeValues[':user'].S
-        return { Items: [...items.values()].filter(item => item.GSI2PK?.S === value).map(item => ({ PK: item.PK, SK: item.SK })) }
+        const prefix = input.ExpressionAttributeValues[':prefix'].S
+        return { Items: [...items.values()].filter(item => item.GSI2PK?.S === value && item.GSI2SK?.S.startsWith(prefix)).map(item => ({ PK: item.PK, SK: item.SK })) }
       }
       throw new Error(`Unexpected command ${name}`)
     },
@@ -45,30 +46,33 @@ const session = (id: string, userId = 'QCU-STU-IT-A'): Session => {
 }
 
 describe('DynamoDB session store', () => {
-  it('writes the app-table item shape with a numeric TTL and a per-user index key', async () => {
+  it('writes the DOC006 SESSION item with a numeric TTL and a per-user index key', async () => {
     const { client, items } = fakeClient()
-    const store = createDynamoSessionStore('accs-dev-app', client)
+    const store = createDynamoSessionStore('accs-dev-ccs_identity', client)
     await store.create(session('abc'))
     const item = items.get('SESSION#abc|META')!
-    expect(item).toMatchObject({ entityType: { S: 'SESSION' }, userId: { S: 'QCU-STU-IT-A' }, GSI2PK: { S: 'SESSIONS#QCU-STU-IT-A' }, GSI2SK: { S: '2026-11-01T02:00:00.000Z' }, status: { S: 'active' } })
-    expect(item.expiresAt).toEqual({ N: String(Date.parse('2026-11-01T14:00:00.000Z') / 1000) })
+    expect(item).toMatchObject({ entity_type: { S: 'SESSION' }, session_id: { S: 'abc' }, user_id: { S: 'QCU-STU-IT-A' }, GSI2PK: { S: 'USER#QCU-STU-IT-A' }, GSI2SK: { S: 'SESSION#2026-11-01T02:00:00.000Z' }, status: { S: 'active' }, expires_at: { S: '2026-11-01T14:00:00.000Z' } })
+    expect(item.expires_epoch).toEqual({ N: String(Date.parse('2026-11-01T14:00:00.000Z') / 1000) })
+    expect(Object.keys(item).filter(k => /[A-Z]/.test(k) && !/^(PK|SK|GSI\dPK|GSI\dSK)$/.test(k))).toEqual([])
     expect(await store.get('abc')).toEqual(session('abc'))
     await expect(store.create(session('abc'))).rejects.toThrow()
   })
 
   it('reads strongly consistent and ignores other item types', async () => {
     const { client, items, sent } = fakeClient()
-    const store = createDynamoSessionStore('accs-dev-app', client)
-    items.set('SESSION#other|META', { PK: { S: 'SESSION#other' }, SK: { S: 'META' }, entityType: { S: 'USER' } })
+    const store = createDynamoSessionStore('accs-dev-ccs_identity', client)
+    items.set('SESSION#other|META', { PK: { S: 'SESSION#other' }, SK: { S: 'META' }, entity_type: { S: 'USER' } })
     expect(await store.get('other')).toBeUndefined()
     expect(sent.at(-1)!.input.ConsistentRead).toBe(true)
   })
 
   it('revokes one session, all of a user, and skips touching revoked ones', async () => {
-    const { client } = fakeClient()
-    const store = createDynamoSessionStore('accs-dev-app', client)
+    const { client, items } = fakeClient()
+    const store = createDynamoSessionStore('accs-dev-ccs_identity', client)
     for (const id of ['a', 'b', 'c']) await store.create(session(id))
     await store.create(session('z', 'QCU-ADMIN'))
+    // A role-holder entry under the same user key on GSI2 must not be touched.
+    items.set('ROLE#x|META', { PK: { S: 'ROLE#x' }, SK: { S: 'META' }, GSI2PK: { S: 'USER#QCU-STU-IT-A' }, GSI2SK: { S: 'ROLE#x' } })
     await store.revoke('a')
     expect((await store.get('a'))!.status).toBe('revoked')
     await store.revokeUser('QCU-STU-IT-A', 'b')

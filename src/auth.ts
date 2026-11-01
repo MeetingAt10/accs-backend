@@ -40,7 +40,6 @@ export const defaultHash = () => (cachedDefaultHash ??= hashPassword(defaultPass
 export type AuthData = {
   users: User[]
   credentials: Record<string, string>
-  resets: Record<string, { codeHash: string; expires: number }>
 }
 
 /** `update` runs `mutate` on a fresh copy and persists it; if `mutate` throws, nothing is saved. */
@@ -49,8 +48,12 @@ export interface AuthStore {
   update(mutate: (data: AuthData) => void): Promise<void>
 }
 
-const empty = (): AuthData => ({ users: [], credentials: {}, resets: {} })
-const parse = (text: string): AuthData => ({ ...empty(), ...JSON.parse(text) })
+const empty = (): AuthData => ({ users: [], credentials: {} })
+// Reset codes moved to ccs_identity; a leftover `resets` key in an old object is dropped on the next write.
+const parse = (text: string): AuthData => {
+  const { users, credentials } = { ...empty(), ...JSON.parse(text) } as AuthData
+  return { users, credentials }
+}
 
 function simpleStore(read: () => AuthData, write: (data: AuthData) => void): AuthStore {
   return {

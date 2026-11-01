@@ -30,7 +30,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
-      # Sessions live in the app table (TABLE_NAME is set on the Lambda), so no signing key is inlined.
+      # Sessions live in ccs_identity (TABLE_PREFIX is set on the Lambda), so no signing key is inlined.
       - run: npm run build:lambda
 
       - uses: aws-actions/configure-aws-credentials@v4

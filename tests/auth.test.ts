@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createApp } from '../src/app.js'
 import { createMemoryAuthStore, hashPassword, passwordProblem, verifyPassword } from '../src/auth.js'
+import { createMemoryResetStore } from '../src/resets.js'
 import { createMemorySessionStore, sessionIdOf, sessionPolicy } from '../src/sessions.js'
 import { createMemoryRepository } from '../src/store.js'
 
@@ -238,5 +239,53 @@ describe('server-side sessions', () => {
     const code = String(log.mock.calls.at(-1)?.[0]).match(/(\d{6})$/)![1]
     expect((await request(app).post('/api/auth/reset-password').send({ emailOrId: 'QCU-STU-IT-A', code, password: 'An0ther!Passw0rd' })).status).toBe(200)
     expect(await sessionStatus(app, current)).toBe(401)
+  })
+})
+
+describe('reset code limits and office-assisted reset', () => {
+  const admin = async (app: ReturnType<typeof newApp>) => String((await request(app).post('/api/auth/sign-in').send({ emailOrId: 'QCU-ADMIN', password: 'Accs@Qcu2026!' })).headers['set-cookie'][0]).split(';')[0]!
+  const reset = (app: ReturnType<typeof newApp>, code: string) => request(app).post('/api/auth/reset-password').send({ emailOrId: 'QCU-STU-IT-A', code, password: 'An0ther!Passw0rd' })
+  const wrongCode = (code: string) => (code === '000000' ? '111111' : '000000')
+
+  it('kills a code after five wrong guesses, even when they are spread across instances', async () => {
+    const shared = { authStore: createMemoryAuthStore(), sessionStore: createMemorySessionStore(), resetStore: createMemoryResetStore() }
+    const first = createApp(createMemoryRepository(), shared)
+    const second = createApp(createMemoryRepository(), shared)
+    const issued = await request(first).post('/api/admin/accounts/QCU-STU-IT-A/reset-code').set('Cookie', await admin(first)).send({})
+    const code = issued.body.record.code as string
+    for (let n = 0; n < 3; n++) expect((await reset(first, wrongCode(code))).status).toBe(400)
+    for (let n = 0; n < 2; n++) expect((await reset(second, wrongCode(code))).status).toBe(400)
+    // Each instance has seen fewer than five failures, but the code itself has none left.
+    const third = createApp(createMemoryRepository(), shared)
+    expect((await reset(third, code)).status).toBe(400)
+  })
+
+  it('applies a cooldown to self-service requests', async () => {
+    const resetStore = createMemoryResetStore()
+    const app = createApp(createMemoryRepository(), { authStore: createMemoryAuthStore(), resetStore })
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    for (let n = 0; n < 2; n++) expect((await request(app).post('/api/auth/forgot-password').send({ emailOrId: 'QCU-STU-IT-A' })).status).toBe(200)
+    expect(log).toHaveBeenCalledTimes(1)
+  })
+
+  it('lets an administrator issue a code once, audited, that resets the password', async () => {
+    const repository = createMemoryRepository()
+    const app = createApp(repository, { authStore: createMemoryAuthStore() })
+    const cookie = await admin(app)
+    const issued = await request(app).post('/api/admin/accounts/QCU-STU-IT-A/reset-code').set('Cookie', cookie).send({})
+    expect(issued.status).toBe(200)
+    expect(issued.body.record.code).toMatch(/^\d{6}$/)
+    expect(repository.read().audit.some(a => a.action === 'Password reset code issued' && a.reference === 'QCU-STU-IT-A' && a.actorId === 'QCU-ADMIN')).toBe(true)
+    expect(JSON.stringify(repository.read().audit)).not.toContain(issued.body.record.code)
+    expect((await reset(app, issued.body.record.code)).status).toBe(200)
+    expect((await request(app).post('/api/auth/sign-in').send({ emailOrId: 'QCU-STU-IT-A', password: 'An0ther!Passw0rd' })).status).toBe(200)
+  })
+
+  it('refuses the admin endpoint to other roles and unknown accounts', async () => {
+    const app = newApp()
+    const student = String((await request(app).post('/api/auth/sign-in').send({ emailOrId: 'QCU-STU-IT-B', password: 'Accs@Qcu2026!' })).headers['set-cookie'][0]).split(';')[0]!
+    expect((await request(app).post('/api/admin/accounts/QCU-STU-IT-A/reset-code').set('Cookie', student).send({})).status).toBe(403)
+    expect((await request(app).post('/api/admin/accounts/QCU-STU-IT-A/reset-code').send({})).status).toBe(401)
+    expect((await request(app).post('/api/admin/accounts/NOPE/reset-code').set('Cookie', await admin(app)).send({})).status).toBe(404)
   })
 })

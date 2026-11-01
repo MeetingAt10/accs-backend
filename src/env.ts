@@ -3,8 +3,9 @@ import { z } from 'zod'
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(3000),
-  // App table from accs-architecture (adr/0003); the Lambda sets it. Holds SESSION items; required on Lambda.
-  TABLE_NAME: z.string().min(1).optional(),
+  // DynamoDB tables are <TABLE_PREFIX><DOC006 table>, e.g. accs-dev-ccs_identity (accs-architecture adr/0004).
+  // The Lambda sets it; required there.
+  TABLE_PREFIX: z.string().min(1).optional(),
   // Registered users and credentials: an S3 object when the bucket is set, otherwise a JSON file.
   AUTH_STORE_FILE: z.string().default('/tmp/accs-auth-store.json'),
   AUTH_STORE_BUCKET: z.string().optional(),
@@ -18,3 +19,7 @@ const schema = z.object({
 
 export const env = schema.parse(process.env)
 export const onLambda = !!process.env.AWS_LAMBDA_FUNCTION_NAME
+
+// The twelve DOC006 domain tables.
+export type DomainTable = 'ccs_identity' | 'ccs_academic' | 'ccs_community' | 'ccs_messaging' | 'ccs_moderation' | 'ccs_scheduling' | 'ccs_grievance' | 'ccs_evaluation' | 'ccs_discipline' | 'ccs_notification' | 'ccs_assistant' | 'ccs_audit'
+export const tableName = (table: DomainTable) => (env.TABLE_PREFIX ? `${env.TABLE_PREFIX}${table}` : undefined)
