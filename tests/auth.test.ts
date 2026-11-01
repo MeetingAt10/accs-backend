@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createApp } from '../src/app.js'
 import { createMemoryAuthStore, hashPassword, passwordProblem, verifyPassword } from '../src/auth.js'
+import { createMemorySessionStore, sessionIdOf, sessionPolicy } from '../src/sessions.js'
 import { createMemoryRepository } from '../src/store.js'
 
 const password = 'Str0ng!Passw0rd'
@@ -55,9 +56,19 @@ describe('registration and sign-in', () => {
     const second = createApp(createMemoryRepository(), { authStore })
     const created = await request(first).post('/api/auth/register').send(student)
     const cookie = String(created.headers['set-cookie'][0]).split(';')[0]
-    // Different signing keys per app, so the second instance needs its own sign-in.
+    // Separate session stores, so the second instance does not know this session.
     expect((await request(second).get('/api/session').set('Cookie', cookie)).status).toBe(401)
     expect((await request(second).post('/api/auth/sign-in').send({ emailOrId: 'ana.reyes@example.com', password })).status).toBe(200)
+  })
+
+  it('accepts a session on every instance that shares the session store', async () => {
+    const authStore = createMemoryAuthStore()
+    const sessionStore = createMemorySessionStore()
+    const first = createApp(createMemoryRepository(), { authStore, sessionStore })
+    const second = createApp(createMemoryRepository(), { authStore, sessionStore })
+    const created = await request(first).post('/api/auth/register').send(student)
+    const cookie = String(created.headers['set-cookie'][0]).split(';')[0]
+    expect((await request(second).get('/api/session').set('Cookie', cookie)).body.user.id).toBe(created.body.user.id)
   })
 
   it('rejects wrong passwords with a generic error', async () => {
@@ -151,5 +162,81 @@ describe('password reset and change', () => {
     expect((await agent.post('/api/auth/change-password').send({ currentPassword: 'Accs@Qcu2026!', password: next })).status).toBe(200)
     expect((await request(app).post('/api/auth/sign-in').send({ emailOrId: 'QCU-STU-IT-A', password: 'Accs@Qcu2026!' })).status).toBe(401)
     expect((await request(app).post('/api/auth/sign-in').send({ emailOrId: 'QCU-STU-IT-A', password: next })).status).toBe(200)
+  })
+})
+
+describe('server-side sessions', () => {
+  const cookieOf = (response: request.Response) => String(response.headers['set-cookie'][0]).split(';')[0]!
+  const signIn = (app: ReturnType<typeof newApp>, remember = false) => request(app).post('/api/auth/sign-in').send({ emailOrId: 'QCU-STU-IT-A', password: 'Accs@Qcu2026!', remember })
+  const sessionStatus = async (app: ReturnType<typeof newApp>, cookie: string) => (await request(app).get('/api/session').set('Cookie', cookie)).status
+
+  it('stores only a hash of the opaque cookie token', async () => {
+    const sessionStore = createMemorySessionStore()
+    const app = createApp(createMemoryRepository(), { authStore: createMemoryAuthStore(), sessionStore })
+    const token = cookieOf(await signIn(app)).slice('accs_session='.length)
+    expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(await sessionStore.get(token)).toBeUndefined()
+    expect(await sessionStore.get(sessionIdOf(token))).toMatchObject({ userId: 'QCU-STU-IT-A', status: 'active', activeRoleId: 'student', remember: false })
+  })
+
+  it('revokes the session on sign-out, so a copied cookie stops working', async () => {
+    const app = newApp()
+    const cookie = cookieOf(await signIn(app))
+    expect(await sessionStatus(app, cookie)).toBe(200)
+    await request(app).post('/api/auth/sign-out').set('Cookie', cookie).send({})
+    expect(await sessionStatus(app, cookie)).toBe(401)
+  })
+
+  it('rejects old signed-token cookies and malformed values', async () => {
+    const app = newApp()
+    const legacy = `${Buffer.from(JSON.stringify({ id: 'QCU-ADMIN', roles: ['administrator'] })).toString('base64url')}.c2lnbmF0dXJl`
+    for (const value of [legacy, '', 'x'.repeat(43)]) expect(await sessionStatus(app, `accs_session=${value}`)).toBe(401)
+  })
+
+  it('expires idle sessions and sessions past their absolute lifetime', async () => {
+    const app = newApp()
+    const normal = cookieOf(await signIn(app))
+    const remembered = cookieOf(await signIn(app, true))
+    const start = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start + sessionPolicy.normal.idleMs + 1000)
+    expect(await sessionStatus(app, normal)).toBe(401)
+    expect(await sessionStatus(app, remembered)).toBe(200)
+    clock.mockReturnValue(start + sessionPolicy.remember.absoluteMs + 1000)
+    expect(await sessionStatus(app, remembered)).toBe(401)
+  })
+
+  it('keeps a session alive while it is used within the idle window', async () => {
+    const app = newApp()
+    const cookie = cookieOf(await signIn(app))
+    const start = Date.now()
+    const clock = vi.spyOn(Date, 'now')
+    for (let step = 1; step <= 3; step++) {
+      clock.mockReturnValue(start + step * (sessionPolicy.normal.idleMs - 60 * 1000))
+      expect(await sessionStatus(app, cookie)).toBe(200)
+    }
+  })
+
+  it('ends the sessions of a deactivated account immediately', async () => {
+    const app = newApp()
+    const student = cookieOf(await signIn(app))
+    const admin = cookieOf(await request(app).post('/api/auth/sign-in').send({ emailOrId: 'QCU-ADMIN', password: 'Accs@Qcu2026!' }))
+    const update = await request(app).post('/api/pages/P47/actions').set('Cookie', admin).send({ action: 'updateRoles', recordId: 'QCU-STU-IT-A', reason: 'Account closed', payload: { roles: ['student'], active: false } })
+    expect(update.status).toBe(200)
+    expect(await sessionStatus(app, student)).toBe(401)
+  })
+
+  it('signs out other devices on a password change and every device on a reset', async () => {
+    const app = newApp()
+    const current = cookieOf(await signIn(app))
+    const other = cookieOf(await signIn(app))
+    expect((await request(app).post('/api/auth/change-password').set('Cookie', current).send({ currentPassword: 'Accs@Qcu2026!', password: 'N3w!Passw0rdXyz' })).status).toBe(200)
+    expect(await sessionStatus(app, current)).toBe(200)
+    expect(await sessionStatus(app, other)).toBe(401)
+
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    await request(app).post('/api/auth/forgot-password').send({ emailOrId: 'QCU-STU-IT-A' })
+    const code = String(log.mock.calls.at(-1)?.[0]).match(/(\d{6})$/)![1]
+    expect((await request(app).post('/api/auth/reset-password').send({ emailOrId: 'QCU-STU-IT-A', code, password: 'An0ther!Passw0rd' })).status).toBe(200)
+    expect(await sessionStatus(app, current)).toBe(401)
   })
 })

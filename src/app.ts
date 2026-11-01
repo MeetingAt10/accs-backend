@@ -1,28 +1,41 @@
-import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
+import { randomBytes, randomInt } from 'node:crypto'
 import cors from 'cors'
 import express, { type ErrorRequestHandler, type Request, type Response } from 'express'
 import helmet from 'helmet'
 import { z } from 'zod'
 
 import { type AuthData, type AuthStore, createAuthStore, defaultHash, hashPassword, verifyPassword } from './auth.js'
-import { env } from './env.js'
+import { env, onLambda } from './env.js'
 import { actionRequestSchema, actionResponseSchema, changePasswordSchema, emptyBodySchema, errorResponseSchema, forgotPasswordSchema, healthResponseSchema, idParamsSchema, pageQuerySchema, pageResponseSchema, registerSchema, resetPasswordSchema, sessionResponseSchema, signInSchema, type User } from './schemas.js'
 import { ApiError, getPage, performAction, refreshRestrictions, sessionView } from './services.js'
+import { createSessionStore, isWellFormedToken, newSessionToken, sessionIdOf, sessionPolicy, sessionState, type SessionStore } from './sessions.js'
 import { createMemoryRepository, type Repository } from './store.js'
 
 function send<T>(res:Response,schema:z.ZodType<T>,value:unknown,status=200){const parsed=schema.safeParse(value);if(!parsed.success)throw new Error('API response did not match its schema');res.status(status).json(parsed.data)}
-export function createApp(repository:Repository=createMemoryRepository(),options:{authStore?:AuthStore}={}){
-  const app=express();const signingKey=env.SESSION_SECRET??randomBytes(32).toString('hex')
+export function createApp(repository:Repository=createMemoryRepository(),options:{authStore?:AuthStore;sessionStore?:SessionStore}={}){
+  const app=express()
   const authStore=options.authStore??createAuthStore()
-  const signature=(value:string)=>createHmac('sha256',signingKey).update(value).digest('base64url')
+  const sessions=options.sessionStore??createSessionStore({nodeEnv:env.NODE_ENV,tableName:env.TABLE_NAME,onLambda})
   // The deployed app and API sit on different domains, so the session cookie must be cross-site there.
   const cookieOptions={httpOnly:true,sameSite:env.NODE_ENV==='production'?'none' as const:'lax' as const,secure:env.NODE_ENV==='production',path:'/'}
   app.use(helmet());app.use(cors({origin:env.CORS_ORIGIN,credentials:true}));app.use(express.json({limit:'128kb'}))
   app.get(['/health','/api/health'],(_req,res)=>send(res,healthResponseSchema,{status:'ok'}))
   const cookieValue=(req:Request)=>req.headers.cookie?.split(';').map(part=>part.trim()).find(part=>part.startsWith('accs_session='))?.slice('accs_session='.length)
-  // Resolves the signed session cookie to the current user (roles come from the token, profile from the repository).
-  const sessionUser=(req:Request)=>{const [id,signed]=cookieValue(req)?.split('.')??[];let valid=false;if(id&&signed){const expected=Buffer.from(signature(id));const actual=Buffer.from(signed);valid=actual.length===expected.length&&timingSafeEqual(actual,expected)}const claims=valid&&id?decodeSession(id):undefined;const account=claims?repository.read().users.find(u=>u.id===claims.id&&u.active):undefined;if(!account||!claims)return undefined;return refreshRestrictions(repository.read(),{...account,roles:claims.roles})}
-  const startSession=(res:Response,user:User,remember=false)=>{const id=encodeSession(user);res.cookie('accs_session',`${id}.${signature(id)}`,remember?{...cookieOptions,maxAge:30*24*60*60*1000}:cookieOptions)}
+  // Resolves the session cookie to a live SESSION item, then to the account. Roles are read from the
+  // account on every request, so a role change or deactivation applies to existing sessions at once.
+  const sessionUser=async(req:Request,res:Response)=>{
+    const token=cookieValue(req);if(!isWellFormedToken(token))return undefined
+    const sessionId=sessionIdOf(token);const session=await sessions.get(sessionId);const now=Date.now()
+    if(!session||sessionState(session,now)!=='live')return undefined
+    const account=repository.read().users.find(u=>u.id===session.userId&&u.active);if(!account)return undefined
+    if(now-Date.parse(session.lastSeenAt)>=sessionPolicy.touchIntervalMs)await sessions.touch(sessionId,new Date(now).toISOString())
+    res.locals.sessionId=sessionId;return refreshRestrictions(repository.read(),structuredClone(account))
+  }
+  const startSession=async(req:Request,res:Response,user:User,remember=false)=>{
+    const token=newSessionToken();const issued=new Date();const {absoluteMs}=remember?sessionPolicy.remember:sessionPolicy.normal
+    await sessions.create({sessionId:sessionIdOf(token),userId:user.id,activeRoleId:user.roles[0]??'',issuedAt:issued.toISOString(),expiresAt:new Date(issued.getTime()+absoluteMs).toISOString(),lastSeenAt:issued.toISOString(),remember,ipAddress:req.ip??'',userAgent:String(req.headers['user-agent']??'').slice(0,512),status:'active'})
+    res.cookie('accs_session',token,remember?{...cookieOptions,maxAge:absoluteMs}:cookieOptions)
+  }
   // Registered users live in the auth store; merge them into the repository (and their class spaces) before any lookup.
   const syncUsers=async()=>{const db=repository.read();const known=new Set(db.users.map(u=>u.id));for(const u of (await authStore.load()).users)if(!known.has(u.id)){db.users.push(structuredClone(u));for(const space of db.spaces)if(u.spaceIds.includes(space.id)&&!space.studentIds.includes(u.id))space.studentIds.push(u.id)}}
   const findUser=(ident:string)=>{const key=ident.trim().toLowerCase();return repository.read().users.find(u=>u.active&&(u.email.toLowerCase()===key||u.id.toLowerCase()===key||u.studentId?.toLowerCase()===key))}
@@ -41,7 +54,7 @@ export function createApp(repository:Repository=createMemoryRepository(),options
     // The employee ID is kept in studentId too: it is the only identifier field a user has.
     const created:User={id:`USR-${randomBytes(5).toString('hex').toUpperCase()}`,name:body.fullName,email,roles:[body.role],...(student?{program:body.program,section:body.section,year:body.yearLevel,adviserId:spaces[0]?.professorIds[0]}:{}),studentId:body.identifier,restrictions:[],title:'',bio:'',education:'',officeHours:'',spaceIds:spaces.map(s=>s.id),organizationIds:[],active:true}
     await authStore.update(data=>{const taken=[...repository.read().users,...data.users];if(taken.some(u=>u.email.toLowerCase()===email))throw new ApiError(409,'An account with this email already exists.','CONFLICT');if(taken.some(u=>u.studentId?.toLowerCase()===body.identifier.toLowerCase()))throw new ApiError(409,'An account with this ID already exists.','CONFLICT');data.users.push(created);data.credentials[created.id]=hashPassword(body.password)})
-    await syncUsers();startSession(res,created);sessionOut(res,created,201)
+    await syncUsers();await startSession(req,res,created);sessionOut(res,created,201)
   })
   app.post('/api/auth/sign-in',async(req,res)=>{
     const {emailOrId,password,remember}=signInSchema.parse(req.body);const key=emailOrId.trim().toLowerCase()
@@ -50,7 +63,7 @@ export function createApp(repository:Repository=createMemoryRepository(),options
     // Always run one scrypt verification so unknown accounts and wrong passwords cost the same.
     const matches=verifyPassword(password,stored||defaultHash())
     if(!user||!stored||!matches){bump(key);throw new ApiError(401,'The email, ID, or password is incorrect.','INVALID_CREDENTIALS')}
-    attempts.delete(key);startSession(res,user,remember);sessionOut(res,user)
+    attempts.delete(key);await startSession(req,res,user,remember);sessionOut(res,user)
   })
   app.post('/api/auth/forgot-password',async(req,res)=>{
     const {emailOrId}=forgotPasswordSchema.parse(req.body);const key=`forgot:${emailOrId.trim().toLowerCase()}`;const user=findUser(emailOrId)
@@ -63,16 +76,20 @@ export function createApp(repository:Repository=createMemoryRepository(),options
     const user=findUser(emailOrId);const reset=user&&(await authStore.load()).resets[user.id]
     if(!user||!reset||reset.expires<=Date.now()||!verifyPassword(code,reset.codeHash)){bump(key);throw new ApiError(400,'The code is incorrect or has expired.','INVALID_CODE')}
     await authStore.update(data=>{delete data.resets[user.id];data.credentials[user.id]=hashPassword(password)})
+    // A reset means the old password may be known to someone else: end every session.
+    await sessions.revokeUser(user.id)
     attempts.delete(key);send(res,actionResponseSchema,{ok:true,message:'Password updated. Sign in with your new password.'})
   })
-  app.post('/api/auth/sign-out',(req,res)=>{emptyBodySchema.parse(req.body??{});const value=req.headers.cookie?.split(';').map(part=>part.trim()).find(part=>part.startsWith('accs_session='))?.slice('accs_session='.length);res.clearCookie('accs_session',cookieOptions);send(res,actionResponseSchema,{ok:true,message:'Signed out.'})})
-  app.use('/api',(req,res,next)=>{const user=sessionUser(req);if(!user)return send(res,errorResponseSchema,{error:'Sign in to continue.',code:'UNAUTHENTICATED'},401);res.locals.user=user;next()})
+  app.post('/api/auth/sign-out',async(req,res)=>{emptyBodySchema.parse(req.body??{});const token=cookieValue(req);if(isWellFormedToken(token))await sessions.revoke(sessionIdOf(token));res.clearCookie('accs_session',cookieOptions);send(res,actionResponseSchema,{ok:true,message:'Signed out.'})})
+  app.use('/api',async(req,res,next)=>{const user=await sessionUser(req,res);if(!user)return send(res,errorResponseSchema,{error:'Sign in to continue.',code:'UNAUTHENTICATED'},401);res.locals.user=user;next()})
   app.post('/api/auth/change-password',async(req,res)=>{
     const user=res.locals.user as User;const {currentPassword,password}=changePasswordSchema.parse(req.body);const key=`change:${user.id}`
     if(blocked(key))throw tooMany()
     const stored=credentialFor(user,await authStore.load())
     if(!stored||!verifyPassword(currentPassword,stored)){bump(key);throw new ApiError(400,'Your current password is incorrect.','INVALID_CREDENTIALS')}
     await authStore.update(data=>{data.credentials[user.id]=hashPassword(password)})
+    // Keep this session; sign out every other device.
+    await sessions.revokeUser(user.id,res.locals.sessionId as string)
     attempts.delete(key);send(res,actionResponseSchema,{ok:true,message:'Password changed.'})
   })
   app.get('/api/session',(_req,res)=>send(res,sessionResponseSchema,sessionView(res.locals.user as User)))
@@ -84,17 +101,3 @@ export function createApp(repository:Repository=createMemoryRepository(),options
 }
 export const app=createApp()
 
-// Sessions are self-contained signed tokens (user id and the roles loaded at sign-in), so every
-// Lambda instance can verify them without shared session storage.
-function encodeSession(user: User) {
-  return Buffer.from(JSON.stringify({ id: user.id, roles: user.roles })).toString('base64url')
-}
-
-function decodeSession(token: string): Pick<User, 'id' | 'roles'> | undefined {
-  try {
-    const claims = JSON.parse(Buffer.from(token, 'base64url').toString('utf8'))
-    return typeof claims?.id === 'string' && Array.isArray(claims.roles) ? claims : undefined
-  } catch {
-    return undefined
-  }
-}
