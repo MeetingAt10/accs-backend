@@ -5,20 +5,17 @@ import helmet from 'helmet'
 import { z } from 'zod'
 
 import { type AuthData, type AuthStore, createAuthStore, defaultHash, hashPassword, verifyPassword } from './auth.js'
-import { env, onLambda, tableName } from './env.js'
+import { env, onLambda } from './env.js'
 import { actionRequestSchema, actionResponseSchema, changePasswordSchema, emptyBodySchema, errorResponseSchema, forgotPasswordSchema, healthResponseSchema, idParamsSchema, pageQuerySchema, pageResponseSchema, registerSchema, resetPasswordSchema, sessionResponseSchema, signInSchema, type User } from './schemas.js'
-import { hasPermission } from './access.js'
-import { ApiError, getPage, performAction, refreshRestrictions, sessionView, unavailable } from './services.js'
-import { createResetStore, resetPolicy, type ResetStore } from './resets.js'
+import { ApiError, getPage, performAction, refreshRestrictions, sessionView } from './services.js'
 import { createSessionStore, isWellFormedToken, newSessionToken, sessionIdOf, sessionPolicy, sessionState, type SessionStore } from './sessions.js'
 import { createMemoryRepository, type Repository } from './store.js'
 
 function send<T>(res:Response,schema:z.ZodType<T>,value:unknown,status=200){const parsed=schema.safeParse(value);if(!parsed.success)throw new Error('API response did not match its schema');res.status(status).json(parsed.data)}
-export function createApp(repository:Repository=createMemoryRepository(),options:{authStore?:AuthStore;sessionStore?:SessionStore;resetStore?:ResetStore}={}){
+export function createApp(repository:Repository=createMemoryRepository(),options:{authStore?:AuthStore;sessionStore?:SessionStore}={}){
   const app=express()
   const authStore=options.authStore??createAuthStore()
-  const sessions=options.sessionStore??createSessionStore({nodeEnv:env.NODE_ENV,tableName:tableName('ccs_identity'),onLambda})
-  const resets=options.resetStore??createResetStore({nodeEnv:env.NODE_ENV,tableName:tableName('ccs_identity'),onLambda})
+  const sessions=options.sessionStore??createSessionStore({nodeEnv:env.NODE_ENV,tableName:env.TABLE_NAME,onLambda})
   // The deployed app and API sit on different domains, so the session cookie must be cross-site there.
   const cookieOptions={httpOnly:true,sameSite:env.NODE_ENV==='production'?'none' as const:'lax' as const,secure:env.NODE_ENV==='production',path:'/'}
   app.use(helmet());app.use(cors({origin:env.CORS_ORIGIN,credentials:true}));app.use(express.json({limit:'128kb'}))
@@ -68,29 +65,17 @@ export function createApp(repository:Repository=createMemoryRepository(),options
     if(!user||!stored||!matches){bump(key);throw new ApiError(401,'The email, ID, or password is incorrect.','INVALID_CREDENTIALS')}
     attempts.delete(key);await startSession(req,res,user,remember);sessionOut(res,user)
   })
-  // TBD(SES): no email channel yet. Outside production the code is logged; in production an administrator
-  // issues it (POST /api/admin/accounts/:id/reset-code) and hands it over, so self-service issues nothing.
-  const deliverResetCode=(user:User,code:string)=>{if(env.NODE_ENV==='production')return false;console.log(`[accs] password reset code for ${user.id}: ${code}`);return true}
-  const selfServiceReset=env.NODE_ENV!=='production'
-  const newResetCode=()=>{const code=String(randomInt(100000,1000000));return {code,codeHash:hashPassword(code)}}
   app.post('/api/auth/forgot-password',async(req,res)=>{
-    const {emailOrId}=forgotPasswordSchema.parse(req.body);const user=findUser(emailOrId)
-    // Hash a code whether or not the account exists, so the response time does not reveal it.
-    const {code,codeHash}=newResetCode()
-    if(user&&selfServiceReset&&await resets.issue({userId:user.id,codeHash,now:Date.now()})==='issued')deliverResetCode(user,code)
-    send(res,actionResponseSchema,{ok:true,message:selfServiceReset?'If an account matches, a reset code has been issued. Ask an ACCS administrator if you do not receive it.':'To reset your password, ask an ACCS administrator for a reset code, then enter it here with your new password.'})
+    const {emailOrId}=forgotPasswordSchema.parse(req.body);const key=`forgot:${emailOrId.trim().toLowerCase()}`;const user=findUser(emailOrId)
+    if(user&&!blocked(key)){bump(key);const code=String(randomInt(100000,1000000));await authStore.update(data=>{data.resets[user.id]={codeHash:hashPassword(code),expires:Date.now()+15*60*1000}});if(env.NODE_ENV!=='production')console.log(`[accs] password reset code for ${user.id}: ${code}`)}
+    send(res,actionResponseSchema,{ok:true,message:'If an account matches, a reset code has been issued. Contact the CCS office if you do not receive it.'})
   })
   app.post('/api/auth/reset-password',async(req,res)=>{
     const {emailOrId,code,password}=resetPasswordSchema.parse(req.body);const key=`reset:${emailOrId.trim().toLowerCase()}`
     if(blocked(key))throw tooMany()
-    const user=findUser(emailOrId)
-    // The guess is counted before the code is checked, so parallel requests cannot exceed the per-code limit.
-    const claimed=user?await resets.claimAttempt(user.id,Date.now()):undefined
-    const matches=verifyPassword(code,claimed?.codeHash??defaultHash())
-    if(!user||!claimed||!matches){bump(key);throw new ApiError(400,'The code is incorrect or has expired.','INVALID_CODE')}
-    // Single use: only one request can delete this code, even if two arrive with it at once.
-    if(!await resets.consume(user.id,claimed.codeHash)){bump(key);throw new ApiError(400,'The code is incorrect or has expired.','INVALID_CODE')}
-    await authStore.update(data=>{data.credentials[user.id]=hashPassword(password)})
+    const user=findUser(emailOrId);const reset=user&&(await authStore.load()).resets[user.id]
+    if(!user||!reset||reset.expires<=Date.now()||!verifyPassword(code,reset.codeHash)){bump(key);throw new ApiError(400,'The code is incorrect or has expired.','INVALID_CODE')}
+    await authStore.update(data=>{delete data.resets[user.id];data.credentials[user.id]=hashPassword(password)})
     // A reset means the old password may be known to someone else: end every session.
     await sessions.revokeUser(user.id)
     attempts.delete(key);send(res,actionResponseSchema,{ok:true,message:'Password updated. Sign in with your new password.'})
@@ -106,16 +91,6 @@ export function createApp(repository:Repository=createMemoryRepository(),options
     // Keep this session; sign out every other device.
     await sessions.revokeUser(user.id,res.locals.sessionId as string)
     attempts.delete(key);send(res,actionResponseSchema,{ok:true,message:'Password changed.'})
-  })
-  // Office-assisted reset: an administrator issues a code, shown once, and gives it to the account holder.
-  app.post('/api/admin/accounts/:id/reset-code',async(req,res)=>{
-    const admin=res.locals.user as User;const id=z.string().trim().min(1).max(64).parse(req.params.id);emptyBodySchema.parse(req.body??{})
-    if(!hasPermission(admin,'role.manage'))throw new ApiError(403,'You do not have access to this action.','FORBIDDEN')
-    const account=repository.read().users.find(u=>u.id===id&&u.active);if(!account)throw unavailable()
-    const {code,codeHash}=newResetCode();const now=Date.now()
-    await resets.issue({userId:account.id,codeHash,now,issuedBy:admin.id})
-    const db=repository.read();db.audit.push({id:repository.nextId('AUDIT'),at:new Date(now).toISOString(),actorId:admin.id,action:'Password reset code issued','module':'identity',reference:account.id,result:'Recorded'})
-    send(res,actionResponseSchema,{ok:true,message:'Reset code issued. Give it to the account holder; it expires in 15 minutes and is not shown again.',record:{code,expiresAt:new Date(now+resetPolicy.codeTtlMs).toISOString()}})
   })
   app.get('/api/session',(_req,res)=>send(res,sessionResponseSchema,sessionView(res.locals.user as User)))
   app.get('/api/pages/:pageId',(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const query=pageQuerySchema.parse(req.query);send(res,pageResponseSchema,getPage(repository,res.locals.user as User,pageId,query))})
