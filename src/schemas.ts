@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { passwordProblem } from './auth.js'
+
 export const roles = ['student', 'organization', 'professor', 'staff', 'chair', 'dean', 'administrator', 'guidance', 'osas', 'president'] as const
 export const roleSchema = z.enum(roles)
 export type Role = z.infer<typeof roleSchema>
@@ -13,12 +15,38 @@ export type PageQuery = z.infer<typeof pageQuerySchema>
 export const jsonObjectSchema = z.record(z.string(), z.json())
 export const pageResponseSchema = z.object({ pageId: pageIdSchema, title: z.string(), scope: z.string(), sampleData: z.literal(true), data: jsonObjectSchema })
 export const sessionResponseSchema = z.object({ user: userSchema, permissions: z.array(z.string()), allowedPages: z.array(z.string()), roleLabels: z.record(z.string(), z.string()), sampleData: z.literal(true) })
-export const accountsResponseSchema = z.object({ accounts: z.array(userSchema.pick({ id: true, name: true, email: true, roles: true }).extend({ description: z.string() })), sampleData: z.literal(true) })
 export const actionRequestSchema = z.object({ action: z.string().min(1).max(60), recordId: z.string().max(100).optional(), payload: z.record(z.string(), z.unknown()).default({}), reason: z.string().max(2000).optional() }).strict()
 export type ActionRequest = z.infer<typeof actionRequestSchema>
 export const actionResponseSchema = z.object({ ok: z.literal(true), message: z.string(), record: z.json().optional() })
 export const errorResponseSchema = z.object({ error: z.string(), code: z.string(), fields: z.array(z.object({ path: z.string(), message: z.string() })).optional() })
-export const signInSchema = z.object({ accountId: z.string().min(1).max(100) }).strict()
+const password = z.string().max(200).superRefine((value, context) => {
+  const problem = passwordProblem(value)
+  if (problem) context.addIssue({ code: 'custom', message: problem })
+})
+const emailOrId = z.string().trim().min(1).max(200)
+export const signInSchema = z.object({ emailOrId, password: z.string().min(1).max(200), remember: z.boolean().optional() }).strict()
+export const forgotPasswordSchema = z.object({ emailOrId }).strict()
+export const resetPasswordSchema = z.object({ emailOrId, code: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code.'), password }).strict()
+export const changePasswordSchema = z.object({ currentPassword: z.string().min(1).max(200), password }).strict()
+// Privileged roles are granted by an administrator, so they are not selectable here.
+export const registerSchema = z.object({
+  fullName: z.string().trim().min(2).max(100),
+  email: z.string().trim().max(200).pipe(z.email()),
+  identifier: z.string().trim(),
+  role: z.enum(['student', 'professor', 'staff']),
+  program: z.enum(programs).optional(),
+  yearLevel: z.number().int().min(1).max(4).optional(),
+  section: z.enum(['A', 'B', 'C', 'D', 'E', 'F']).optional(),
+  password,
+}).strict().superRefine((value, context) => {
+  const student = value.role === 'student'
+  if (!(student ? /^\d{2}-\d{4}$/ : /^(\d{2}|\d{4})-\d{4}$/).test(value.identifier)) {
+    context.addIssue({ code: 'custom', path: ['identifier'], message: student ? 'Use the format 24-1234.' : 'Use the format 24-1234 or 2024-1234.' })
+  }
+  if (student) for (const field of ['program', 'yearLevel', 'section'] as const) {
+    if (value[field] === undefined) context.addIssue({ code: 'custom', path: [field], message: 'Required for students.' })
+  }
+})
 export const emptyBodySchema = z.object({}).strict()
 export const idParamsSchema = z.object({ pageId: pageIdSchema }).strict()
 export const healthResponseSchema = z.object({ status: z.literal('ok') })

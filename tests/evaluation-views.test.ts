@@ -15,21 +15,21 @@ describe('evaluation read models', () => {
 
   async function login(accountId: string) {
     const agent = request.agent(app)
-    const signedIn = await agent.post('/api/auth/sign-in').send({ accountId })
+    const signedIn = await agent.post('/api/auth/sign-in').send({ emailOrId: accountId, password: 'Accs@Qcu2026!' })
 
     expect(signedIn.status).toBe(200)
     return agent
   }
 
   it('DEAN-03-V returns faculty completion and review status for the cycle editor', async () => {
-    const dean = await login('DEMO-DEAN')
+    const dean = await login('QCU-DEAN')
     const response = await dean.get('/api/pages/P31?id=CYCLE-2026-2')
 
     expect(response.status).toBe(200)
     expect(response.body.data.facultyCompletion).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          id: 'DEMO-PROF-IT',
+          id: 'QCU-PROF-IT',
           assigned: 1,
           submitted: 0,
         }),
@@ -38,7 +38,7 @@ describe('evaluation read models', () => {
     expect(response.body.data.facultyReviews).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          id: 'DEMO-PROF-IT',
+          id: 'QCU-PROF-IT',
           status: 'Not yet',
         }),
       ]),
@@ -47,9 +47,9 @@ describe('evaluation read models', () => {
   })
 
   it('PRO-08-V/B includes a program reference average without exposing evaluator identities', async () => {
-    const professor = await login('DEMO-PROF-IT')
+    const professor = await login('QCU-PROF-IT')
     const response = await professor.get(
-      '/api/pages/P29?id=DEMO-PROF-IT&cycle=CYCLE-2026-1',
+      '/api/pages/P29?id=QCU-PROF-IT&cycle=CYCLE-2026-1',
     )
 
     expect(response.status).toBe(200)

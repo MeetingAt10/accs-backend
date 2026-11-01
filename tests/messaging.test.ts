@@ -15,15 +15,15 @@ describe('message read state and muted notifications', () => {
 
   async function login(accountId: string) {
     const agent = request.agent(app)
-    const signedIn = await agent.post('/api/auth/sign-in').send({ accountId })
+    const signedIn = await agent.post('/api/auth/sign-in').send({ emailOrId: accountId, password: 'Accs@Qcu2026!' })
 
     expect(signedIn.status).toBe(200)
     return agent
   }
 
   it('STU-03-V tracks unread messages, marks threads read, and respects mute preferences', async () => {
-    const student = await login('DEMO-STU-IT-A')
-    const professor = await login('DEMO-PROF-IT')
+    const student = await login('QCU-STU-IT-A')
+    const professor = await login('QCU-PROF-IT')
     const inbox = await student.get('/api/pages/P11')
     const initialThread = inbox.body.data.threads.find(
       (thread: { id: string }) => thread.id === 'THREAD-IT-A',
@@ -51,7 +51,7 @@ describe('message read state and muted notifications', () => {
     expect(muted.status).toBe(200)
 
     const noticesBefore = repository.read().notifications.filter(
-      notification => notification.recipientId === 'DEMO-STU-IT-A'
+      notification => notification.recipientId === 'QCU-STU-IT-A'
         && notification.kind === 'message',
     ).length
     const sent = await professor.post('/api/pages/P12/actions').send({
@@ -62,7 +62,7 @@ describe('message read state and muted notifications', () => {
 
     expect(sent.status).toBe(200)
     expect(repository.read().notifications.filter(
-      notification => notification.recipientId === 'DEMO-STU-IT-A'
+      notification => notification.recipientId === 'QCU-STU-IT-A'
         && notification.kind === 'message',
     )).toHaveLength(noticesBefore)
     expect((await student.get('/api/pages/P11')).body.data.threads.find(
@@ -71,7 +71,7 @@ describe('message read state and muted notifications', () => {
   })
 
   it('STU-03-I denies read-state changes for a conversation outside the user scope', async () => {
-    const student = await login('DEMO-STU-IT-B')
+    const student = await login('QCU-STU-IT-B')
     const response = await student.post('/api/pages/P12/actions').send({
       action: 'markThreadRead',
       recordId: 'THREAD-IT-A',

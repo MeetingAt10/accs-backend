@@ -9,7 +9,7 @@ import { createMemoryRepository } from '../src/store.js'
 type Module = { id: string; role: string; name: string; pages: string[] }
 const { modules } = JSON.parse(readFileSync(new URL('./fixtures/doc003-modules.json', import.meta.url), 'utf8')) as { modules: Module[] }
 
-const accounts: Record<string, string> = { student: 'DEMO-STU-IT-A', organization: 'DEMO-ORG', professor: 'DEMO-PROF-IT', staff: 'DEMO-STAFF', chair: 'DEMO-CHAIR-IT', dean: 'DEMO-DEAN', administrator: 'DEMO-ADMIN', guidance: 'DEMO-GUIDANCE', osas: 'DEMO-OSAS', president: 'DEMO-PRESIDENT' }
+const accounts: Record<string, string> = { student: 'QCU-STU-IT-A', organization: 'QCU-ORG', professor: 'QCU-PROF-IT', staff: 'QCU-STAFF', chair: 'QCU-CHAIR-IT', dean: 'QCU-DEAN', administrator: 'QCU-ADMIN', guidance: 'QCU-GUIDANCE', osas: 'QCU-OSAS', president: 'QCU-PRESIDENT' }
 
 describe('DOC003 module inventory', () => {
   it('has the 58 modules per role group in the inventory', () => {
@@ -26,7 +26,7 @@ describe('DOC003 module inventory', () => {
       const app = createApp(createMemoryRepository())
       for (const role of roles) {
         const agent = request.agent(app)
-        expect((await agent.post('/api/auth/sign-in').send({ accountId: accounts[role] })).status).toBe(200)
+        expect((await agent.post('/api/auth/sign-in').send({ emailOrId: accounts[role], password: 'Accs@Qcu2026!' })).status).toBe(200)
         const { allowedPages } = (await agent.get('/api/session')).body as { allowedPages: string[] }
         const reachable = module.pages.filter((page) => allowedPages.includes(page))
         expect(reachable, `${role} has no page for ${module.id}`).not.toHaveLength(0)

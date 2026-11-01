@@ -12,14 +12,14 @@ beforeEach(() => {
 
 async function signIn(accountId: string) {
   const agent = request.agent(app)
-  const response = await agent.post('/api/auth/sign-in').send({ accountId })
+  const response = await agent.post('/api/auth/sign-in').send({ emailOrId: accountId, password: 'Accs@Qcu2026!' })
   expect(response.status).toBe(200)
   return agent
 }
 
 describe('case analytics filters', () => {
   it('CHR-05-V applies the case-reference search within the permitted program scope', async () => {
-    const dean = await signIn('DEMO-DEAN')
+    const dean = await signIn('QCU-DEAN')
     const match = await dean.get('/api/pages/P25?q=rpt-0241')
     const noMatch = await dean.get('/api/pages/P25?q=missing-reference')
 
