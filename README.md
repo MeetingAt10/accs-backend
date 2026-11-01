@@ -30,7 +30,3 @@ System concept not defined yet.
 Passwords are hashed with `crypto.scryptSync` and need 10+ characters with upper and lower case, a number, and a symbol. Students must give program, year level, and section. Privileged roles are granted by an administrator, never self-registered.
 
 Registered accounts and password hashes live in the auth store (`src/auth.ts`): an S3 object when `AUTH_STORE_BUCKET` is set (Lambda; `AUTH_STORE_KEY`, default `auth-store.json`), otherwise a JSON file at `AUTH_STORE_FILE` (default `/tmp/accs-auth-store.json`). Tests use an in-memory store. Seeded pilot accounts (`QCU-STU-IT-A`, `QCU-ADMIN`, …) sign in with their ID or email and `Accs@Qcu2026!` until changed; rotate or disable this shared password before real users join.
-
-## Sessions
-
-Sign-in creates a server-side session. The `accs_session` cookie holds an opaque random token; the app table (`TABLE_NAME`, a `SESSION#<sha256 of token>` item) stores only its hash, so a leaked table cannot be replayed. Every request reads the session and the account, so sign-out, a role change, and deactivation apply at once. Sessions end after 30 minutes idle or 12 hours (remember me: 7 days idle, 30 days); these are provisional until DOC003 decision D-08. Changing a password signs out other devices; a password reset signs out all of them. Without `TABLE_NAME`, sessions stay in memory locally, and on Lambda sign-in fails rather than issuing sessions valid on one instance only.
