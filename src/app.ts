@@ -121,8 +121,28 @@ export function createApp(repository:Repository=createMemoryRepository(),options
   app.get('/api/pages/:pageId',(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const query=pageQuerySchema.parse(req.query);send(res,pageResponseSchema,getPage(repository,res.locals.user as User,pageId,query))})
   app.post('/api/pages/:pageId/actions',(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const body=actionRequestSchema.parse(req.body);send(res,actionResponseSchema,performAction(repository,res.locals.user as User,pageId,body))})
   app.use('/api',(_req,res)=>send(res,errorResponseSchema,{error:'This API resource is not available.',code:'NOT_FOUND'},404))
-  const errors:ErrorRequestHandler=(error,_req,res,_next)=>{if(error instanceof z.ZodError)return send(res,errorResponseSchema,{error:'Check the required fields.',code:'VALIDATION_ERROR',fields:error.issues.map(issue=>({path:issue.path.map(String).join('.'),message:issue.message}))},400);if(error instanceof ApiError)return send(res,errorResponseSchema,{error:error.message,code:error.code},error.status);if(error instanceof SyntaxError)return send(res,errorResponseSchema,{error:'The request must contain valid JSON.',code:'VALIDATION_ERROR'},400);send(res,errorResponseSchema,{error:'The request could not be completed.',code:'INTERNAL_ERROR'},500)}
+  const errors:ErrorRequestHandler=(error,req,res,_next)=>{if(error instanceof z.ZodError)return send(res,errorResponseSchema,{error:'Check the required fields.',code:'VALIDATION_ERROR',fields:error.issues.map(issue=>({path:issue.path.map(String).join('.'),message:issue.message}))},400);if(error instanceof ApiError)return send(res,errorResponseSchema,{error:error.message,code:error.code},error.status);if(error instanceof SyntaxError)return send(res,errorResponseSchema,{error:'The request must contain valid JSON.',code:'VALIDATION_ERROR'},400)
+    // body-parser errors carry their own 4xx status (for example 413 for a body over the 128 KB limit).
+    const status=(error as {status?:unknown}).status;if(typeof status==='number'&&status>=400&&status<500)return send(res,errorResponseSchema,{error:status===413?'The request is too large.':'The request could not be read.',code:'VALIDATION_ERROR'},status)
+    logUnexpected(req,error);send(res,errorResponseSchema,{error:'The request could not be completed.',code:'INTERNAL_ERROR'},500)}
   app.use(errors);return app
 }
 export const app=createApp()
+
+/**
+ * Writes one JSON line per unexpected error, so 500s are visible in CloudWatch (the Lambda runtime adds the
+ * timestamp and request ID). Only the method, path, and error are logged: never the body, query, headers, or
+ * cookies, which can carry passwords, reset codes, and session tokens.
+ */
+export function logUnexpected(req: Request, error: unknown) {
+  const err = error instanceof Error ? error : new Error(String(error))
+  console.error(JSON.stringify({
+    level: 'error',
+    msg: 'Unhandled error',
+    method: req.method,
+    path: req.path,
+    status: 500,
+    error: { name: err.name, message: err.message, stack: err.stack },
+  }))
+}
 

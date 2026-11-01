@@ -39,3 +39,7 @@ Codes live in `ccs_identity` as the `RESET` item `USER#<id>` / `RESET` (hash onl
 ## Sessions
 
 Sign-in creates a server-side session. The `accs_session` cookie holds an opaque random token; the `ccs_identity` table (`<TABLE_PREFIX>ccs_identity`, a DOC006 `SESSION` item keyed `SESSION#<sha256 of token>`) stores only its hash, so a leaked table cannot be replayed. Every request reads the session and the account, so sign-out, a role change, and deactivation apply at once. Sessions end after 30 minutes idle or 12 hours (remember me: 7 days idle, 30 days); these are provisional until DOC003 decision D-08. Changing a password signs out other devices; a password reset signs out all of them. Without `TABLE_PREFIX`, sessions stay in memory locally, and on Lambda sign-in fails rather than issuing sessions valid on one instance only.
+
+## Errors and logging
+
+Every unexpected error returns `500 INTERNAL_ERROR` and writes one JSON line to stderr (CloudWatch on Lambda, where the runtime adds the timestamp and request ID): `level`, `msg`, `method`, `path`, `status`, and the error's name, message, and stack. The body, query string, headers, and cookies are never logged, since they can hold passwords, reset codes, and session tokens. Validation, auth, and other expected 4xx responses are not logged; a body over the 128 KB limit returns `413`.
