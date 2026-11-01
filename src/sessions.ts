@@ -9,8 +9,9 @@ import {
   type AttributeValue,
 } from '@aws-sdk/client-dynamodb'
 
-// Server-side sessions, stored in the app table (accs-architecture adr/0003): PK SESSION#<sha256>, SK META,
-// GSI2 SESSIONS#<userId> / <issuedAt> to list a user's sessions, TTL on expiresAt (epoch seconds).
+// Server-side sessions: DOC006 item type SESSION in ccs_identity (accs-architecture adr/0004).
+// PK SESSION#<session_id>, SK META; GSI2 USER#<user_id> / SESSION#<issued_at> lists a user's sessions;
+// TTL on expires_epoch. session_id is the SHA-256 of the cookie token (amendment to DOC006).
 // The cookie carries an opaque random token; only its SHA-256 is stored, so a leaked table
 // or backup cannot be replayed as live sessions.
 
@@ -93,7 +94,7 @@ export function createDynamoSessionStore(tableName: string, client = new DynamoD
       await client.send(new UpdateItemCommand({
         TableName: tableName,
         Key: keyOf(sessionId),
-        UpdateExpression: 'SET #status = :revoked, updatedAt = :now',
+        UpdateExpression: 'SET #status = :revoked, updated_at = :now',
         ConditionExpression: 'attribute_exists(PK)',
         ExpressionAttributeNames: { '#status': 'status' },
         ExpressionAttributeValues: { ':revoked': s('revoked'), ':now': s(now) },
@@ -112,38 +113,40 @@ export function createDynamoSessionStore(tableName: string, client = new DynamoD
         ConditionExpression: 'attribute_not_exists(PK)',
         Item: {
           ...keyOf(session.sessionId),
-          entityType: s('SESSION'),
-          sessionId: s(session.sessionId),
-          userId: s(session.userId),
-          GSI2PK: s(`SESSIONS#${session.userId}`),
-          GSI2SK: s(session.issuedAt),
-          issuedAt: s(session.issuedAt),
-          activeRoleId: s(session.activeRoleId),
-          expiresAt: { N: String(expiresEpoch) },
-          lastSeenAt: s(session.lastSeenAt),
+          entity_type: s('SESSION'),
+          session_id: s(session.sessionId),
+          user_id: s(session.userId),
+          GSI2PK: s(`USER#${session.userId}`),
+          GSI2SK: s(`SESSION#${session.issuedAt}`),
+          issued_at: s(session.issuedAt),
+          active_role_id: s(session.activeRoleId),
+          expires_at: s(session.expiresAt),
+          expires_epoch: { N: String(expiresEpoch) },
+          last_seen_at: s(session.lastSeenAt),
           remember: { BOOL: session.remember },
-          ipAddress: s(session.ipAddress),
-          userAgent: s(session.userAgent),
+          ip_address: s(session.ipAddress),
+          user_agent: s(session.userAgent),
           status: s(session.status),
-          createdAt: s(session.issuedAt),
-          updatedAt: s(session.issuedAt),
+          created_at: s(session.issuedAt),
+          updated_at: s(session.issuedAt),
         },
       }))
     },
     async get(sessionId) {
       // Strongly consistent, so a sign-out or revocation is seen by the very next request.
       const { Item } = await client.send(new GetItemCommand({ TableName: tableName, Key: keyOf(sessionId), ConsistentRead: true }))
-      if (!Item || Item.entityType?.S !== 'SESSION') return undefined
+      if (!Item || Item.entity_type?.S !== 'SESSION') return undefined
       return {
-        sessionId: Item.sessionId?.S ?? sessionId,
-        userId: Item.userId?.S ?? '',
-        activeRoleId: Item.activeRoleId?.S ?? '',
-        issuedAt: Item.issuedAt?.S ?? '',
-        expiresAt: new Date(Number(Item.expiresAt?.N ?? 0) * 1000).toISOString(),
-        lastSeenAt: Item.lastSeenAt?.S ?? '',
+        sessionId: Item.session_id?.S ?? sessionId,
+        userId: Item.user_id?.S ?? '',
+        activeRoleId: Item.active_role_id?.S ?? '',
+        issuedAt: Item.issued_at?.S ?? '',
+        // A missing expiry reads as already expired.
+        expiresAt: Item.expires_at?.S ?? new Date(0).toISOString(),
+        lastSeenAt: Item.last_seen_at?.S ?? '',
         remember: Item.remember?.BOOL ?? false,
-        ipAddress: Item.ipAddress?.S ?? '',
-        userAgent: Item.userAgent?.S ?? '',
+        ipAddress: Item.ip_address?.S ?? '',
+        userAgent: Item.user_agent?.S ?? '',
         status: (Item.status?.S ?? 'revoked') as SessionStatus,
       }
     },
@@ -152,7 +155,7 @@ export function createDynamoSessionStore(tableName: string, client = new DynamoD
         await client.send(new UpdateItemCommand({
           TableName: tableName,
           Key: keyOf(sessionId),
-          UpdateExpression: 'SET lastSeenAt = :at, updatedAt = :at',
+          UpdateExpression: 'SET last_seen_at = :at, updated_at = :at',
           ConditionExpression: '#status = :active',
           ExpressionAttributeNames: { '#status': 'status' },
           ExpressionAttributeValues: { ':at': s(at), ':active': s('active') },
@@ -168,8 +171,9 @@ export function createDynamoSessionStore(tableName: string, client = new DynamoD
         const page = await client.send(new QueryCommand({
           TableName: tableName,
           IndexName: 'GSI2',
-          KeyConditionExpression: 'GSI2PK = :user',
-          ExpressionAttributeValues: { ':user': s(`SESSIONS#${userId}`) },
+          // GSI2 also lists role holders under ROLE#…, so the SESSION# prefix keeps this to sessions.
+          KeyConditionExpression: 'GSI2PK = :user AND begins_with(GSI2SK, :prefix)',
+          ExpressionAttributeValues: { ':user': s(`USER#${userId}`), ':prefix': s('SESSION#') },
           ExclusiveStartKey,
         }))
         for (const item of page.Items ?? []) {
@@ -185,7 +189,7 @@ export function createDynamoSessionStore(tableName: string, client = new DynamoD
 /** A store that fails on use, so a misconfigured deploy rejects sign-in instead of keeping per-instance sessions. */
 function unconfiguredSessionStore(): SessionStore {
   const fail = async (): Promise<never> => {
-    throw new Error('TABLE_NAME is not configured; server-side sessions need DynamoDB on Lambda.')
+    throw new Error('TABLE_PREFIX is not configured; server-side sessions need the ccs_identity table on Lambda.')
   }
   return { create: fail, get: fail, touch: fail, revoke: fail, revokeUser: fail }
 }
