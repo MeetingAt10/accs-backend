@@ -33,7 +33,10 @@ export function passwordProblem(password: string) {
 }
 
 // Every seeded active user signs in with this until they set their own password.
-export const defaultPassword = 'Accs@Qcu2026!'
+// Deployed stacks set SEED_PASSWORD; the built-in value is for local runs and tests only. Production without
+// SEED_PASSWORD gets an unguessable random value, which disables seeded sign-in instead of falling back.
+export const defaultPassword =
+  env.SEED_PASSWORD ?? (env.NODE_ENV === 'production' ? randomBytes(32).toString('base64url') : 'Accs@Qcu2026!')
 let cachedDefaultHash: string | undefined
 export const defaultHash = () => (cachedDefaultHash ??= hashPassword(defaultPassword))
 

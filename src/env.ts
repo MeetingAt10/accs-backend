@@ -10,6 +10,9 @@ const schema = z.object({
   AUTH_STORE_FILE: z.string().default('/tmp/accs-auth-store.json'),
   AUTH_STORE_BUCKET: z.string().optional(),
   AUTH_STORE_KEY: z.string().default('auth-store.json'),
+  // Shared sign-in password of the seeded accounts. Deployed stacks set it (stack parameter SeedPassword);
+  // without it, production disables seeded sign-in and local runs use the built-in default in auth.ts.
+  SEED_PASSWORD: z.string().min(10).optional(),
   // Comma-separated list: every ACCS site (portal, forums, ...) calls the same API with credentials.
   CORS_ORIGIN: z
     .string()
