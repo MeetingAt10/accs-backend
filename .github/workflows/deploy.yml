@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy
+  group: deploy-${{ github.ref_name }} # main and dev deploy to different stacks, so they must not cancel each other
   cancel-in-progress: false
 
 permissions:
