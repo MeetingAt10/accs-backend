@@ -14,7 +14,7 @@ permissions:
 
 env:
   AWS_REGION: ap-southeast-1
-  FUNCTION: accs-dev-Api-16DK6Q24YCIV1-Function-rFauAkpucm9r
+  STACK: ${{ github.ref_name == 'main' && 'accs-prod' || 'accs-dev' }} # main is the prod API, dev the dev API
 
 jobs:
   deploy:
@@ -41,6 +41,7 @@ jobs:
 
       - name: Update the Lambda code
         run: |
+          FUNCTION=$(aws cloudformation describe-stacks --stack-name "$STACK" --query "Stacks[0].Outputs[?OutputKey=='ApiFunctionName'].OutputValue" --output text)
           (cd dist-lambda && zip -qj ../api.zip index.cjs)
           aws lambda update-function-code --function-name "$FUNCTION" --zip-file fileb://api.zip --query LastModified --output text
           aws lambda wait function-updated --function-name "$FUNCTION"
