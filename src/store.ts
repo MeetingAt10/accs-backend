@@ -70,14 +70,18 @@ export type Database = {
 }
 /** What domain rules see while they run. They stay synchronous, so one unit of work is never interleaved with another. */
 export interface UnitOfWork { read(): Database; nextId(prefix: string): string }
+/** The collections a shared backend keeps in its record store. Every other collection stays per instance (`persist.ts`). */
+export type Collection = 'reports' | 'consultations' | 'slots' | 'threads' | 'notifications' | 'audit'
 /**
  * The storage boundary. A backend does its I/O around the work: it loads, runs the work, then commits.
  * - `view`: read-only. Anything the work changes is discarded, and what it returns is detached from the store.
  * - `transact`: all or nothing. If the work throws, nothing it changed is kept.
+ * `collections` names the stored collections the work touches (default: all). A backend that loads on demand skips the
+ * others, and the work throws if it reads one that was not named. Memory ignores it.
  */
 export interface Repository {
-  view<T>(work: (unit: UnitOfWork) => T): Promise<T>
-  transact<T>(work: (unit: UnitOfWork) => T): Promise<T>
+  view<T>(work: (unit: UnitOfWork) => T, collections?: readonly Collection[]): Promise<T>
+  transact<T>(work: (unit: UnitOfWork) => T, collections?: readonly Collection[]): Promise<T>
 }
 /** Adds direct access to the live state, for tests and seeding. Application code goes through `view` and `transact`. */
 export interface MemoryRepository extends Repository { read(): Database }
@@ -105,8 +109,10 @@ export function createMemoryRepository(): MemoryRepository {
 }
 
 function user(id: string, name: string, roles: Role[], extra: Partial<User> = {}): User { return { id, name, email: `${id.toLowerCase().replaceAll('qcu-', '').replaceAll('-', '.')}@qcu.edu.ph`, roles, restrictions: [], title: roles.includes('student') ? 'CCS student' : 'CCS personnel', bio: roles.includes('student') ? 'Student, QCU College of Computer Studies.' : 'QCU College of Computer Studies.', education: roles.includes('student') ? 'Quezon City University' : 'Quezon City University, College of Computer Studies', officeHours: 'By appointment. Request a time under Consultations.', spaceIds: [], organizationIds: [], active: true, ...extra } }
+/** The account shape with its default profile text, for accounts created after the seed. */
+export const newUser = user
 const at = '2026-10-20T02:00:00.000Z'
-function seed(): Database {
+export function seed(): Database {
   const users: User[] = [
     user('QCU-STU-IT-A', 'Mira Solis', ['student'], { program: 'BSIT', section: 'A', year: 3, studentId: 'QCU-2024-0101', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], organizationIds: ['ORG-COMPUTING'] }),
     user('QCU-STU-IT-B', 'Luca Reed', ['student'], { program: 'BSIT', section: 'B', year: 3, studentId: 'QCU-2024-0102', adviserId: 'QCU-PROF-OTHER', spaceIds: ['SPACE-IT-B'] }),
@@ -124,6 +130,8 @@ function seed(): Database {
     user('QCU-GUIDANCE', 'Alex Fern', ['guidance'], { office: 'Guidance Office', title: 'Guidance officer', officeHours: 'Weekdays, 9:00 AM to 4:00 PM' }),
     user('QCU-OSAS', 'Jamie Alder', ['osas'], { office: 'Office of Student Affairs and Services', title: 'OSAS officer', officeHours: 'Weekdays, 9:00 AM to 4:00 PM' }),
     user('QCU-PRESIDENT', 'Taylor Rowan', ['president'], { office: 'Office of the University President', title: 'Staff, Office of the University President' }),
+    // Inactive until the Dean activates it. The email is a placeholder: activation can replace it.
+    user('QCU-SECRETARY', 'CCS Secretary', ['secretary'], { active: false, email: 'secretary@example.invalid', office: 'CCS Office', title: 'CCS secretary', officeHours: 'Monday to Friday, 8:00 AM to 5:00 PM' }),
   ]
   const spaces: Space[] = [
     { id: 'SPACE-IT-A', title: 'BSIT 3A', program: 'BSIT', section: 'A', subject: 'Section group', professorIds: ['QCU-PROF-IT'], studentIds: ['QCU-STU-IT-A', 'QCU-STU-RESTRICTED'] },
@@ -200,3 +208,5 @@ function seed(): Database {
     moderation: [{ id: 'MOD-0101', itemType: 'comment', itemId: 'COMMENT-0101', parentId: 'POST-0102', authorId: 'QCU-STU-IT-B', reporterId: 'QCU-STU-IT-A', source: 'User', reason: 'Reported by a classmate as off-topic', excerpt: 'Same problem in BSIT 3B. A posted lab schedule would help us plan.', status: 'Pending', at, history: [] }], settings: {}, permissionOverrides: {}, telemetry: [], followUps: [],
   }
 }
+/** The seeded accounts that sign in with the shared seed password until they set their own. Inactive ones (the secretary) never do. */
+export const demoUserIds: ReadonlySet<string> = new Set(seed().users.filter(u => u.active).map(u => u.id))

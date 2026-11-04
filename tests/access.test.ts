@@ -1,16 +1,20 @@
 import request from 'supertest'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.js'
+import { createMemoryAuthStore, hashPassword } from '../src/auth.js'
 import { createMemoryRepository } from '../src/store.js'
 
-const accounts={student:'QCU-STU-IT-A',organization:'QCU-ORG',professor:'QCU-PROF-IT',staff:'QCU-STAFF',chair:'QCU-CHAIR-CS',dean:'QCU-DEAN',administrator:'QCU-ADMIN',guidance:'QCU-GUIDANCE',osas:'QCU-OSAS',president:'QCU-PRESIDENT'}
+const accounts={student:'QCU-STU-IT-A',organization:'QCU-ORG',professor:'QCU-PROF-IT',staff:'QCU-STAFF',chair:'QCU-CHAIR-CS',dean:'QCU-DEAN',administrator:'QCU-ADMIN',guidance:'QCU-GUIDANCE',osas:'QCU-OSAS',president:'QCU-PRESIDENT',secretary:'QCU-SECRETARY'}
 const all=Object.keys(accounts)
 const grants:Record<string,string[]>={
  P01:all,P02:all,P03:all,P04:all,P05:['student','organization','professor','chair','dean','guidance','osas'],P06:all,P07:['student','professor','chair','dean'],P08:['student','professor','chair','dean'],P09:all,P10:all,P11:['student','professor','chair','dean','guidance','osas'],P12:['student','professor','chair','dean','guidance','osas'],P13:['student','organization','professor','chair','dean','guidance','osas'],P14:['student','professor'],P15:['student'],P16:['student','professor'],P17:['professor'],P18:['student'],P19:['student'],P20:['student'],P21:['professor','chair','dean','guidance','osas','president'],P22:['professor','chair','dean','guidance','osas','president'],P23:['chair'],P24:['chair'],P25:['chair','dean'],P26:['student','professor','chair','dean'],P27:['student','professor'],P28:['professor','chair','dean'],P29:['professor','chair','dean'],P30:['dean'],P31:['dean'],P32:['professor'],P33:['chair','dean','guidance','osas'],P34:['chair','dean','guidance','osas'],P35:['administrator','guidance','osas'],P36:['student'],P37:all,P38:all,P39:all,P40:all,P41:all,P42:all,P43:all,P44:all,P45:['administrator'],P46:['administrator'],P47:['administrator'],P48:['administrator'],P49:['administrator'],P50:['administrator'],P51:['administrator'],P52:['administrator'],
 }
-let repo=createMemoryRepository();let app=createApp(repo)
-beforeEach(()=>{repo=createMemoryRepository();app=createApp(repo)})
-async function login(id:string){const agent=request.agent(app);expect((await agent.post('/api/auth/sign-in').send({emailOrId:id,password:'Accs@Qcu2026!'})).status).toBe(200);return agent}
+let repo=createMemoryRepository();let authStore=createMemoryAuthStore();let app=createApp(repo,{authStore})
+beforeEach(()=>{repo=createMemoryRepository();authStore=createMemoryAuthStore();app=createApp(repo,{authStore})})
+async function login(id:string){
+ // The seeded secretary stays inactive until the Dean activates it (see accounts.test.ts). Switch it on with a stored password here so this matrix stays quick.
+ if(id==='QCU-SECRETARY'){repo.read().users.find(u=>u.id===id)!.active=true;await authStore.update(data=>{data.credentials[id]=hashPassword('Accs@Qcu2026!')})}
+ const agent=request.agent(app);expect((await agent.post('/api/auth/sign-in').send({emailOrId:id,password:'Accs@Qcu2026!'})).status).toBe(200);return agent}
 describe('ALL-01-E/J and ALL-05-I route matrix',()=>{
  for(const[pageId,allowed]of Object.entries(grants))for(const[role,id]of Object.entries(accounts))it(`${pageId} × ${role}: ${allowed.includes(role)?'allowed within scope':'denied'} (ALL-01-B)`,async()=>{const agent=await login(id);const result=await agent.get(`/api/pages/${pageId}`);expect(result.status).toBe(allowed.includes(role)?200:403);if(result.status===403)expect(result.body).toEqual({error:"This page isn't available to your role.",code:'FORBIDDEN'})})
 })

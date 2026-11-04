@@ -41,8 +41,11 @@ let cachedDefaultHash: string | undefined
 export const defaultHash = () => (cachedDefaultHash ??= hashPassword(defaultPassword))
 
 export type AuthData = {
+  /** Accounts created after the seed, and changes to seeded ones: a record here replaces the seeded user with the same ID. */
   users: User[]
   credentials: Record<string, string>
+  /** Faculty IDs who advise each year level ("1" to "4"). A student's adviser follows from their year and program. */
+  advisorAssignments: Record<string, string[]>
 }
 
 /** `update` runs `mutate` on a fresh copy and persists it; if `mutate` throws, nothing is saved. */
@@ -51,11 +54,11 @@ export interface AuthStore {
   update(mutate: (data: AuthData) => void): Promise<void>
 }
 
-const empty = (): AuthData => ({ users: [], credentials: {} })
+const empty = (): AuthData => ({ users: [], credentials: {}, advisorAssignments: {} })
 // Reset codes moved to ccs_identity; a leftover `resets` key in an old object is dropped on the next write.
 const parse = (text: string): AuthData => {
-  const { users, credentials } = { ...empty(), ...JSON.parse(text) } as AuthData
-  return { users, credentials }
+  const { users, credentials, advisorAssignments } = { ...empty(), ...JSON.parse(text) } as AuthData
+  return { users, credentials, advisorAssignments }
 }
 
 function simpleStore(read: () => AuthData, write: (data: AuthData) => void): AuthStore {
@@ -97,8 +100,10 @@ export function createFileAuthStore(file: string): AuthStore {
 
 const statusOf = (error: unknown) => (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode
 
-export function createS3AuthStore(bucket: string, key: string): AuthStore {
-  const s3 = new S3Client({})
+// A write that loses the ETag race reloads and runs `mutate` again, up to this many times in all.
+const writeAttempts = 5
+
+export function createS3AuthStore(bucket: string, key: string, s3 = new S3Client({})): AuthStore {
   let cache = { etag: undefined as string | undefined, data: empty(), checkedAt: 0 }
 
   // Conditional GET: a 304 keeps the cached copy; a missing object is an empty store.
@@ -136,8 +141,11 @@ export function createS3AuthStore(bucket: string, key: string): AuthStore {
           cache = { etag: response.ETag, data: next, checkedAt: Date.now() }
           return
         } catch (error) {
-          // Someone else wrote first: reload and retry once.
-          if (attempt === 0 && (statusOf(error) === 412 || statusOf(error) === 409)) continue
+          // Someone else wrote first: reload and run `mutate` on their version, after a short random pause.
+          if (attempt + 1 < writeAttempts && (statusOf(error) === 412 || statusOf(error) === 409)) {
+            await new Promise((resolve) => setTimeout(resolve, 20 * (attempt + 1) + Math.random() * 60))
+            continue
+          }
           throw error
         }
       }
