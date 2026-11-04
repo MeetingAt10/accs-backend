@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
 import { allowedPages, canActCase, canAudience, canFacultyResult, canPage, canPublish, canReach, canSpace, canStudentRecord, canThread, canViewCase, hasPermission, hasRole, isOrganizationMember, pageTitles, permissionRoles, permissions, scopeLabel } from './access.js'
-import type { Assignment, Cycle, Database, Message, Post, Report, Repository, Stage, Thread } from './store.js'
+import type { Assignment, Cycle, Database, Message, Post, Report, Repository, Stage, Thread, UnitOfWork } from './store.js'
 
 export class ApiError extends Error { constructor(public status: number, message: string, public code = 'FORBIDDEN') { super(message) } }
 export const unavailable = () => new ApiError(404, "This record isn't available to you.", 'UNAVAILABLE')
@@ -83,8 +83,8 @@ function programResultCriteria(db:Database,program?:string,cycleId?:string) {
     }
   })
 }
-function audit(repo:Repository,user:User,action:string,module:string,reference:string,purpose?:string,reason?:string) { const entry={id:repo.nextId('AUDIT'),at:now(),actorId:user.id,action,module,reference,result:'Recorded',...(purpose?{purpose}:{}),...(reason?{reason}:{})};repo.read().audit.push(entry);return entry }
-function notify(repo:Repository,recipientId:string,kind:string,pageId:string,recordId?:string) {
+function audit(repo:UnitOfWork,user:User,action:string,module:string,reference:string,purpose?:string,reason?:string) { const entry={id:repo.nextId('AUDIT'),at:now(),actorId:user.id,action,module,reference,result:'Recorded',...(purpose?{purpose}:{}),...(reason?{reason}:{})};repo.read().audit.push(entry);return entry }
+function notify(repo:UnitOfWork,recipientId:string,kind:string,pageId:string,recordId?:string) {
   const db = repo.read()
   const preference = db.settings[recipientId]?.priorities[kind]
   if (preference === 'muted') return
@@ -159,7 +159,7 @@ function validateFeedScope(db: Database, user: User, scope?: string) {
 function spaceThreadId(db: Database, user: User, spaceId: string) {
   return db.threads.find(thread => thread.spaceId === spaceId && canThread(db, user, thread))?.id
 }
-function syncPostEvent(repo: Repository, post: Post) {
+function syncPostEvent(repo: UnitOfWork, post: Post) {
   const db = repo.read()
   const previous = db.events.find(event => event.postId === post.id)
   db.events = db.events.filter(event => event.postId !== post.id)
@@ -180,7 +180,7 @@ function syncPostEvent(repo: Repository, post: Post) {
     contact: post.eventContact,
   })
 }
-function notifyAnnouncementMembers(repo: Repository, post: Post) {
+function notifyAnnouncementMembers(repo: UnitOfWork, post: Post) {
   if (post.kind !== 'announcement' || !post.notifyMembers) return
   const db = repo.read()
   const [kind, id] = post.audience.split(':')
@@ -196,7 +196,7 @@ function notifyAnnouncementMembers(repo: Repository, post: Post) {
     }
   }
 }
-function queuePostReview(repo: Repository, post: Post) {
+function queuePostReview(repo: UnitOfWork, post: Post) {
   if (!/\b(idiot|stupid|hate)\b/i.test(post.body)) return
   const db = repo.read()
   if (db.moderation.some(item => item.itemId === post.id && item.status === 'Pending')) return
@@ -216,7 +216,12 @@ function queuePostReview(repo: Repository, post: Post) {
 }
 function visibleConsultations(db:Database,user:User){return db.consultations.filter(c=>c.studentId===user.id&&hasRole(user,'student')||c.facultyId===user.id&&hasRole(user,'professor'))}
 function visibleSlots(db:Database,user:User){return db.slots.filter(s=>s.facultyId===user.id||hasRole(user,'dean','chair')||canReach(db,user,find(db.users,s.facultyId)))}
-export function getPage(repo:Repository,user:User,pageId:string,query:PageQuery={},internalRole=false) {
+// P34 records every opening of a student record in the audit trail, so that one read has to commit.
+export function getPage(repo:Repository,user:User,pageId:string,query:PageQuery={}) {
+  const work=(unit:UnitOfWork)=>readPage(unit,user,pageId,query)
+  return pageId==='P34'?repo.transact(work):repo.view(work)
+}
+function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},internalRole=false) {
   if(!canPage(user,pageId))throw new ApiError(403,"This page isn't available to your role.")
   const db=repo.read(); const data:Record<string,unknown>={}; const ownReports=db.reports.filter(r=>r.ownerId===user.id);const cases=db.reports.filter(r=>canViewCase(user,r));
   if (pageId === 'P04') validateFeedScope(db, user, query.scope)
@@ -235,7 +240,7 @@ export function getPage(repo:Repository,user:User,pageId:string,query:PageQuery=
       if(hasRole(user,'administrator'))data.redirect='/admin'
       const consultations=visibleConsultations(db,user);const assignments=db.assignments.filter(a=>a.evaluatorId===user.id&&['Published','Closed'].includes(find(db.cycles,a.cycleId).status))
       data.stats=[{label:hasRole(user,'student')?'Active reports':'Reports in your queue',value:(hasRole(user,'student')?ownReports:cases).filter(r=>!['Resolved','Closed'].includes(r.status)).length,note:'Reports you can see'},{label:'Consultations',value:consultations.filter(c=>!['Completed','Declined','Cancelled'].includes(c.status)).length,note:'Requests and booked times'},{label:'Evaluations due',value:assignments.filter(a=>!a.submittedAt).length,note:'Forms assigned to you'},{label:'Unread updates',value:db.notifications.filter(n=>n.recipientId===user.id&&!n.read).length,note:'In your notifications'}]
-      Object.assign(data,{announcements:posts.filter(p=>p.kind==='announcement').slice(0,3).map(p=>postView(db,p,user)),posts:posts.slice(0,3).map(p=>postView(db,p,user)),events:visibleEvents(db,user), reports:hasRole(user,'student')?ownReports.slice(0,4).map(r=>reportView(db,r,user,true)):[],cases:cases.slice(0,4).map(r=>reportView(db,r,user)),consultations:consultations.map(c=>consultationView(db,c)),assignments:assignments.map(a=>assignmentView(db,a)),todos:db.todos.filter(t=>t.ownerId===user.id),notifications:db.notifications.filter(n=>n.recipientId===user.id).slice(0,5),sections:spaces.map(s=>({id:s.id,title:s.title,program:s.program,subject:s.subject})),roleSections:internalRole?[]:user.roles.map(role=>({role,title:roleLabels[role],description:scopeLabel({...user,roles:[role]}),...getPage(repo,{...user,roles:[role]},'P03',{},true).data}))});break}
+      Object.assign(data,{announcements:posts.filter(p=>p.kind==='announcement').slice(0,3).map(p=>postView(db,p,user)),posts:posts.slice(0,3).map(p=>postView(db,p,user)),events:visibleEvents(db,user), reports:hasRole(user,'student')?ownReports.slice(0,4).map(r=>reportView(db,r,user,true)):[],cases:cases.slice(0,4).map(r=>reportView(db,r,user)),consultations:consultations.map(c=>consultationView(db,c)),assignments:assignments.map(a=>assignmentView(db,a)),todos:db.todos.filter(t=>t.ownerId===user.id),notifications:db.notifications.filter(n=>n.recipientId===user.id).slice(0,5),sections:spaces.map(s=>({id:s.id,title:s.title,program:s.program,subject:s.subject})),roleSections:internalRole?[]:user.roles.map(role=>({role,title:roleLabels[role],description:scopeLabel({...user,roles:[role]}),...readPage(repo,{...user,roles:[role]},'P03',{},true).data}))});break}
     case'P04':Object.assign(data,{posts:posts.map(p=>postView(db,p,user)),spaces:spaces.map(s=>({id:s.id,title:s.title})),canPost:hasPermission(user,'post.create')});break
     case 'P05':
       Object.assign(data, {
@@ -545,7 +550,7 @@ export function getPage(repo:Repository,user:User,pageId:string,query:PageQuery=
   return JSON.parse(JSON.stringify({pageId,title:pageTitles[pageId],scope:scopeLabel(user),sampleData:true,data})) as {pageId:string;title:string;scope:string;sampleData:true;data:Record<string,unknown>}
 }
 
-function ensureCycleAssignments(repo:Repository,cycle:Cycle){
+function ensureCycleAssignments(repo:UnitOfWork,cycle:Cycle){
   const db=repo.read()
   const add=(evaluatorId:string,facultyId:string,relation:string,subject:string)=>{if(!db.assignments.some(a=>a.cycleId===cycle.id&&a.evaluatorId===evaluatorId&&a.facultyId===facultyId&&a.relation===relation))db.assignments.push({id:repo.nextId('EVAL'),evaluatorId,facultyId,cycleId:cycle.id,relation,subject})}
   for(const student of db.users.filter(u=>hasRole(u,'student'))){if(cycle.forms.includes('student'))for(const facultyId of [...new Set(db.spaces.filter(s=>s.studentIds.includes(student.id)).flatMap(s=>s.professorIds))])add(student.id,facultyId,'Student to faculty',student.program??'CCS')}
@@ -598,7 +603,8 @@ const actionPages: Record<string, string[]> = {
   updatePermission: ['P48'],
   moderate: ['P50'],
 }
-export function performAction(repo:Repository,user:User,pageId:string,request:ActionRequest){
+export function performAction(repo:Repository,user:User,pageId:string,request:ActionRequest){return repo.transact(unit=>runAction(unit,user,pageId,request))}
+function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest){
   if(!canPage(user,pageId)||!actionPages[request.action]?.includes(pageId))throw deny()
   const db=repo.read();const id=request.recordId;let record:unknown;let message='Changes saved.'
   const getOwnReport=()=>{const r=find(db.reports,id);if(r.ownerId!==user.id||!hasRole(user,'student'))throw unavailable();return r}
@@ -743,7 +749,7 @@ export function performAction(repo:Repository,user:User,pageId:string,request:Ac
       message = 'Conversation marked as read.'
       break
     }
-    case'markNotification':case'openNotification':{const n=find(db.notifications,id);if(n.recipientId!==user.id)throw unavailable();if(request.action==='openNotification'){actionPayloads.openNotification.parse(request.payload);getPage(repo,user,n.pageId,n.recordId?{id:n.recordId}:{});n.read=true;record={pageId:n.pageId,recordId:n.recordId}}else n.read=actionPayloads.markNotification.parse(request.payload).read;message='Notification updated.';break}
+    case'markNotification':case'openNotification':{const n=find(db.notifications,id);if(n.recipientId!==user.id)throw unavailable();if(request.action==='openNotification'){actionPayloads.openNotification.parse(request.payload);readPage(repo,user,n.pageId,n.recordId?{id:n.recordId}:{});n.read=true;record={pageId:n.pageId,recordId:n.recordId}}else n.read=actionPayloads.markNotification.parse(request.payload).read;message='Notification updated.';break}
     case'markAllNotifications':actionPayloads.markAllNotifications.parse(request.payload);db.notifications.filter(n=>n.recipientId===user.id).forEach(n=>{n.read=true});message='Notifications marked as read.';break
     case'assistantAsk':{requirePermission(user,'assistant.use');const p=actionPayloads.assistantAsk.parse(request.payload);const started=Date.now();record=assistantAnswer(db,user,p.question);db.telemetry.push({at:now(),category:'assistant',durationMs:Date.now()-started,success:true});message='Answer ready.';break}
     case'submitEvaluation':{requirePermission(user,'evaluation.fill');const p=actionPayloads.submitEvaluation.parse(request.payload);const a=find(db.assignments,id);if(a.evaluatorId!==user.id)throw unavailable();const cycle=find(db.cycles,a.cycleId);if(cycle.status!=='Published')throw conflict('This evaluation is not open.');if(a.submittedAt)throw conflict('This evaluation has already been submitted.');for(const q of cycle.questions){const value=p.answers[q.id];if(q.required&&(value===undefined||value===''))throw new ApiError(400,'Answer every required question.','VALIDATION_ERROR');if(value!==undefined&&(q.type==='rating'&&typeof value!=='number'||q.type==='text'&&typeof value!=='string'))throw new ApiError(400,'One answer is in the wrong format.','VALIDATION_ERROR')}if(Object.keys(p.answers).some(key=>!cycle.questions.some(q=>q.id===key)))throw new ApiError(400,'One answer does not belong to this form.','VALIDATION_ERROR');a.answers=p.answers;a.comment=p.comment;a.submittedAt=now();record=assignmentView(db,a,true);message='Evaluation submitted.';break}
@@ -752,7 +758,7 @@ export function performAction(repo:Repository,user:User,pageId:string,request:Ac
     case'cycleAction':{requirePermission(user,'evaluation.configure');const p=actionPayloads.cycleAction.parse(request.payload);const c=find(db.cycles,id);const next:Record<string,string>={Draft:'In review','In review':'Published',Published:'Closed'};if(next[c.status]!==p.status)throw conflict('The cycle cannot move to that status.');if(!c.title||!c.instructions||!c.questions.length||!c.forms.length||c.closes<c.opens)throw new ApiError(400,'Add a name, instructions, dates, forms, and questions first.','VALIDATION_ERROR');c.status=p.status;if(['In review','Published'].includes(p.status))ensureCycleAssignments(repo,c);if(p.status==='Published')for(const recipientId of [...new Set(db.assignments.filter(a=>a.cycleId===c.id).map(a=>a.evaluatorId))])notify(repo,recipientId,'evaluation','P26');if(p.publishResults&&p.status==='Closed')c.resultsPublished=true;audit(repo,user,'Evaluation cycle changed','evaluations',c.id);record=c;message='Cycle updated.';break}
     case'reviewQuestions':{requirePermission(user,'evaluation.review');const p=actionPayloads.reviewQuestions.parse(request.payload);const c=find(db.cycles,id);if(!db.assignments.some(a=>a.cycleId===c.id&&a.facultyId===user.id))throw unavailable();if(c.status!=='In review'||c.reviews.some(r=>r.userId===user.id))throw conflict('There are no questions to review right now.');c.reviews.push({userId:user.id,...p,at:now()});record={id:c.id,review:c.reviews.at(-1)};message='Review sent.';break}
     case'saveFollowUp':{requireRole(user,'chair','dean');const p=actionPayloads.saveFollowUp.parse(request.payload);const faculty=find(db.users,id);if(!canFacultyResult(user,faculty))throw unavailable();db.followUps.push({facultyId:faculty.id,actorId:user.id,note:p.note,at:now()});audit(repo,user,'Evaluation follow-up recorded','evaluations',faculty.id);message='Follow-up note saved.';break}
-    case'openRecord':{const p=actionPayloads.openRecord.parse(request.payload);record=getPage(repo,user,'P34',{id,...p}).data.record;message='Record opened and logged.';break}
+    case'openRecord':{const p=actionPayloads.openRecord.parse(request.payload);record=readPage(repo,user,'P34',{id,...p}).data.record;message='Record opened and logged.';break}
     case'reviewGoodMoral':{requirePermission(user,'goodmoral.review');const p=actionPayloads.reviewGoodMoral.parse(request.payload);const student=find(db.users,id);if(!canStudentRecord(db,user,student))throw unavailable();const review={studentId:student.id,...p,actorId:user.id,at:now()};db.goodMoral=db.goodMoral.filter(g=>g.studentId!==student.id);db.goodMoral.push(review);audit(repo,user,'Good Moral prerequisite reviewed','records',student.studentId??student.id);record=review;message='Review saved.';break}
     case'applyRestriction':{requireRole(user,'administrator');const p=actionPayloads.applyRestriction.parse(request.payload);reasonOf(request);const student=find(db.users,p.studentId);if(!hasRole(student,'student'))throw unavailable();if(p.until<now().slice(0,10))throw new ApiError(400,'The end date must be today or later.','VALIDATION_ERROR');const r={id:repo.nextId('RST'),...p,starts:now(),actorId:user.id,active:true};db.restrictions.push(r);audit(repo,user,'Restriction applied','restrictions',r.id);notify(repo,student.id,'restriction','P36');record=r;message='Selected features paused.';break}
     case'liftRestriction':{requireRole(user,'administrator');actionPayloads.liftRestriction.parse(request.payload);reasonOf(request);const r=find(db.restrictions,id);if(!r.active||r.until<now().slice(0,10))throw conflict('This restriction has already ended.');r.active=false;audit(repo,user,'Restriction lifted','restrictions',r.id);notify(repo,r.studentId,'restriction','P36');record=r;message='Restriction lifted.';break}

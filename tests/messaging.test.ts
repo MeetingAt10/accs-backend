@@ -2,10 +2,10 @@ import request from 'supertest'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { createApp } from '../src/app.js'
-import { createMemoryRepository, type Repository } from '../src/store.js'
+import { createMemoryRepository, type MemoryRepository } from '../src/store.js'
 
 describe('message read state and muted notifications', () => {
-  let repository: Repository
+  let repository: MemoryRepository
   let app: ReturnType<typeof createApp>
 
   beforeEach(() => {

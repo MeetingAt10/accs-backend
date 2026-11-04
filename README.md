@@ -16,6 +16,12 @@ pnpm build && pnpm start
 
 System concept not defined yet.
 
+## Storage boundary
+
+Routes and domain rules reach data only through `Repository` (`src/store.ts`). `view` runs read-only work: its changes are discarded and its result is detached. `transact` is all or nothing: if the work throws, nothing it changed is kept. The work itself stays synchronous, so a backend does its I/O before and after it, and one unit of work is never interleaved with another. `GET /api/pages/P34` uses `transact` because opening a student record writes an audit entry.
+
+The only implementation today is `createMemoryRepository`, so domain data is still per Lambda instance and lost on a cold start. Domains move to DynamoDB behind this interface one at a time.
+
 ## Accounts and sign-in
 
 | Endpoint | Body | Result |
