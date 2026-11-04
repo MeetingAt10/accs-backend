@@ -67,9 +67,41 @@ export type Database = {
   sequence: number; users: User[]; spaces: Space[]; organizations: Organization[]; posts: Post[]; threads: Thread[]; slots: Slot[]; consultations: Consultation[]; reports: Report[]; drafts: Record<string, Record<string, unknown>>; todos: { id: string; ownerId: string; title: string; date: string; done: boolean }[];
   events: Event[]; cycles: Cycle[]; assignments: Assignment[]; restrictions: Restriction[]; referrals: Referral[]; offenses: { id: string; studentId: string; level: number; summary: string; decisionReference: string; actorRole: string; at: string; status: string }[]; goodMoral: { studentId: string; status: string; decisionSource: string; notes: string; actorId: string; at: string }[]; clusters: { id: string; program: string; title: string; reportIds: string[]; similarity: number; supporting: string; dissenting: string; phrases: string[]; status: string; history: { at: string; actorId: string; decision: string; reason: string }[] }[]; notifications: Notification[]; audit: Audit[]; moderation: Moderation[]; settings: Record<string, { theme: string; density: string; priorities: Record<string, string> }>; permissionOverrides: Record<string, boolean>; telemetry: { at: string; category: string; durationMs: number; success: boolean }[]; followUps: { facultyId: string; actorId: string; note: string; at: string }[];
 }
-export interface Repository { read(): Database; nextId(prefix: string): string }
-// One process owns this in-memory state. Replace this repository when persistent storage is chosen.
-export function createMemoryRepository(): Repository { const data = seed(); return { read: () => data, nextId: (prefix) => `${prefix}-${String(++data.sequence).padStart(4, '0')}` } }
+/** What domain rules see while they run. They stay synchronous, so one unit of work is never interleaved with another. */
+export interface UnitOfWork { read(): Database; nextId(prefix: string): string }
+/**
+ * The storage boundary. A backend does its I/O around the work: it loads, runs the work, then commits.
+ * - `view`: read-only. Anything the work changes is discarded, and what it returns is detached from the store.
+ * - `transact`: all or nothing. If the work throws, nothing it changed is kept.
+ */
+export interface Repository {
+  view<T>(work: (unit: UnitOfWork) => T): Promise<T>
+  transact<T>(work: (unit: UnitOfWork) => T): Promise<T>
+}
+/** Adds direct access to the live state, for tests and seeding. Application code goes through `view` and `transact`. */
+export interface MemoryRepository extends Repository { read(): Database }
+// One process owns this in-memory state, so on Lambda it is per instance and lost on a cold start. Domains move
+// to DynamoDB behind `Repository` one at a time (accs-architecture adr/0004).
+export function createMemoryRepository(): MemoryRepository {
+  const data = seed()
+  const nextId = (prefix: string) => `${prefix}-${String(++data.sequence).padStart(4, '0')}`
+  return {
+    read: () => data,
+    view: async (work) => {
+      const copy = structuredClone(data)
+      return work({ read: () => copy, nextId: () => { throw new Error('A read-only view cannot allocate IDs.') } })
+    },
+    transact: async (work) => {
+      const before = structuredClone(data)
+      try {
+        return structuredClone(work({ read: () => data, nextId }))
+      } catch (error) {
+        Object.assign(data, before)
+        throw error
+      }
+    },
+  }
+}
 
 function user(id: string, name: string, roles: Role[], extra: Partial<User> = {}): User { return { id, name, email: `${id.toLowerCase().replaceAll('qcu-', '').replaceAll('-', '.')}@qcu.edu.ph`, roles, restrictions: [], title: roles.includes('student') ? 'CCS student' : 'CCS personnel', bio: roles.includes('student') ? 'Student, QCU College of Computer Studies.' : 'QCU College of Computer Studies.', education: roles.includes('student') ? 'Quezon City University' : 'Quezon City University, College of Computer Studies', officeHours: 'By appointment. Request a time under Consultations.', spaceIds: [], organizationIds: [], active: true, ...extra } }
 const at = '2026-10-20T02:00:00.000Z'
