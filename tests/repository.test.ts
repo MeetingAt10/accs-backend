@@ -2,7 +2,8 @@ import request from 'supertest'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { createApp } from '../src/app.js'
-import { createMemoryAuthStore } from '../src/auth.js'
+import { createMemoryAuthStore, hashPassword } from '../src/auth.js'
+import type { User } from '../src/schemas.js'
 import { createMemoryRepository, type MemoryRepository, type Repository } from '../src/store.js'
 
 const password = 'Accs@Qcu2026!'
@@ -119,12 +120,11 @@ describe('API over the repository boundary', () => {
       expect(repo.read().consultations.filter(consultation => consultation.slotId === 'SLOT-0101')).toHaveLength(1)
     })
 
-    it('merges a registered user once when requests arrive together', async () => {
+    it('merges an auth-store user once when requests arrive together', async () => {
       const authStore = createMemoryAuthStore()
-      const shared = createApp(withLatency(repo), { authStore })
-      const body = { fullName: 'New Student', email: 'new.student@qcu.edu.ph', identifier: '26-0999', role: 'student', program: 'BSIT', yearLevel: 3, section: 'A', password: 'N3w!Passw0rdXyz' }
-      const registered = await request(shared).post('/api/auth/register').send(body)
-      expect(registered.status).toBe(201)
+      const body = { email: 'new.student@qcu.edu.ph', password: 'N3w!Passw0rdXyz' }
+      const added: User = { id: 'USR-NEW', name: 'New Student', email: body.email, roles: ['student'], program: 'BSIT', section: 'A', year: 3, studentId: '26-0999', restrictions: [], title: '', bio: '', education: '', officeHours: '', spaceIds: ['SPACE-IT-A'], organizationIds: [], active: true }
+      await authStore.update(data => { data.users.push(added); data.credentials[added.id] = hashPassword(body.password) })
       // A second instance has never seen this user, so concurrent requests race to merge them.
       const fresh = createMemoryRepository()
       const other = createApp(withLatency(fresh), { authStore })
@@ -132,7 +132,7 @@ describe('API over the repository boundary', () => {
       expect(signIns.map(response => response.status)).toEqual([200, 200, 200, 200, 200])
       expect(fresh.read().users.filter(user => user.email === body.email)).toHaveLength(1)
       const space = fresh.read().spaces.find(entry => entry.id === 'SPACE-IT-A')!
-      expect(space.studentIds.filter(id => id === registered.body.user.id)).toHaveLength(1)
+      expect(space.studentIds.filter(id => id === added.id)).toHaveLength(1)
     })
   })
 })

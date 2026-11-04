@@ -1,4 +1,4 @@
-import { randomBytes, randomInt } from 'node:crypto'
+import { randomInt } from 'node:crypto'
 import cors from 'cors'
 import express, { type ErrorRequestHandler, type Request, type Response } from 'express'
 import helmet from 'helmet'
@@ -6,7 +6,7 @@ import { z } from 'zod'
 
 import { type AuthData, type AuthStore, createAuthStore, defaultHash, hashPassword, verifyPassword } from './auth.js'
 import { env, onLambda, tableName } from './env.js'
-import { actionRequestSchema, actionResponseSchema, changePasswordSchema, emptyBodySchema, errorResponseSchema, forgotPasswordSchema, healthResponseSchema, idParamsSchema, pageQuerySchema, pageResponseSchema, registerSchema, resetPasswordSchema, sessionResponseSchema, signInSchema, type User } from './schemas.js'
+import { actionRequestSchema, actionResponseSchema, changePasswordSchema, emptyBodySchema, errorResponseSchema, forgotPasswordSchema, healthResponseSchema, idParamsSchema, pageQuerySchema, pageResponseSchema, resetPasswordSchema, sessionResponseSchema, signInSchema, type User } from './schemas.js'
 import { hasPermission } from './access.js'
 import { ApiError, getPage, performAction, refreshRestrictions, sessionView, unavailable } from './services.js'
 import { createResetStore, resetPolicy, type ResetStore } from './resets.js'
@@ -57,14 +57,6 @@ export function createApp(repository:Repository=createMemoryRepository(),options
   const tooMany=()=>new ApiError(429,'Too many attempts. Try again in 15 minutes.','TOO_MANY_ATTEMPTS')
   const sessionOut=async(res:Response,user:User,status=200)=>send(res,sessionResponseSchema,sessionView(await repository.view(unit=>refreshRestrictions(unit.read(),user))),status)
   app.use('/api',async(_req,_res,next)=>{await syncUsers();next()})
-  app.post('/api/auth/register',async(req,res)=>{
-    const body=registerSchema.parse(req.body);const email=body.email.toLowerCase();const student=body.role==='student'
-    const {existing,spaces}=await repository.view(unit=>{const db=unit.read();return {existing:db.users,spaces:student?db.spaces.filter(s=>s.program===body.program&&s.section===body.section):[]}})
-    // The employee ID is kept in studentId too: it is the only identifier field a user has.
-    const created:User={id:`USR-${randomBytes(5).toString('hex').toUpperCase()}`,name:body.fullName,email,roles:[body.role],...(student?{program:body.program,section:body.section,year:body.yearLevel,adviserId:spaces[0]?.professorIds[0]}:{}),studentId:body.identifier,restrictions:[],title:'',bio:'',education:'',officeHours:'',spaceIds:spaces.map(s=>s.id),organizationIds:[],active:true}
-    await authStore.update(data=>{const taken=[...existing,...data.users];if(taken.some(u=>u.email.toLowerCase()===email))throw new ApiError(409,'An account with this email already exists.','CONFLICT');if(taken.some(u=>u.studentId?.toLowerCase()===body.identifier.toLowerCase()))throw new ApiError(409,'An account with this ID already exists.','CONFLICT');data.users.push(created);data.credentials[created.id]=hashPassword(body.password)})
-    await syncUsers();await startSession(req,res,created);await sessionOut(res,created,201)
-  })
   app.post('/api/auth/sign-in',async(req,res)=>{
     const {emailOrId,password,remember}=signInSchema.parse(req.body);const key=emailOrId.trim().toLowerCase()
     if(blocked(key))throw tooMany()
