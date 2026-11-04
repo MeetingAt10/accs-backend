@@ -5,8 +5,8 @@ import type { Assignment, Cycle, Database, Message, Post, Report, Repository, St
 
 export class ApiError extends Error { constructor(public status: number, message: string, public code = 'FORBIDDEN') { super(message) } }
 export const unavailable = () => new ApiError(404, "This record isn't available to you.", 'UNAVAILABLE')
-const deny = () => new ApiError(403, "This action isn't available to your role.", 'FORBIDDEN')
-const conflict = (message: string) => new ApiError(409, message, 'CONFLICT')
+export const deny = () => new ApiError(403, "This action isn't available to your role.", 'FORBIDDEN')
+export const conflict = (message: string) => new ApiError(409, message, 'CONFLICT')
 const now = () => new Date().toISOString()
 const offices: Record<Stage,string> = { adviser:'Adviser',chair:'Program Chair',dean:'Dean',guidance:'Guidance Office',osas:'OSAS',executive:"President's Office" }
 const stageRoles: Record<Stage,string> = { adviser:'professor',chair:'chair',dean:'dean',guidance:'guidance',osas:'osas',executive:'president' }
@@ -525,7 +525,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
       }
       break
     }
-    case'P37':data.people=db.users.filter(u=>!hasRole(u,'student','organization')&&match(`${u.name} ${u.office} ${u.program} ${u.email}`)).map(person);break
+    case'P37':data.people=db.users.filter(u=>u.active&&!hasRole(u,'student','organization')&&match(`${u.name} ${u.office} ${u.program} ${u.email}`)).map(person);break
     case'P38':{const u=pick(db.users.filter(u=>u.active),query.id);if(u){const {studentId: _studentId,...profile}=person(refreshRestrictions(db,u));data.record=profile}break}
     case'P39':data.record=person(user);break
     case'P40':data.notifications=db.notifications.filter(n=>n.recipientId===user.id);break
@@ -603,7 +603,14 @@ const actionPages: Record<string, string[]> = {
   updatePermission: ['P48'],
   moderate: ['P50'],
 }
-export function performAction(repo:Repository,user:User,pageId:string,request:ActionRequest){return repo.transact(unit=>runAction(unit,user,pageId,request))}
+/** The fields `updateRoles` changes, as the auth store keeps them. */
+export type AccountChange = Pick<User,'id'|'roles'|'active'> & Partial<Pick<User,'program'|'section'>>
+// Accounts live in the auth store, shared by every instance, so a role change is saved there once the action has committed.
+export async function performAction(repo:Repository,user:User,pageId:string,request:ActionRequest,saveAccount?:(change:AccountChange)=>Promise<void>){
+  const result=await repo.transact(unit=>runAction(unit,user,pageId,request))
+  if(request.action==='updateRoles')await saveAccount?.(result.record as AccountChange)
+  return result
+}
 function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest){
   if(!canPage(user,pageId)||!actionPages[request.action]?.includes(pageId))throw deny()
   const db=repo.read();const id=request.recordId;let record:unknown;let message='Changes saved.'
