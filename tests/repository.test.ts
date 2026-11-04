@@ -34,7 +34,7 @@ describe('memory repository contract', () => {
     expect(repo.read().todos.at(-1)?.title).toBe('kept')
   })
 
-  it('rolls back every change when the work throws, including allocated IDs', async () => {
+  it('rolls back every change when the work throws', async () => {
     const before = structuredClone(repo.read())
     await expect(repo.transact(unit => {
       const db = unit.read()
