@@ -26,7 +26,6 @@ The only implementation today is `createMemoryRepository`, so domain data is sti
 
 | Endpoint | Body | Result |
 |---|---|---|
-| `POST /api/auth/register` | `{ fullName, email, identifier, role: 'student' \| 'professor' \| 'staff', program?, yearLevel?, section?, password }` | 201 + session cookie; 409 `CONFLICT` on a taken email or ID |
 | `POST /api/auth/sign-in` | `{ emailOrId, password, remember? }` | 200 + session cookie; 401 `INVALID_CREDENTIALS`; 429 `TOO_MANY_ATTEMPTS` after 5 failures in 15 minutes |
 | `POST /api/auth/forgot-password` | `{ emailOrId }` | Always 200, same answer for unknown accounts. Outside production issues a 6-digit code and logs it; in production issues nothing until email delivery exists |
 | `POST /api/auth/reset-password` | `{ emailOrId, code, password }` | 200 and signs out every session; 400 `INVALID_CODE` |
@@ -34,9 +33,9 @@ The only implementation today is `createMemoryRepository`, so domain data is sti
 | `POST /api/auth/change-password` | `{ currentPassword, password }` (signed in) | 200; 400 `INVALID_CREDENTIALS` |
 | `POST /api/auth/sign-out` | `{}` | Clears the cookie |
 
-Passwords are hashed with `crypto.scryptSync` and need 10+ characters with upper and lower case, a number, and a symbol. Students must give program, year level, and section. Privileged roles are granted by an administrator, never self-registered.
+Passwords are hashed with `crypto.scryptSync` and need 10+ characters with upper and lower case, a number, and a symbol. Accounts are not self-registered; they come from the secretary or an MIS import.
 
-Registered accounts and password hashes live in the auth store (`src/auth.ts`): an S3 object when `AUTH_STORE_BUCKET` is set (Lambda; `AUTH_STORE_KEY`, default `auth-store.json`), otherwise a JSON file at `AUTH_STORE_FILE` (default `/tmp/accs-auth-store.json`). Tests use an in-memory store. Seeded pilot accounts (`QCU-STU-IT-A`, `QCU-ADMIN`, …) sign in with their ID or email and `Accs@Qcu2026!` until changed; rotate or disable this shared password before real users join.
+Accounts added to the auth store and password hashes live in the auth store (`src/auth.ts`): an S3 object when `AUTH_STORE_BUCKET` is set (Lambda; `AUTH_STORE_KEY`, default `auth-store.json`), otherwise a JSON file at `AUTH_STORE_FILE` (default `/tmp/accs-auth-store.json`). Tests use an in-memory store. Seeded pilot accounts (`QCU-STU-IT-A`, `QCU-ADMIN`, …) sign in with their ID or email and `Accs@Qcu2026!` until changed; rotate or disable this shared password before real users join.
 
 ## Password reset codes
 

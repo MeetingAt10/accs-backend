@@ -28,25 +28,6 @@ export const signInSchema = z.object({ emailOrId, password: z.string().min(1).ma
 export const forgotPasswordSchema = z.object({ emailOrId }).strict()
 export const resetPasswordSchema = z.object({ emailOrId, code: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code.'), password }).strict()
 export const changePasswordSchema = z.object({ currentPassword: z.string().min(1).max(200), password }).strict()
-// Privileged roles are granted by an administrator, so they are not selectable here.
-export const registerSchema = z.object({
-  fullName: z.string().trim().min(2).max(100),
-  email: z.string().trim().max(200).pipe(z.email()),
-  identifier: z.string().trim(),
-  role: z.enum(['student', 'professor', 'staff']),
-  program: z.enum(programs).optional(),
-  yearLevel: z.number().int().min(1).max(4).optional(),
-  section: z.enum(['A', 'B', 'C', 'D', 'E', 'F']).optional(),
-  password,
-}).strict().superRefine((value, context) => {
-  const student = value.role === 'student'
-  if (!(student ? /^\d{2}-\d{4}$/ : /^(\d{2}|\d{4})-\d{4}$/).test(value.identifier)) {
-    context.addIssue({ code: 'custom', path: ['identifier'], message: student ? 'Use the format 24-1234.' : 'Use the format 24-1234 or 2024-1234.' })
-  }
-  if (student) for (const field of ['program', 'yearLevel', 'section'] as const) {
-    if (value[field] === undefined) context.addIssue({ code: 'custom', path: [field], message: 'Required for students.' })
-  }
-})
 export const emptyBodySchema = z.object({}).strict()
 export const idParamsSchema = z.object({ pageId: pageIdSchema }).strict()
 export const healthResponseSchema = z.object({ status: z.literal('ok') })
