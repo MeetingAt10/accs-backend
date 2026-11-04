@@ -9,6 +9,7 @@ import { env, onLambda, tableName } from './env.js'
 import { actionRequestSchema, actionResponseSchema, changePasswordSchema, completeFirstLoginSchema, emptyBodySchema, errorResponseSchema, forgotPasswordSchema, healthResponseSchema, idParamsSchema, pageQuerySchema, pageResponseSchema, resetPasswordSchema, sessionResponseSchema, signInSchema, type User } from './schemas.js'
 import { accountRouter, applyAccounts, recordAudit, saveAccountChange, setOwnCredentials, unsentMailer, type InviteMailer } from './accounts.js'
 import { hasPermission } from './access.js'
+import { devRouter, devToolboxEnabled, isDevToolboxCall, type Stack } from './dev.js'
 import { send } from './http.js'
 import { createRepository } from './persist.js'
 import { ApiError, getPage, performAction, refreshRestrictions, sessionView, unavailable, type AccountChange } from './services.js'
@@ -16,8 +17,10 @@ import { createResetStore, resetPolicy, type ResetStore } from './resets.js'
 import { createSessionStore, isWellFormedToken, newSessionToken, sessionIdOf, sessionPolicy, sessionState, type SessionStore } from './sessions.js'
 import { demoUserIds, type Repository } from './store.js'
 
-export function createApp(repository:Repository=createRepository({nodeEnv:env.NODE_ENV,tableName}),options:{authStore?:AuthStore;sessionStore?:SessionStore;resetStore?:ResetStore;mailer?:InviteMailer}={}){
+export function createApp(repository:Repository=createRepository({nodeEnv:env.NODE_ENV,tableName}),options:{authStore?:AuthStore;sessionStore?:SessionStore;resetStore?:ResetStore;mailer?:InviteMailer;stack?:Stack}={}){
   const app=express()
+  // The account switcher for testers exists only on the development stack and on local runs (src/dev.ts).
+  const devToolbox=devToolboxEnabled(options.stack??{tablePrefix:env.TABLE_PREFIX,nodeEnv:env.NODE_ENV})
   const authStore=options.authStore??createAuthStore()
   const sessions=options.sessionStore??createSessionStore({nodeEnv:env.NODE_ENV,tableName:tableName('ccs_identity'),onLambda})
   const resets=options.resetStore??createResetStore({nodeEnv:env.NODE_ENV,tableName:tableName('ccs_identity'),onLambda})
@@ -100,7 +103,8 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   app.post('/api/auth/sign-out',async(req,res)=>{emptyBodySchema.parse(req.body??{});const token=cookieValue(req);if(isWellFormedToken(token))await sessions.revoke(sessionIdOf(token));res.clearCookie('accs_session',cookieOptions);send(res,actionResponseSchema,{ok:true,message:'Signed out.'})})
   app.use('/api',async(req,res,next)=>{const user=await sessionUser(req,res);if(!user)return send(res,errorResponseSchema,{error:'Sign in to continue.',code:'UNAUTHENTICATED'},401);res.locals.user=user
     // Temporary credentials open only the call that replaces them, reading the session, and signing out (registered above).
-    const setting=req.method==='GET'&&req.path==='/session'||req.method==='POST'&&req.path==='/auth/complete-first-login'
+    // Where the account switcher exists, its two calls stay open too, so a tester can leave an account that is still on temporary details.
+    const setting=req.method==='GET'&&req.path==='/session'||req.method==='POST'&&req.path==='/auth/complete-first-login'||devToolbox&&isDevToolboxCall(req.method,req.path)
     if(user.mustChangeCredentials&&!setting)return send(res,errorResponseSchema,{error:'Set your own username and password to continue.',code:'CREDENTIALS_CHANGE_REQUIRED'},403)
     next()})
   app.post('/api/auth/complete-first-login',async(req,res)=>{
@@ -131,16 +135,17 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   app.post('/api/admin/accounts/:id/reset-code',async(req,res)=>{
     const admin=res.locals.user as User;const id=z.string().trim().min(1).max(64).parse(req.params.id);emptyBodySchema.parse(req.body??{})
     if(!hasPermission(admin,'role.manage'))throw new ApiError(403,'You do not have access to this action.','FORBIDDEN')
-    const account=await repository.view(unit=>unit.read().users.find(u=>u.id===id&&u.active));if(!account)throw unavailable()
+    const account=await repository.view(unit=>unit.read().users.find(u=>u.id===id&&u.active),[]);if(!account)throw unavailable()
     const {code,codeHash}=newResetCode();const now=Date.now()
     await resets.issue({userId:account.id,codeHash,now,issuedBy:admin.id})
-    await repository.transact(unit=>{unit.read().audit.push({id:unit.nextId('AUDIT'),at:new Date(now).toISOString(),actorId:admin.id,action:'Password reset code issued','module':'identity',reference:account.id,result:'Recorded'})})
+    await repository.transact(unit=>{unit.read().audit.push({id:unit.nextId('AUDIT'),at:new Date(now).toISOString(),actorId:admin.id,action:'Password reset code issued','module':'identity',reference:account.id,result:'Recorded'})},['audit'])
     send(res,actionResponseSchema,{ok:true,message:'Reset code issued. Give it to the account holder; it expires in 15 minutes and is not shown again.',record:{code,expiresAt:new Date(now+resetPolicy.codeTtlMs).toISOString()}})
   })
   app.get('/api/session',(_req,res)=>send(res,sessionResponseSchema,sessionView(res.locals.user as User)))
   app.get('/api/pages/:pageId',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const query=pageQuerySchema.parse(req.query);send(res,pageResponseSchema,await getPage(repository,res.locals.user as User,pageId,query))})
   app.post('/api/pages/:pageId/actions',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const body=actionRequestSchema.parse(req.body);send(res,actionResponseSchema,await performAction(repository,res.locals.user as User,pageId,body,saveAccount))})
   app.use('/api/accounts',accountRouter({repository,authStore,sessions,mailer:options.mailer??unsentMailer}))
+  if(devToolbox)app.use('/api/dev',devRouter({repository,sessions,start:startSession,out:sessionOut}))
   app.use('/api',(_req,res)=>send(res,errorResponseSchema,{error:'This API resource is not available.',code:'NOT_FOUND'},404))
   const errors:ErrorRequestHandler=(error,req,res,_next)=>{if(error instanceof z.ZodError)return send(res,errorResponseSchema,{error:'Check the required fields.',code:'VALIDATION_ERROR',fields:error.issues.map(issue=>({path:issue.path.map(String).join('.'),message:issue.message}))},400);if(error instanceof ApiError)return send(res,errorResponseSchema,{error:error.message,code:error.code},error.status);if(error instanceof SyntaxError)return send(res,errorResponseSchema,{error:'The request must contain valid JSON.',code:'VALIDATION_ERROR'},400)
     // body-parser errors carry their own 4xx status (for example 413 for a body over the 128 KB limit).

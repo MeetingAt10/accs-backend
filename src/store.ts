@@ -1,10 +1,22 @@
+import { consentWording } from './consent.js'
 import { ulid } from './ids.js'
-import type { Role, User } from './schemas.js'
+import type { Role, TalkMode, User } from './schemas.js'
 
 export type Stage = 'adviser' | 'chair' | 'dean' | 'guidance' | 'osas' | 'executive'
 export type Message = { id: string; authorId: string; body: string; at: string }
 export type History = { id: string; at: string; actorId: string; actorRole: string; action: string; reason: string; update: string; public: boolean; stage: Stage }
-export type Report = { id: string; ownerId: string; program: string; adviserId: string; stage: Stage; status: string; narrative: string; category: string; severity: 'low' | 'medium' | 'high'; identity: 'named' | 'anonymous'; alias: string; disclosedTo: string[]; involvedUserIds: string[]; bypassed: boolean; createdAt: string; updatedAt: string; caseFileId?: string; sourcePostId?: string; location?: string; occurredOn?: string; history: History[]; notes: Message[]; messages: Message[] }
+/** The student's agreement to send a concern, stamped by the server with the exact wording they were shown. */
+export type ReportConsent = { readStatement: true; at: string; userId: string; version: string; wording: string }
+/** One agreement to talk in one way. A student who changes the way adds another; earlier ones stay. */
+export type TalkConsent = { mode: TalkMode; participate: true; recordCall?: boolean; wording: string; at: string }
+/** How the student and the office handling the concern talk. `meetingLink` (video, voice) and `place` (face to face) are added by that office. */
+export type Talk = { mode: TalkMode; consents: TalkConsent[]; slotId?: string; consultationId?: string; preferredAt?: string; scheduledAt?: string; meetingLink?: string; place?: string; updatedAt: string }
+/**
+ * `aboutAdvisor` is true when the concern goes around the adviser: the student said so, or the adviser is named in it.
+ * Then the adviser never sees it. `allowChair` and `allowDean` are the student's choice; an office they did not allow
+ * cannot read the concern. A report stored before these fields existed has none of them, which reads as "not allowed".
+ */
+export type Report = { id: string; ownerId: string; program: string; adviserId?: string; stage: Stage; status: string; narrative: string; category: string; severity: 'low' | 'medium' | 'high'; identity: 'named' | 'anonymous'; alias: string; disclosedTo: string[]; involvedUserIds: string[]; bypassed: boolean; aboutAdvisor: boolean; allowChair: boolean; allowDean: boolean; consent: ReportConsent; talk?: Talk; createdAt: string; updatedAt: string; caseFileId?: string; sourcePostId?: string; location?: string; occurredOn?: string; history: History[]; notes: Message[]; messages: Message[] }
 export type Post = {
   id: string
   authorId: string
@@ -55,7 +67,7 @@ export type Thread = {
   readMessageCounts: Record<string, number>
 }
 export type Slot = { id: string; facultyId: string; date: string; start: string; end: string; state: 'open' | 'requested' | 'booked' | 'unavailable' }
-export type Consultation = { id: string; studentId: string; facultyId: string; slotId: string; purpose: string; status: 'Requested' | 'Approved' | 'Booked' | 'Completed' | 'Declined' | 'Cancelled'; createdAt: string; updatedAt: string; history: { at: string; status: string; note: string; actorId: string }[] }
+export type Consultation = { id: string; studentId: string; facultyId: string; slotId: string; /** The concern this time is for, when the student booked it to talk about one. */ reportId?: string; purpose: string; status: 'Requested' | 'Approved' | 'Booked' | 'Completed' | 'Declined' | 'Cancelled'; createdAt: string; updatedAt: string; history: { at: string; status: string; note: string; actorId: string }[] }
 export type Question = { id: string; criterion: string; text: string; type: 'rating' | 'text'; required: boolean }
 export type Cycle = { id: string; title: string; term: string; opens: string; closes: string; status: 'Draft' | 'In review' | 'Published' | 'Closed'; instructions: string; questions: Question[]; forms: string[]; resultsPublished: boolean; reviews: { userId: string; decision: string; note: string; at: string }[] }
 export type Assignment = { id: string; evaluatorId: string; facultyId: string; cycleId: string; relation: string; subject: string; answers?: Record<string, string | number>; comment?: string; submittedAt?: string }
@@ -151,7 +163,7 @@ export function seed(): Database {
   function report(id: string, ownerId: string, stage: Stage, bypassed = false, converted = false): Report {
     const owner = users.find(u => u.id === ownerId)!
     const history = stages.slice(0, stages.indexOf(stage) + 1).filter(s => !bypassed || s !== 'adviser').map((s, index): History => ({ id: `H-${id}-${index}`, at, actorId: s === 'adviser' ? owner.adviserId! : s === 'chair' && owner.program === 'BSCS' ? 'QCU-CHAIR-CS' : actorIds[s], actorRole: stageRoles[s], action: index === 0 ? 'Submitted' : 'Transferred', reason: 'Routine routing', update: 'The office is reviewing your report.', public: true, stage: s }))
-    return { id, ownerId, program: owner.program!, adviserId: owner.adviserId!, stage, status: stage === 'guidance' && converted ? 'Case File at Guidance' : `With ${stage}`, narrative: 'The IC 301 lab timetable changed on Monday and nobody told us. Our group missed a scheduled activity. Please look into how lab schedule changes are announced.', category: 'General concern', severity: 'medium', identity: 'anonymous', alias: `Reporter A-${id.slice(-2)}`, disclosedTo: [], involvedUserIds: bypassed ? [owner.adviserId!] : [], bypassed, createdAt: at, updatedAt: at, ...(converted ? { caseFileId: `CF-${id.slice(-4)}` } : {}), history, notes: [{ id: `NOTE-${id}`, authorId: actorIds[stage], body: 'Asked the lab coordinator about the Monday timetable change. Waiting for a reply.', at }], messages: [{ id: `MSG-${id}`, authorId: actorIds[stage], body: 'We received your report. Reply here if you have more details.', at }] }
+    return { id, ownerId, program: owner.program!, adviserId: owner.adviserId!, stage, status: stage === 'guidance' && converted ? 'Case File at Guidance' : `With ${stage}`, narrative: 'The IC 301 lab timetable changed on Monday and nobody told us. Our group missed a scheduled activity. Please look into how lab schedule changes are announced.', category: 'General concern', severity: 'medium', identity: 'anonymous', alias: `Reporter A-${id.slice(-2)}`, disclosedTo: [], involvedUserIds: bypassed ? [owner.adviserId!] : [], bypassed, aboutAdvisor: bypassed, allowChair: true, allowDean: true, consent: { readStatement: true, at, userId: ownerId, version: consentWording.version, wording: consentWording.report }, talk: { mode: 'chat', consents: [{ mode: 'chat', participate: true, wording: consentWording.talk.chat, at }], updatedAt: at }, createdAt: at, updatedAt: at, ...(converted ? { caseFileId: `CF-${id.slice(-4)}` } : {}), history, notes: [{ id: `NOTE-${id}`, authorId: actorIds[stage], body: 'Asked the lab coordinator about the Monday timetable change. Waiting for a reply.', at }], messages: [{ id: `MSG-${id}`, authorId: actorIds[stage], body: 'We received your report. Reply here if you have more details.', at }] }
   }
   const reports = [report('RPT-0241', 'QCU-STU-IT-A', 'adviser'), report('RPT-0242', 'QCU-STU-IT-A', 'chair', true), report('RPT-0243', 'QCU-STU-IT-B', 'dean'), report('RPT-0244', 'QCU-STU-RESTRICTED', 'guidance'), report('RPT-0245', 'QCU-STU-IT-A', 'guidance', false, true), report('RPT-0246', 'QCU-STU-IT-A', 'osas', false, true), report('RPT-0247', 'QCU-STU-IT-A', 'executive', false, true), report('RPT-0248', 'QCU-STU-CS', 'chair')]
   reports[0]!.sourcePostId = 'POST-0102'

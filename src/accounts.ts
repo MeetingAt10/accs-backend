@@ -48,15 +48,19 @@ const digits = '23456789'
 const symbols = '!@#$%&*?-_=+'
 const pick = (chars: string) => chars[randomInt(chars.length)]!
 
-/** 14 random characters with at least one lower case letter, capital, digit, and symbol, so it passes `passwordProblem`. */
+/**
+ * 14 random characters with at least one lower case letter, capital, digit, and symbol, so it passes `passwordProblem`.
+ * The first is a letter or digit: the secretary downloads the credentials as CSV, and a spreadsheet reads a cell that
+ * starts with = + - or @ as a formula.
+ */
 export function temporaryPassword() {
   for (;;) {
-    const chars = [pick(lower), pick(upper), pick(digits), pick(symbols), ...Array.from({ length: 10 }, () => pick(lower + upper + digits + symbols))]
+    const chars = [pick(lower), pick(upper), pick(digits), pick(symbols), ...Array.from({ length: 9 }, () => pick(lower + upper + digits + symbols))]
     for (let i = chars.length - 1; i > 0; i--) {
       const j = randomInt(i + 1)
       ;[chars[i], chars[j]] = [chars[j]!, chars[i]!]
     }
-    const password = chars.join('')
+    const password = pick(lower + upper + digits) + chars.join('')
     if (!passwordProblem(password)) return password
   }
 }

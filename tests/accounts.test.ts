@@ -2,14 +2,14 @@ import { readFileSync } from 'node:fs'
 import request from 'supertest'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { sendInvite, type Invite, type InviteMailer } from '../src/accounts.js'
+import { sendInvite, temporaryPassword, type Invite, type InviteMailer } from '../src/accounts.js'
 import { createApp } from '../src/app.js'
 import { createMemoryAuthStore, passwordProblem } from '../src/auth.js'
 import { createRecordRepository } from '../src/persist.js'
 import { createMemoryRecordStore } from '../src/records.js'
 import { createMemorySessionStore } from '../src/sessions.js'
 import { createMemoryRepository, type Database, type Repository } from '../src/store.js'
-import { activateSecretary, secretaryPassword, secretarySession, seedPassword, signIn } from './helpers.js'
+import { activateSecretary, concernChoices, secretaryPassword, secretarySession, seedPassword, signIn } from './helpers.js'
 
 // The unsent-invite mailer logs once per account; the tests that look at the log spy on it again.
 beforeEach(() => { vi.spyOn(console, 'log').mockImplementation(() => {}) })
@@ -485,7 +485,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       expect(made!.account.adviserId).toBe('QCU-PROF-CS')
       const { agent: pupil } = await signIn(app, made!.credentials.username, made!.credentials.temporaryPassword)
       await pupil.post('/api/auth/complete-first-login').send({ currentPassword: made!.credentials.temporaryPassword, username: 'pupil.one', password: 'Student1!Passw0rd' })
-      const filed = await pupil.post('/api/pages/P19/actions').send({ action: 'createReport', payload: { narrative: 'The lab timetable changed without notice.', category: 'General concern', severity: 'low', identity: 'named' } })
+      const filed = await pupil.post('/api/pages/P19/actions').send({ action: 'createReport', payload: { narrative: 'The lab timetable changed without notice.', category: 'General concern', severity: 'low', identity: 'named', ...concernChoices } })
       expect([filed.status, filed.body.record.stage]).toEqual([200, 'adviser'])
       const { agent: adviser } = await signIn(app, 'QCU-PROF-CS')
       expect((await adviser.get(`/api/pages/P22?id=${filed.body.record.id}`)).status).toBe(200)
@@ -681,5 +681,19 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       expect(texts.filter(Boolean).length).toBeGreaterThan(10)
       for (const text of texts) expect(text).not.toMatch(/\bD-\d\d\b|\bDOC\d{3}\b|\bTBD\b|\b[A-Z]{2,4}-\d{2}\b/)
     })
+  })
+})
+
+describe('temporary passwords', () => {
+  it('start with a letter or digit, so a spreadsheet opened from the downloaded CSV never reads one as a formula', () => {
+    // About 1 in 15 would start with = + - or @ if the first character were not chosen on its own, so this many cannot pass by luck.
+    for (let n = 0; n < 3000; n++) {
+      const password = temporaryPassword()
+      expect(password).toMatch(/^[A-Za-z0-9]/)
+      expect(password).toHaveLength(14)
+      expect(passwordProblem(password)).toBeUndefined()
+      // No look-alikes, because these are read off a screen and typed.
+      expect(password).not.toMatch(/[0O1lI]/)
+    }
   })
 })

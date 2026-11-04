@@ -73,11 +73,18 @@ export function canThread(db: Database, user: User, thread: Thread) {
   const other = db.users.find(u => thread.memberIds.includes(u.id) && u.id !== user.id)
   return !!other && canReach(db,user,other)
 }
-export function isConflicted(user: User, report: Report) { return report.involvedUserIds.includes(user.id) || report.bypassed && report.adviserId === user.id }
+// A concern about the adviser never reaches the adviser, whatever stage it is at.
+export function isConflicted(user: User, report: Report) { return report.involvedUserIds.includes(user.id) || (report.bypassed || report.aboutAdvisor) && report.adviserId === user.id }
+// The student decides who besides the adviser can read a concern. The Program Chair needs the student's yes, unless the concern is about the adviser and goes to the chair instead; the Dean always needs it.
+// Only an explicit true counts, so a report stored without these fields is not shared.
+const chairMay = (user: User, report: Report) => hasRole(user,'chair') && user.program === report.program && (report.allowChair === true || report.aboutAdvisor === true)
+const deanMay = (user: User, report: Report) => hasRole(user,'dean') && report.allowDean === true
 export function canActCase(user: User, report: Report) {
   if (isConflicted(user,report) || report.ownerId === user.id) return false
-  return report.stage === 'adviser' && hasRole(user,'professor') && report.adviserId === user.id || report.stage === 'chair' && hasRole(user,'chair') && user.program === report.program || report.stage === 'dean' && hasRole(user,'dean') || report.stage === 'guidance' && hasRole(user,'guidance') || report.stage === 'osas' && hasRole(user,'osas') || report.stage === 'executive' && hasRole(user,'president')
+  return report.stage === 'adviser' && hasRole(user,'professor') && report.adviserId === user.id || report.stage === 'chair' && chairMay(user,report) || report.stage === 'dean' && deanMay(user,report) || report.stage === 'guidance' && hasRole(user,'guidance') || report.stage === 'osas' && hasRole(user,'osas') || report.stage === 'executive' && hasRole(user,'president')
 }
+/** For counts that span every stage (analytics): the reports this person's office may see, whichever stage they are at. */
+export function canCountCase(user: User, report: Report) { return !isConflicted(user,report) && report.ownerId !== user.id && (chairMay(user,report) || deanMay(user,report)) }
 export function canViewCase(user: User, report: Report) { return report.ownerId !== user.id && !isConflicted(user,report) && (canActCase(user,report) || report.history.some(entry => entry.actorId === user.id && entry.actorRole !== 'student' && user.roles.includes(entry.actorRole as Role) && (entry.actorRole !== 'chair' || user.program === report.program))) }
 export function canStudentRecord(db: Database, user: User, student: User) { return hasRole(student,'student') && (hasRole(user,'dean') || hasRole(user,'chair') && user.program === student.program || hasRole(user,'guidance') && db.reports.some(r => r.ownerId === student.id && ['guidance','osas','executive'].includes(r.stage)) || hasRole(user,'osas') && db.reports.some(r=>r.ownerId === student.id && ['osas','executive'].includes(r.stage))) }
 export function canFacultyResult(user: User, faculty: User) { return hasRole(user,'dean') || hasRole(user,'chair') && user.program === faculty.program || hasRole(user,'professor') && user.id === faculty.id }

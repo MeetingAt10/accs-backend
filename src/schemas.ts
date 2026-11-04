@@ -7,6 +7,9 @@ export const roleSchema = z.enum(roles)
 export type Role = z.infer<typeof roleSchema>
 export const roleLabels: Record<Role, string> = { student: 'Student', organization: 'CCS Student Organization', professor: 'Professor', staff: 'CCS Staff', chair: 'Program Chair', dean: 'Dean', administrator: 'Administrator / Moderator', guidance: 'Guidance', osas: 'OSAS', president: "President’s Office", secretary: 'CCS Secretary' }
 export const programs = ['BSIT', 'BSCS', 'BSIS'] as const
+/** The ways a student can choose to talk about a concern. */
+export const talkModes = ['chat', 'video', 'voice', 'face_to_face'] as const
+export type TalkMode = (typeof talkModes)[number]
 export const userSchema = z.object({ id: z.string(), name: z.string(), email: z.email(), roles: z.array(roleSchema), program: z.string().optional(), section: z.string().optional(), office: z.string().optional(), organizationId: z.string().optional(), restrictions: z.array(z.string()), title: z.string(), bio: z.string(), education: z.string(), officeHours: z.string(), year: z.number().optional(), studentId: z.string().optional(), spaceIds: z.array(z.string()), organizationIds: z.array(z.string()), adviserId: z.string().optional(), active: z.boolean(), username: z.string().optional(), mustChangeCredentials: z.boolean().optional() })
 export type User = z.infer<typeof userSchema>
 export const pageIdSchema = z.string().regex(/^P(0[1-9]|[1-4][0-9]|5[0-2])$/)
@@ -74,6 +77,21 @@ const text = z.string().trim().min(1).max(4000)
 const reason = z.string().trim().min(1).max(2000)
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+// A date and time as a browser gives it, with or without a time zone: 2026-11-06T10:00 or 2026-11-06T02:00:00Z.
+const when = z.iso.datetime({ offset: true, local: true })
+// People open a meeting link from the page, so only https is accepted. The link is kept in its normal form.
+const meetingLink = z.string().trim().max(500).transform((value, context) => {
+  try {
+    const url = new URL(value)
+    if (url.protocol === 'https:' && url.hostname && !url.username && !url.password) return url.href
+  } catch {
+    // Not a link at all: reported below with the same message.
+  }
+  context.addIssue({ code: 'custom', message: 'Use a link that starts with https://' })
+  return z.NEVER
+})
+const agree = 'Read and agree to the statement to send your concern.'
+const yesOrNo = 'Choose yes or no.'
 export const postLabels = ['Discussion', 'Rant', 'Assistance', 'Support'] as const
 export const announcementPriorities = ['general', 'important', 'urgent'] as const
 const postContent = {
@@ -115,9 +133,24 @@ export const actionPayloads = {
   comment: z.object({ body: text, anonymous: z.boolean().default(false) }).strict(),
   react: z.object({}).strict(),
   flag: z.object({ reason, itemType: z.enum(['post', 'comment', 'message']).default('post'), itemId: z.string().optional() }).strict(),
-  createReport: z.object({ narrative: text, category: text.max(80), severity: z.enum(['low', 'medium', 'high']), identity: z.enum(['named', 'anonymous']), involvedUserIds: z.array(z.string()).default([]), conflictedAdviser: z.boolean().default(false), sourcePostId: z.string().optional(), location: z.string().max(200).optional(), occurredOn: date.optional() }).strict(),
+  // The agreement and the three choices have no defaults: a concern is never sent on a guess about what the student allowed.
+  createReport: z.object({ narrative: text, category: text.max(80), severity: z.enum(['low', 'medium', 'high']), identity: z.enum(['named', 'anonymous']), involvedUserIds: z.array(z.string()).default([]), conflictedAdviser: z.boolean().default(false), sourcePostId: z.string().optional(), location: z.string().max(200).optional(), occurredOn: date.optional(), consent: z.object({ readStatement: z.literal(true, { error: agree }) }, { error: agree }).strict(), allowChair: z.boolean({ error: yesOrNo }), allowDean: z.boolean({ error: yesOrNo }), aboutAdvisor: z.boolean({ error: yesOrNo }) }).strict(),
   saveDraft: z.object({ narrative: z.string().max(4000), category: z.string().max(80).optional(), severity: z.enum(['low', 'medium', 'high']).optional(), identity: z.enum(['named', 'anonymous']).optional() }).strict(),
   sendReportMessage: z.object({ body: text }).strict(),
+  chooseTalkMode: z.object({
+    reportId: z.string().min(1).max(100),
+    mode: z.enum(talkModes),
+    // `recordCall` only means something for a video or voice call; the action says so.
+    consent: z.object({ participate: z.literal(true, { error: 'Agree to take part to choose this way to talk.' }), recordCall: z.boolean().optional() }, { error: 'Agree to take part to choose this way to talk.' }).strict(),
+    slotId: z.string().min(1).max(100).optional(),
+    preferredAt: when.optional(),
+  }).strict(),
+  setTalkDetails: z.object({
+    reportId: z.string().min(1).max(100),
+    scheduledAt: when.optional(),
+    meetingLink: meetingLink.optional(),
+    place: z.string().trim().min(1).max(200).optional(),
+  }).strict().refine(details => details.scheduledAt || details.meetingLink || details.place, { message: 'Add a time, a meeting link, or a place.' }),
   discloseIdentity: z.object({ office: z.string().min(1).optional() }).strict(),
   caseAction: z.object({ type: z.enum(['respond', 'recordAction', 'escalate', 'transfer', 'resolve', 'close', 'convert', 'milestone', 'return']), update: text, nextStage: z.enum(['adviser', 'chair', 'dean', 'guidance', 'osas', 'executive']).optional() }).strict(),
   addNote: z.object({ body: text }).strict(),
