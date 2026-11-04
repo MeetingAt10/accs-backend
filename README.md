@@ -71,7 +71,7 @@ Seeded demo accounts (`QCU-STU-IT-A`, `QCU-ADMIN`, ...) sign in with their ID or
 
 The Dean activates the secretary, and the secretary creates and manages every other account. Routes are under `/api/accounts`, need a session, check permission (`account.activateSecretary` for the Dean, `account.provision` for the secretary) and validate with zod. Failures use the usual `{ error, code, fields? }` body: `401 UNAUTHENTICATED`, `403 FORBIDDEN` (wrong role), `403 CREDENTIALS_CHANGE_REQUIRED`, `400 VALIDATION_ERROR`, `404 UNAVAILABLE`, `409 CONFLICT`. Successful changes answer `{ ok: true, message, record }`.
 
-An `AccountSummary` is `{ id, name, email, roles, program?, section?, year?, studentId?, adviserId?, active, mustChangeCredentials? }`. Credentials are `{ username, temporaryPassword }`, returned in the response that creates them and never again: only the hash is stored, and neither the audit trail nor the logs hold them.
+An `AccountSummary` is `{ id, name, email, roles, program?, section?, year?, studentId?, adviserId?, active, mustChangeCredentials? }`. Credentials are `{ username, temporaryPassword }`, returned in the response that creates them and never again: only the hash is stored, and neither the audit trail nor the logs hold them. A temporary password is 14 characters and starts with a letter or digit, never `=`, `+`, `-`, or `@`, because the secretary downloads credentials as CSV and a spreadsheet reads a cell that starts with one of those as a formula.
 
 | Route | Who | Body / query | Result |
 |---|---|---|---|
@@ -94,6 +94,31 @@ Created accounts are active, with `mustChangeCredentials: true`. A batch is chec
 
 **Audit.** Each change adds an `identity` entry (`Secretary account activated`, `Faculty account created`, `Student account created`, `Account activated`, `Account deactivated`, `Year n advisers changed`, `Program chair changed`, `Sign-in details set`) with the actor and the account or program as reference. The entry is written after the change is stored; if that write fails it is logged and the response still carries the credentials, which are shown only once.
 
+## Concern flow
+
+A student files a concern (a *report* until it reaches Guidance) and chooses how to talk about it. It is the report and page-action system (`POST /api/pages/:pageId/actions`), not a second API, and it lives in the persisted `reports`, `consultations`, `slots`, `notifications`, and `audit` collections. Notices are in-app only; there is no email channel yet.
+
+| Action (page) | Payload | Who |
+|---|---|---|
+| `createReport` (P19) | the statement fields, plus `consent: { readStatement: true }`, `allowChair`, `allowDean`, `aboutAdvisor` (all four required) | Student |
+| `chooseTalkMode` (P19, P20) | `{ reportId, mode: 'chat' \| 'video' \| 'voice' \| 'face_to_face', consent: { participate: true, recordCall? }, slotId?, preferredAt? }` | The student who filed it |
+| `setTalkDetails` (P22) | `{ reportId, scheduledAt?, meetingLink?, place? }`, at least one | The office handling the concern now |
+| `sendReportMessage` (P20, P22) | `{ body }`, with the report as `recordId` | The student and the office handling it, only while the chosen way is `chat` |
+
+`scheduledAt` and `preferredAt` are ISO 8601 dates with a time, with or without a time zone (`2026-11-06T10:00`, `2026-11-06T02:00:00Z`).
+
+**Agreement.** A missing or false `consent.readStatement`, or a missing `allowChair`, `allowDean`, or `aboutAdvisor`, is a 400 `VALIDATION_ERROR`; nothing is stored, sent, or recorded. The server stamps the report with `consent: { readStatement: true, at, userId, version, wording }`. `wording` is the exact text from the one exported constant `consentWording` (`src/consent.ts`), which also holds the wording of each way to talk; changing any sentence changes its `version`. P19 and P20 return the constant as `data.consentWording`, so the app shows the text the server stores. Filing writes two `reports` audit entries (`Report submitted`, `Report consent recorded`) with the report as reference; no audit entry holds the statement or the wording.
+
+**Who can read it.** The student owns it. The adviser (the `professor` account set as the student's `adviserId`) reads it unless `aboutAdvisor` is true. The Program Chair of the student's program reads it if `allowChair` is true or `aboutAdvisor` is true (it goes to the chair instead). The Dean reads it only if `allowDean` is true. Guidance, OSAS, and the President's Office read it as before, once a case reaches them. Every path applies this: the case queue and workspace (P21, P22), similar reports (P23, P24, with the count of reports in a group), the analytics counts (P25), notices, the assistant, and later steps. Moving a concern to the chair or the Dean when the student did not allow that office is a 409 `CONFLICT` ("The student has not allowed the Dean to read this concern, so it cannot be sent there."). A report stored before these fields existed has none of them, so it reads as not shared.
+
+**About the adviser.** With `aboutAdvisor: true` the concern starts at the chair stage with the Program Chair of the student's program. The adviser is not told, cannot read it, and is not counted; the same holds when the existing conflict check sends a concern around the adviser (the adviser is named in the statement or in `involvedUserIds`, or `conflictedAdviser` is true), and then `aboutAdvisor` is stored as true. A student without an active adviser gets a 409 when filing unless `aboutAdvisor` is true. If no Program Chair other than the adviser can receive it, filing is a 409 and nothing is stored.
+
+**How to talk.** `chooseTalkMode` stores `talk: { mode, consents, slotId?, consultationId?, preferredAt?, scheduledAt?, meetingLink?, place?, updatedAt }` on the report and notifies the office. Every call appends a consent record `{ mode, participate, recordCall?, wording, at }` and keeps the earlier ones, so a student can change the way and each change is recorded. `recordCall` applies to `video` and `voice` only (default false; `true` for another way is a 400). With `slotId`, one of the open times of an office handling the concern is reserved through the same rule as a consultation request (409 `That time was just taken. Pick another time.`), as a consultation with `reportId` and the purpose `Talk about a concern`; a student can hold one live request per concern, and an anonymous student shares their name with the office first (409), because the booking shows the office who asked. Choosing another way clears the time, link, and place the office had set. `setTalkDetails` adds them for the chosen way: `meetingLink` only for `video` and `voice` and only `https` (400 otherwise), `place` only for `face_to_face`; both are 409 for another way, and the student is notified.
+
+**Messages.** `sendReportMessage` is a 409 unless `talk.mode` is `chat`, for the student and for the office alike. The conversation is read by polling P20 and P22. Each message is audited as `Reporter message sent` or `Handler message sent` without its text. A message and a change of details notify the other side. The student's views show who answered (`office`, and each message's `author.roles`) and never the internal notes.
+
+**What the views return.** The student's views (P18, P20) and the office's (P21 rows, P22) carry `consent` (`{ readStatement, at, version, wording }`; the account behind it is never returned), `allowChair`, `allowDean`, `aboutAdvisor`, and `talk`. A P21 row also has `reporter` (the name, or the alias), `category`, `createdAt`, and `updatedAt`. There is no unread mark per report; an unread notice for the report on P40 (`recordId`, `read`) is the signal.
+
 ## Password reset codes
 
 Codes live in `ccs_identity` as the `RESET` item `USER#<id>` / `RESET` (hash only, TTL on `expires_epoch`), so limits hold on every Lambda instance: 5 guesses per code (counted before the check, so parallel guesses cannot exceed it), 15-minute expiry, single use, 60-second cooldown, and 5 self-service codes per account per hour (a new code keeps the count). An administrator-issued code skips the cooldown and the cap. There is no email channel yet (SES is planned): in production the CCS office gets a code from an administrator and hands it to the account holder. Limits are provisional until D-08.
@@ -101,6 +126,17 @@ Codes live in `ccs_identity` as the `RESET` item `USER#<id>` / `RESET` (hash onl
 ## Sessions
 
 Sign-in creates a server-side session. The `accs_session` cookie holds an opaque random token; the `ccs_identity` table (`<TABLE_PREFIX>ccs_identity`, a DOC006 `SESSION` item keyed `SESSION#<sha256 of token>`) stores only its hash, so a leaked table cannot be replayed. Every request reads the session and the account, so sign-out, a role change, and deactivation apply at once. Sessions end after 30 minutes idle or 12 hours (remember me: 7 days idle, 30 days); these are provisional until DOC003 decision D-08. Changing a password signs out other devices; a password reset signs out all of them. Without `TABLE_PREFIX`, sessions stay in memory locally, and on Lambda sign-in fails rather than issuing sessions valid on one instance only.
+
+## Dev toolbox
+
+Testers on the development stack change to another account without signing out. The session cookie is `httpOnly`, so the API does the swap. The code is `src/dev.ts`.
+
+| Route | Result |
+|---|---|
+| `GET /api/dev/users` | `{ users: [{ id, name, roles, active, username? }] }`, by name: every account, the inactive ones and the ones from the auth store included. No email, student ID, or hash |
+| `POST /api/dev/switch-user` `{ userId }` | Ends the caller's session, starts one for the target, and answers with the body sign-in answers with (`user`, `permissions`, `allowedPages`, `roleLabels`) and the new cookie. 409 `CONFLICT` for an account that is not active, 404 for one that does not exist, 400 for a bad body |
+
+The routes are mounted only when `TABLE_PREFIX` starts with `accs-dev-`, or, with no prefix, when `NODE_ENV` is not `production`. On any other deployed stack, and in production without a prefix, they do not exist: a signed-in caller gets 404 `NOT_FOUND`, and a caller who is not signed in gets 401, as for any unknown API path. A prefix that is not `accs-dev-` never mounts them, whatever `NODE_ENV` is. The caller must be signed in, and the hold on an account that still has temporary sign-in details does not apply to these two calls, so a tester can leave such an account. Each switch adds one `identity` audit entry (`Account switched`, with the actor and the target) before the session changes; a switch that cannot be recorded does not happen. Anyone signed in on the development stack can become any active account, the Dean included, so keep real student data off that stack.
 
 ## Errors and logging
 

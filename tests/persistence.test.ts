@@ -9,7 +9,7 @@ import { createDynamoRecordStore, createMemoryRecordStore, RecordConflict, write
 import { ApiError } from '../src/services.js'
 import { createMemorySessionStore } from '../src/sessions.js'
 import type { Database, Notification } from '../src/store.js'
-import { signIn } from './helpers.js'
+import { concernChoices, signIn } from './helpers.js'
 
 const tick = () => new Promise((resolve) => setImmediate(resolve))
 const at = '2026-11-05T02:00:00.000Z'
@@ -368,7 +368,7 @@ describe('two app instances sharing a record store', () => {
       },
     }
   }
-  const report = { narrative: 'The lab timetable changed without notice.', category: 'General concern', severity: 'low', identity: 'named' }
+  const report = { narrative: 'The lab timetable changed without notice.', category: 'General concern', severity: 'low', identity: 'named', ...concernChoices }
 
   it('shows data written by one to the other, and to an instance that starts cold', async () => {
     const { instance } = instances()
@@ -377,6 +377,9 @@ describe('two app instances sharing a record store', () => {
     const filed = await student.post('/api/pages/P19/actions').send({ action: 'createReport', payload: report })
     expect(filed.status).toBe(200)
     const id = filed.body.record.id as string
+
+    // Messages open once the student chooses chat.
+    expect((await student.post('/api/pages/P20/actions').send({ action: 'chooseTalkMode', payload: { reportId: id, mode: 'chat', consent: { participate: true } } })).status).toBe(200)
 
     const { agent: adviser } = await signIn(second, 'QCU-PROF-CS')
     expect((await adviser.get(`/api/pages/P22?id=${id}`)).status).toBe(200)

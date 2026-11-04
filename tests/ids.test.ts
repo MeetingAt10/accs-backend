@@ -5,6 +5,7 @@ import { createApp } from '../src/app.js'
 import { createMemoryAuthStore } from '../src/auth.js'
 import { createUlidFactory, ulid } from '../src/ids.js'
 import { createMemoryRepository } from '../src/store.js'
+import { concernChoices } from './helpers.js'
 
 const zeros = () => Buffer.alloc(10)
 const password = 'Accs@Qcu2026!'
@@ -54,7 +55,7 @@ describe('ulid', () => {
 })
 
 describe('generated IDs across instances', () => {
-  const report = { narrative: 'The lab timetable changed without notice.', category: 'General concern', severity: 'low', identity: 'named' }
+  const report = { narrative: 'The lab timetable changed without notice.', category: 'General concern', severity: 'low', identity: 'named', ...concernChoices }
   const signIn = async (app: ReturnType<typeof createApp>, id: string) => {
     const agent = request.agent(app)
     expect((await agent.post('/api/auth/sign-in').send({ emailOrId: id, password })).status).toBe(200)

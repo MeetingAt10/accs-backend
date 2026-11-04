@@ -5,6 +5,9 @@ import type { createApp } from '../src/app.js'
 
 type App = ReturnType<typeof createApp>
 
+/** What a student sends with every concern besides the statement: the agreement and the three choices. Everything is off, so only the adviser can read it. */
+export const concernChoices = { consent: { readStatement: true }, allowChair: false, allowDean: false, aboutAdvisor: false }
+
 /** The shared password of the seeded accounts in tests. */
 export const seedPassword = 'Accs@Qcu2026!'
 /** What the secretary chooses on the first sign-in. */
