@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createApp } from '../src/app.js'
 import { createMemoryAuthStore, hashPassword, passwordProblem, verifyPassword } from '../src/auth.js'
-import { createMemoryResetStore } from '../src/resets.js'
+import { createMemoryResetStore, resetPolicy } from '../src/resets.js'
 import { createMemorySessionStore, sessionIdOf, sessionPolicy } from '../src/sessions.js'
 import type { User } from '../src/schemas.js'
 import { createMemoryRepository } from '../src/store.js'
@@ -246,6 +246,50 @@ describe('reset code limits and office-assisted reset', () => {
     const app = createApp(createMemoryRepository(), { authStore: createMemoryAuthStore(), resetStore })
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     for (let n = 0; n < 2; n++) expect((await request(app).post('/api/auth/forgot-password').send({ emailOrId: 'QCU-STU-IT-A' })).status).toBe(200)
+    expect(log).toHaveBeenCalledTimes(1)
+  })
+
+  it('states the documented limits', () => {
+    expect(resetPolicy).toMatchObject({ cooldownMs: 60 * 1000, maxPerWindow: 5, windowMs: 60 * 60 * 1000 })
+  })
+
+  it('stops issuing at the hourly cap, with the same answer as for an unknown account', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const app = createApp(createMemoryRepository(), { authStore: createMemoryAuthStore(), resetStore: createMemoryResetStore() })
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+      const forgot = (emailOrId: string) => request(app).post('/api/auth/forgot-password').send({ emailOrId })
+      const unknown = await forgot('nobody@example.com')
+      expect(unknown.status).toBe(200)
+      const start = Date.now()
+
+      for (let n = 1; n <= resetPolicy.maxPerWindow; n++) {
+        const issued = await forgot('QCU-STU-IT-A')
+        expect([issued.status, issued.body]).toEqual([200, unknown.body])
+        expect(log).toHaveBeenCalledTimes(n)
+        vi.advanceTimersByTime(resetPolicy.cooldownMs)
+      }
+
+      // Past the cooldown but inside the hour: refused, and the caller cannot tell.
+      const refused = await forgot('QCU-STU-IT-A')
+      expect([refused.status, refused.body]).toEqual([200, unknown.body])
+      expect(log).toHaveBeenCalledTimes(resetPolicy.maxPerWindow)
+
+      vi.setSystemTime(start + resetPolicy.windowMs)
+      expect((await forgot('QCU-STU-IT-A')).status).toBe(200)
+      expect(log).toHaveBeenCalledTimes(resetPolicy.maxPerWindow + 1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('answers a request inside the cooldown the same way, and issues nothing', async () => {
+    const app = createApp(createMemoryRepository(), { authStore: createMemoryAuthStore(), resetStore: createMemoryResetStore() })
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const forgot = () => request(app).post('/api/auth/forgot-password').send({ emailOrId: 'QCU-STU-IT-A' })
+    const first = await forgot()
+    const second = await forgot()
+    expect([second.status, second.body]).toEqual([first.status, first.body])
     expect(log).toHaveBeenCalledTimes(1)
   })
 
