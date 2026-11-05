@@ -27,24 +27,33 @@ Two implementations:
 
 ### Shared state (record repository)
 
-The seed is the base. Six collections are shared by every instance and survive a cold start; each lives in its domain table (accs-architecture ADR 0004):
+The seed is the base. Twenty-one collections are shared by every instance and survive a cold start; each lives in its domain table (accs-architecture ADR 0004):
 
 | Collection | Table |
 |---|---|
-| `reports` | `ccs_grievance` |
-| `consultations`, `slots` | `ccs_scheduling` |
+| `reports`, `clusters` | `ccs_grievance` |
+| `consultations`, `slots`, `events`, `todos` | `ccs_scheduling` |
 | `threads` | `ccs_messaging` |
-| `notifications` | `ccs_notification` |
+| `notifications`, `settings` | `ccs_notification` |
+| `posts` (with their comments and reactions) | `ccs_community` |
+| `moderation` | `ccs_moderation` |
+| `cycles`, `assignments`, `followUps` | `ccs_evaluation` |
+| `restrictions`, `referrals`, `goodMoral` | `ccs_discipline` |
+| `drafts`, `telemetry` | `ccs_assistant` |
+| `permissionOverrides` | `ccs_identity` |
 | `audit` | `ccs_audit` (add-only: entries are only ever put, never changed or deleted) |
 
 One item per record: `PK = STATE#<collection>`, `SK` the record ID, `data` the record as JSON text, a numeric `version`, and `entity_type = STATE`. A stored record replaces the seeded record with the same ID; a record deleted from the seed (an availability slot) is kept as an item with `deleted` set, so it stays hidden. A seeded record that has been changed is stored whole, so later edits to its seed text do not reach it.
 
+`drafts`, `settings`, and `permissionOverrides` are objects in the code; each key is stored as its own record. `goodMoral` has one record per student, with the student ID as `SK`. These are generic `STATE` items: the tables follow DOC006, but the items do not use its item types or attribute names.
+
 - `view` queries each collection it needs (strongly consistent, every page of the result, in parallel), lays the records over the seed, and runs the work on that private copy.
 - `transact` does the same, then writes only the records that changed, each conditioned on the version it read (`attribute_not_exists(PK)` for a new record), in one `TransactWriteItems` per 100 writes. If another instance changed a record first, the work runs again on fresh data, up to 3 times in all, and then the call fails with `409 CONFLICT`. A change of more than 100 records is split into several transactions; if a later one loses a race the work is not run again, since the earlier ones are already stored, and the call fails with `409`. Transactions on one instance take turns.
 - The write check is per record: two instances changing the same record cannot both win (one slot, one consultation), but a unit of work that only reads a record and acts on it is not re-checked.
-- Every `view` loads whole collections. Notifications and the audit trail grow without bound; they need a per-user key or a time window before the pilot gets large.
+- Every `view` and action loads all 21 collections (one parallel query each) unless it names fewer. The session check on every authenticated request names only `restrictions`. Notifications, telemetry, and the audit trail grow without bound; they need a per-user key or a time window before the pilot gets large.
+- A post is one record, so comments racing on the same post retry, and can reach the `409`. A cycle that generates more than 100 assignments is written in several transactions, so that change is not atomic.
 
-Everything else stays on the seed, per instance, exactly as in memory: `users` (accounts come from the auth store below), `spaces`, `organizations`, `posts`, `drafts`, `todos`, `events`, `cycles`, `assignments`, `restrictions`, `referrals`, `offenses`, `goodMoral`, `clusters`, `moderation`, `settings`, `permissionOverrides`, `telemetry`, and `followUps`. A change to one of these is lost on a cold start and is not seen by other instances. `src/records.ts` holds the small `RecordStore` interface (`list`, `write`), its DynamoDB implementation, and an in-memory one the tests use to run two app instances over one store.
+Four collections stay on the seed, per instance: `users` (accounts come from the auth store below), `spaces` (only changed from the auth store), and `organizations` and `offenses` (no route writes them). `src/records.ts` holds the small `RecordStore` interface (`list`, `write`), its DynamoDB implementation, and an in-memory one the tests use to run two app instances over one store.
 
 ## Accounts and sign-in
 
@@ -63,7 +72,7 @@ Passwords are hashed with `crypto.scryptSync` and need 10+ characters with upper
 
 **Forced change.** An account created by the secretary, and the secretary once the Dean activates it, has a temporary username and password and `mustChangeCredentials: true`. Until `complete-first-login` succeeds, every authenticated `/api` route except `GET /api/session` and `POST /api/auth/sign-out` answers `403` with code `CREDENTIALS_CHANGE_REQUIRED`.
 
-**Where accounts live.** All account state is in the auth store (`src/auth.ts`): an S3 object when `AUTH_STORE_BUCKET` is set (Lambda; `AUTH_STORE_KEY`, default `auth-store.json`), otherwise a JSON file at `AUTH_STORE_FILE` (default `/tmp/accs-auth-store.json`). Tests use an in-memory store. It holds the accounts created after the seed, any change to a seeded account, the password hashes, and `advisorAssignments`. A stored account record replaces the seeded user with the same ID on every instance (role, program, `active`, username, adviser), so changes persist across instances and cold starts; the profile text a person edits themselves (title, bio, education, office hours) stays per instance. Role and active changes made on the administrator's pages (`updateRoles`) are saved there too. Writes carry the object's ETag; a write that loses the race reloads and runs its change again, up to 5 attempts. Each request reads the store once (cached for 2 seconds, then a conditional GET) and touches the repository only when the stored data changed.
+**Where accounts live.** All account state is in the auth store (`src/auth.ts`): an S3 object when `AUTH_STORE_BUCKET` is set (Lambda; `AUTH_STORE_KEY`, default `auth-store.json`), otherwise a JSON file at `AUTH_STORE_FILE` (default `/tmp/accs-auth-store.json`). Tests use an in-memory store. It holds the accounts created after the seed, any change to a seeded account, the password hashes, and `advisorAssignments`. A stored account record replaces the seeded user with the same ID on every instance (role, program, `active`, username, adviser), so changes persist across instances and cold starts, including the profile text a person edits themselves (title, bio, education, office hours). Role and active changes made on the administrator's pages (`updateRoles`) are saved there too. Writes carry the object's ETag; a write that loses the race reloads and runs its change again, up to 5 attempts. Each request reads the store once (cached for 2 seconds, then a conditional GET) and touches the repository only when the stored data changed.
 
 Seeded demo accounts (`QCU-STU-IT-A`, `QCU-ADMIN`, ...) sign in with their ID or email and `Accs@Qcu2026!` until they set a password; rotate or disable this shared password before real users join. The seeded secretary, `QCU-SECRETARY`, is inactive and never accepts the shared password: it signs in only with credentials the Dean issued.
 
