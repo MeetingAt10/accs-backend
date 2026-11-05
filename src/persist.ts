@@ -6,28 +6,50 @@ import { createDynamoRecordStore, RecordConflict, writeLimit, type RecordStore, 
 import { ApiError } from './services.js'
 import { createMemoryRepository, seed, type Collection, type Database, type Repository } from './store.js'
 
-/** The collections kept in the record store, and the domain table each lives in (accs-architecture adr/0004). */
+/** The collections kept in the record store, and the domain table each lives in (accs-architecture adr/0004, DOC006). */
 export const persisted: Record<Collection, DomainTable> = {
   reports: 'ccs_grievance',
+  clusters: 'ccs_grievance',
   consultations: 'ccs_scheduling',
   slots: 'ccs_scheduling',
+  events: 'ccs_scheduling',
+  todos: 'ccs_scheduling',
   threads: 'ccs_messaging',
   notifications: 'ccs_notification',
+  settings: 'ccs_notification',
   audit: 'ccs_audit',
+  posts: 'ccs_community',
+  moderation: 'ccs_moderation',
+  cycles: 'ccs_evaluation',
+  assignments: 'ccs_evaluation',
+  followUps: 'ccs_evaluation',
+  restrictions: 'ccs_discipline',
+  referrals: 'ccs_discipline',
+  goodMoral: 'ccs_discipline',
+  // Report drafts hold concern narratives, so they stay out of the forum table.
+  drafts: 'ccs_assistant',
+  telemetry: 'ccs_assistant',
+  permissionOverrides: 'ccs_identity',
 }
 const stored = Object.keys(persisted) as Collection[]
 // A unit of work that loses a version race runs again on fresh data, up to this many times in all.
 const attempts = 3
 
-type Row = { id: string }
-type Rows = Record<Collection, Row[]>
+type Row = Record<string, unknown>
 type Loaded = Partial<Record<Collection, StoredRecord[]>>
 const addOnly = () => new Error('Audit entries are add-only.')
+
+// Domain rules see these as objects. Each key is stored as its own record, wrapped so a value can be a plain boolean.
+const objectCollections: ReadonlySet<Collection> = new Set(['drafts', 'settings', 'permissionOverrides'])
+const toRows = (name: Collection, value: unknown): Row[] => (objectCollections.has(name) ? Object.entries(value as Row).map(([id, entry]) => ({ id, value: entry })) : (value as Row[]))
+const fromRows = (name: Collection, rows: Row[]): unknown => (objectCollections.has(name) ? Object.fromEntries(rows.map((row) => [row.id, row.value])) : rows)
+// Good Moral has one row per student and no ID of its own.
+const keyOf = (name: Collection, row: Row) => String(name === 'goodMoral' ? row.studentId : row.id)
 
 /**
  * A `Repository` for several instances that share a record store. The seed is the base: each stored record replaces the
  * seeded record with the same ID, a stored deletion hides it, and new records follow in ID order. Collections outside
- * `persisted` (users, posts, todos, ...) stay per instance, as they are in memory, so they are lost on a cold start.
+ * `persisted` (`users`, `spaces`, `organizations`, `offenses`) stay per instance, as they are in memory.
  * Each unit of work runs on a private copy; `transact` then writes only the records it changed, each conditioned on the
  * version it read, in one DynamoDB transaction per `writeLimit` writes. Conflicting units run again.
  * ponytail: write-write conflicts only. A unit that reads a record and acts on it without changing it is not validated.
@@ -43,14 +65,14 @@ export function createRecordRepository(store: RecordStore): Repository {
     return next
   }
 
-  // ponytail: loads whole collections on every unit of work. Notifications and the audit trail grow without bound, so give
+  // ponytail: loads whole collections on every unit of work. Notifications, telemetry, and the audit trail grow without bound, so give
   // them a per-user key or a time window in the table once a page view slows down.
   const load = async (names: readonly Collection[]) => Object.fromEntries(await Promise.all(names.map(async (name) => [name, await store.list(persisted[name], name)]))) as Loaded
 
   // A working copy: the per-instance state with the stored records laid over the seed. Collections that were not loaded throw when read.
   function open(loaded: Loaded) {
     const db = structuredClone(local)
-    const rows = db as unknown as Rows
+    const collections = db as unknown as Record<Collection, unknown>
     const baseline = new Map<Collection, Map<string, string>>()
     const versions = new Map<Collection, Map<string, number>>()
     for (const name of stored) {
@@ -60,32 +82,35 @@ export function createRecordRepository(store: RecordStore): Repository {
         continue
       }
       const byId = new Map(records.map((record) => [record.id, record]))
-      const seeded = new Set(rows[name].map((row) => row.id))
+      const seedRows = toRows(name, collections[name])
+      const seeded = new Set(seedRows.map((row) => keyOf(name, row)))
       const merged: Row[] = []
-      for (const row of rows[name]) {
-        const record = byId.get(row.id)
+      for (const row of seedRows) {
+        const record = byId.get(keyOf(name, row))
         if (!record) merged.push(row)
         else if (record.data !== undefined) merged.push(JSON.parse(record.data))
       }
       for (const record of records) if (!seeded.has(record.id) && record.data !== undefined) merged.push(JSON.parse(record.data))
-      rows[name] = merged
-      baseline.set(name, new Map(merged.map((row) => [row.id, JSON.stringify(row)])))
+      collections[name] = fromRows(name, merged)
+      baseline.set(name, new Map(merged.map((row) => [keyOf(name, row), JSON.stringify(row)])))
       versions.set(name, new Map(records.map((record) => [record.id, record.version])))
     }
-    return { db, rows, baseline, versions }
+    return { db, baseline, versions }
   }
 
   // Records that differ from what was loaded, version conditions first so a lost race shows in the first transaction.
-  function changes({ rows, baseline, versions }: ReturnType<typeof open>) {
+  function changes({ db, baseline, versions }: ReturnType<typeof open>) {
+    const collections = db as unknown as Record<Collection, unknown>
     const writes: RecordWrite[] = []
     for (const [name, before] of baseline) {
       const ids = new Set<string>()
-      for (const row of rows[name]) {
-        ids.add(row.id)
+      for (const row of toRows(name, collections[name])) {
+        const id = keyOf(name, row)
+        ids.add(id)
         const data = JSON.stringify(row)
-        if (before.get(row.id) === data) continue
-        if (name === 'audit' && before.has(row.id)) throw addOnly()
-        writes.push({ table: persisted[name], collection: name, id: row.id, data, version: versions.get(name)!.get(row.id) })
+        if (before.get(id) === data) continue
+        if (name === 'audit' && before.has(id)) throw addOnly()
+        writes.push({ table: persisted[name], collection: name, id, data, version: versions.get(name)!.get(id) })
       }
       for (const id of before.keys()) {
         if (ids.has(id)) continue

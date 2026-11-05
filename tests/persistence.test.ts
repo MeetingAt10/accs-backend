@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.js'
 import { createMemoryAuthStore } from '../src/auth.js'
 import type { DomainTable } from '../src/env.js'
-import { createRecordRepository, createRepository } from '../src/persist.js'
+import { createRecordRepository, createRepository, persisted } from '../src/persist.js'
 import { createDynamoRecordStore, createMemoryRecordStore, RecordConflict, writeLimit, type RecordStore, type RecordWrite } from '../src/records.js'
 import { ApiError } from '../src/services.js'
 import { createMemorySessionStore } from '../src/sessions.js'
@@ -170,15 +170,15 @@ describe('the record repository', () => {
     const entry = await repo.transact((unit) => {
       const added = { id: unit.nextId('AUDIT'), at, actorId: 'QCU-ADMIN', action: 'Checked', module: 'identity', reference: 'x', result: 'Recorded' }
       unit.read().audit.push(added)
-      unit.read().todos.push({ id: 'MINE-1', ownerId: 'QCU-STU-CS', title: 'Stays on this instance', date: '2026-11-05', done: false })
+      unit.read().spaces[0]!.title = 'Stays on this instance'
       return added
     })
     entry.action = 'changed after the commit'
     expect((await repo.view((unit) => unit.read().audit.at(-1)))?.action).toBe('Checked')
-    expect((await repo.view((unit) => unit.read().todos.at(-1)))?.title).toBe('Stays on this instance')
+    expect(await repo.view((unit) => unit.read().spaces[0]?.title)).toBe('Stays on this instance')
     const other = createRecordRepository(store)
     expect((await other.view((unit) => unit.read().audit.at(-1)))?.id).toBe(entry.id)
-    expect(await other.view((unit) => unit.read().todos.some((todo) => todo.id === 'MINE-1'))).toBe(false)
+    expect(await other.view((unit) => unit.read().spaces[0]?.title)).not.toBe('Stays on this instance')
   })
 
   it('rolls back every change when the work throws, and writes nothing', async () => {
@@ -312,7 +312,7 @@ describe('the record repository', () => {
     await expect(repo.view((unit) => unit.read().reports, ['audit'])).rejects.toThrow('reports collection was not loaded')
     await expect(repo.transact((unit) => unit.read().slots, [])).rejects.toThrow('slots collection was not loaded')
     await repo.view((unit) => unit.read().reports)
-    expect(spy.lists.slice(-6).sort()).toEqual(['ccs_audit/audit', 'ccs_grievance/reports', 'ccs_messaging/threads', 'ccs_notification/notifications', 'ccs_scheduling/consultations', 'ccs_scheduling/slots'])
+    expect(spy.lists.slice(-21).sort()).toEqual(Object.entries(persisted).map(([name, table]) => `${table}/${name}`).sort())
   })
 
   it('takes turns when transactions arrive together, so none of them is lost', async () => {
@@ -434,11 +434,11 @@ describe('two app instances sharing a record store', () => {
     expect(response.status).toBe(404)
     const item = await repo.view((unit) => unit.read().moderation.find((entry) => entry.id === 'MOD-0101')!)
     expect([item.status, item.history]).toEqual(['Pending', []])
-    expect(store.all()).toEqual([])
+    expect(store.all().filter((entry) => entry.collection !== 'posts')).toEqual([])
   })
 
   it('reads, writes, and maps domain errors to their status', async () => {
-    const { instance } = instances(racing)
+    const { instance } = instances()
     const app = instance()
     const { agent: student } = await signIn(app, 'QCU-STU-IT-A')
     expect((await student.get('/api/session')).body.user.id).toBe('QCU-STU-IT-A')

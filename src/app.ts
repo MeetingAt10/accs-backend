@@ -35,7 +35,7 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     const token=cookieValue(req);if(!isWellFormedToken(token))return undefined
     const sessionId=sessionIdOf(token);const session=await sessions.get(sessionId);const now=Date.now()
     if(!session||sessionState(session,now)!=='live')return undefined
-    const user=await repository.view(unit=>{const db=unit.read();const account=db.users.find(u=>u.id===session.userId&&u.active);return account&&refreshRestrictions(db,account)},[]);if(!user)return undefined
+    const user=await repository.view(unit=>{const db=unit.read();const account=db.users.find(u=>u.id===session.userId&&u.active);return account&&refreshRestrictions(db,account)},['restrictions']);if(!user)return undefined
     if(now-Date.parse(session.lastSeenAt)>=sessionPolicy.touchIntervalMs)await sessions.touch(sessionId,new Date(now).toISOString())
     res.locals.sessionId=sessionId;return user
   }
@@ -62,7 +62,7 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   const blocked=(key:string)=>{const a=attempts.get(key);if(a&&a.until<=Date.now()){attempts.delete(key);return false}return !!a&&a.n>=5}
   const bump=(key:string)=>{const a=attempts.get(key);if(!a||a.until<=Date.now()){if(attempts.size>5000)for(const [k,v] of attempts)if(v.until<=Date.now())attempts.delete(k);attempts.set(key,{n:1,until:Date.now()+15*60*1000})}else a.n++}
   const tooMany=()=>new ApiError(429,'Too many attempts. Try again in 15 minutes.','TOO_MANY_ATTEMPTS')
-  const sessionOut=async(res:Response,user:User,status=200)=>send(res,sessionResponseSchema,sessionView(await repository.view(unit=>refreshRestrictions(unit.read(),user),[])),status)
+  const sessionOut=async(res:Response,user:User,status=200)=>send(res,sessionResponseSchema,sessionView(await repository.view(unit=>refreshRestrictions(unit.read(),user),['restrictions'])),status)
   app.use('/api',async(_req,_res,next)=>{await syncUsers();next()})
   app.post('/api/auth/sign-in',async(req,res)=>{
     const {emailOrId,password,remember}=signInSchema.parse(req.body);const key=emailOrId.trim().toLowerCase()
