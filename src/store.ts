@@ -82,7 +82,7 @@ export type Database = {
 }
 /** What domain rules see while they run. They stay synchronous, so one unit of work is never interleaved with another. */
 export interface UnitOfWork { read(): Database; nextId(prefix: string): string }
-/** The collections a shared backend keeps in its record store. Every other collection stays per instance (`persist.ts`). */
+/** The collections a shared backend keeps in its record store. `users`, `spaces`, `organizations`, and `offenses` stay per instance (`persist.ts`). */
 export type Collection = 'reports' | 'consultations' | 'slots' | 'threads' | 'notifications' | 'audit' | 'posts' | 'moderation' | 'drafts' | 'events' | 'todos' | 'cycles' | 'assignments' | 'followUps' | 'restrictions' | 'referrals' | 'goodMoral' | 'clusters' | 'settings' | 'permissionOverrides' | 'telemetry'
 /**
  * The storage boundary. A backend does its I/O around the work: it loads, runs the work, then commits.
@@ -97,8 +97,7 @@ export interface Repository {
 }
 /** Adds direct access to the live state, for tests and seeding. Application code goes through `view` and `transact`. */
 export interface MemoryRepository extends Repository { read(): Database }
-// One process owns this in-memory state, so on Lambda it is per instance and lost on a cold start. Domains move
-// to DynamoDB behind `Repository` one at a time (accs-architecture adr/0004).
+// One process owns this in-memory state, so it is per instance and lost on a restart. Deployed stacks use the record repository (`persist.ts`).
 export function createMemoryRepository(): MemoryRepository {
   const data = seed()
   const nextId = (prefix: string) => `${prefix}-${ulid()}`
