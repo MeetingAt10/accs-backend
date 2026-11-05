@@ -66,7 +66,8 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   const sessionOut=async(res:Response,user:User,status=200)=>send(res,sessionResponseSchema,sessionView(await repository.view(unit=>refreshRestrictions(unit.read(),user),['restrictions'])),status)
   app.use('/api',async(_req,_res,next)=>{await syncUsers();next()})
   app.post('/api/auth/sign-in',async(req,res)=>{
-    const {emailOrId,password,remember}=signInSchema.parse(req.body);const key=emailOrId.trim().toLowerCase()
+    // Per client as well as per identifier, so guesses from elsewhere cannot lock the owner out. On Lambda, serverless-http sets req.ip to API Gateway's source IP; elsewhere trust proxy stays off. Either way X-Forwarded-For cannot change it.
+    const {emailOrId,password,remember}=signInSchema.parse(req.body);const key=`${req.ip}|${emailOrId.trim().toLowerCase()}`
     if(blocked(key))throw tooMany()
     const user=await findUser(emailOrId);const stored=user&&credentialFor(user,await authStore.load())
     // Always run one scrypt verification so unknown accounts and wrong passwords cost the same.

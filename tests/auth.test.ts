@@ -1,3 +1,4 @@
+import serverless from 'serverless-http'
 import request from 'supertest'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -93,6 +94,64 @@ describe('sign-in', () => {
     expect(blocked.status).toBe(429)
     expect(blocked.body.code).toBe('TOO_MANY_ATTEMPTS')
     expect((await request(app).post('/api/auth/sign-in').send({ emailOrId: 'QCU-STU-IT-B', password: 'Accs@Qcu2026!' })).status).toBe(200)
+  })
+
+  it('does not give a client more attempts for a forged X-Forwarded-For outside Lambda', async () => {
+    const app = newApp()
+    const attempt = (n: number, pw: string) => request(app).post('/api/auth/sign-in').set('X-Forwarded-For', `10.0.0.${n}`).send({ emailOrId: 'QCU-STU-IT-A', password: pw })
+    for (let n = 0; n < 5; n++) expect((await attempt(n, 'Wrong!Passw0rd')).status).toBe(401)
+    expect((await attempt(5, 'Accs@Qcu2026!')).status).toBe(429)
+  })
+
+  describe('per client, through the Lambda handler', () => {
+    const seeded = 'Accs@Qcu2026!'
+    // An API Gateway HTTP API event: `sourceIp` is the connection's address, which the caller cannot set.
+    const signInFrom = async (handler: ReturnType<typeof serverless>, sourceIp: string, pw: string, headers: Record<string, string> = {}, emailOrId = 'QCU-STU-IT-A') => {
+      const result = await handler({
+        version: '2.0', routeKey: '$default', rawPath: '/api/auth/sign-in', rawQueryString: '', isBase64Encoded: false,
+        headers: { 'content-type': 'application/json', ...headers },
+        body: JSON.stringify({ emailOrId, password: pw }),
+        requestContext: { stage: '$default', requestId: 'r', http: { method: 'POST', path: '/api/auth/sign-in', protocol: 'HTTP/1.1', sourceIp, userAgent: 'test' } },
+      }, {}) as { statusCode: number }
+      return result.statusCode
+    }
+    const failFiveTimes = async (handler: ReturnType<typeof serverless>, sourceIp: string) => {
+      for (let n = 0; n < 5; n++) expect(await signInFrom(handler, sourceIp, 'Wrong!Passw0rd')).toBe(401)
+    }
+
+    it('does not block the same account from a different client', async () => {
+      const handler = serverless(newApp())
+      await failFiveTimes(handler, '203.0.113.7')
+      expect(await signInFrom(handler, '203.0.113.7', seeded)).toBe(429)
+      expect(await signInFrom(handler, '198.51.100.9', seeded)).toBe(200)
+    })
+
+    it('still limits the client that keeps failing, even after the owner signs in elsewhere', async () => {
+      const handler = serverless(newApp())
+      await failFiveTimes(handler, '203.0.113.7')
+      expect(await signInFrom(handler, '198.51.100.9', seeded)).toBe(200)
+      expect(await signInFrom(handler, '203.0.113.7', 'Wrong!Passw0rd')).toBe(429)
+      expect(await signInFrom(handler, '203.0.113.7', seeded)).toBe(429)
+    })
+
+    it('counts each client separately for the same account', async () => {
+      const handler = serverless(newApp())
+      await failFiveTimes(handler, '203.0.113.7')
+      await failFiveTimes(handler, '198.51.100.9')
+      expect(await signInFrom(handler, '192.0.2.1', seeded)).toBe(200)
+    })
+
+    it('does not give a client more attempts for a forged X-Forwarded-For', async () => {
+      const handler = serverless(newApp())
+      for (let n = 0; n < 5; n++) expect(await signInFrom(handler, '203.0.113.7', 'Wrong!Passw0rd', { 'x-forwarded-for': `10.0.0.${n}, 203.0.113.7` })).toBe(401)
+      expect(await signInFrom(handler, '203.0.113.7', seeded, { 'x-forwarded-for': '10.0.0.99, 203.0.113.7' })).toBe(429)
+    })
+
+    it('does not let a client spend its attempts on one spelling and continue on another', async () => {
+      const handler = serverless(newApp())
+      for (const spelling of ['QCU-STU-IT-A', 'qcu-stu-it-a', ' QCU-STU-IT-A ', 'Qcu-Stu-It-A', 'qcu-STU-it-A']) expect(await signInFrom(handler, '203.0.113.7', 'Wrong!Passw0rd', {}, spelling)).toBe(401)
+      expect(await signInFrom(handler, '203.0.113.7', seeded)).toBe(429)
+    })
   })
 
   it('no longer signs in by account ID alone or lists demo accounts', async () => {
