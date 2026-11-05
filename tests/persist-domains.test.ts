@@ -185,3 +185,33 @@ describe('a route writes through one instance', () => {
     expect((await student.get('/api/pages/P05')).status).toBe(200)
   })
 })
+
+describe('accounts across a restart', () => {
+  const profile = { title: 'Senior lecturer', bio: 'Updated bio.', education: 'MS CS', officeHours: 'Fridays' }
+
+  it('keeps saved profile text on every instance and after a cold start', async () => {
+    const { instance } = stack()
+    const { agent: prof } = await signIn(instance(), 'QCU-PROF-IT')
+    expect((await prof.post('/api/pages/P39/actions').send({ action: 'saveProfile', payload: profile })).status).toBe(200)
+    const { agent: viewer } = await signIn(instance(), 'QCU-STU-CS')
+    expect((await viewer.get('/api/pages/P38?id=QCU-PROF-IT')).body.data.record).toMatchObject(profile)
+  })
+
+  it('keeps the rest of the account when profile text is saved', async () => {
+    const { authStore, instance } = stack()
+    const { agent: prof } = await signIn(instance(), 'QCU-PROF-IT')
+    await prof.post('/api/pages/P39/actions').send({ action: 'saveProfile', payload: profile })
+    const stored = (await authStore.load()).users.find((user) => user.id === 'QCU-PROF-IT')!
+    expect(stored).toMatchObject({ ...profile, active: true })
+    expect(stored.roles).toContain('professor')
+  })
+
+  it('keeps P46/P47 role grants after a restart', async () => {
+    const { instance } = stack()
+    const { agent: admin } = await signIn(instance(), 'QCU-ADMIN')
+    const granted = await admin.post('/api/pages/P47/actions').send({ action: 'updateRoles', recordId: 'QCU-STAFF', reason: 'New duties', payload: { roles: ['staff', 'guidance'] } })
+    expect(granted.status, JSON.stringify(granted.body)).toBe(200)
+    const { agent: restarted } = await signIn(instance(), 'QCU-STAFF')
+    expect((await restarted.get('/api/session')).body.user.roles).toEqual(['staff', 'guidance'])
+  })
+})

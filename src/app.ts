@@ -7,12 +7,12 @@ import { z } from 'zod'
 import { type AuthData, type AuthStore, createAuthStore, defaultHash, hashPassword, verifyPassword } from './auth.js'
 import { env, onLambda, tableName } from './env.js'
 import { actionRequestSchema, actionResponseSchema, changePasswordSchema, completeFirstLoginSchema, emptyBodySchema, errorResponseSchema, forgotPasswordSchema, healthResponseSchema, idParamsSchema, pageQuerySchema, pageResponseSchema, resetPasswordSchema, sessionResponseSchema, signInSchema, type User } from './schemas.js'
-import { accountRouter, applyAccounts, recordAudit, saveAccountChange, setOwnCredentials, unsentMailer, type InviteMailer } from './accounts.js'
+import { accountRouter, applyAccounts, recordAudit, saveAccountChange, saveProfileChange, setOwnCredentials, unsentMailer, type InviteMailer } from './accounts.js'
 import { hasPermission } from './access.js'
 import { devRouter, devToolboxEnabled, isDevToolboxCall, type Stack } from './dev.js'
 import { send } from './http.js'
 import { createRepository } from './persist.js'
-import { ApiError, getPage, performAction, refreshRestrictions, sessionView, unavailable, type AccountChange } from './services.js'
+import { ApiError, getPage, performAction, refreshRestrictions, sessionView, unavailable, type AccountChange, type ProfileChange } from './services.js'
 import { createResetStore, resetPolicy, type ResetStore } from './resets.js'
 import { createSessionStore, isWellFormedToken, newSessionToken, sessionIdOf, sessionPolicy, sessionState, type SessionStore } from './sessions.js'
 import { demoUserIds, type Repository } from './store.js'
@@ -55,6 +55,7 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   const findUser=(ident:string)=>{const key=ident.trim().toLowerCase();return repository.view(unit=>unit.read().users.find(u=>u.active&&(u.email.toLowerCase()===key||u.id.toLowerCase()===key||u.studentId?.toLowerCase()===key||u.username?.toLowerCase()===key)),[])}
   // A role change made on the administrator's pages is saved to the auth store too, so it holds on every instance.
   const saveAccount=async(change:AccountChange)=>saveAccountChange(authStore,await repository.view(unit=>unit.read().users,[]),change)
+  const saveProfile=async(id:string,change:ProfileChange)=>saveProfileChange(authStore,await repository.view(unit=>unit.read().users,[]),id,change)
   // Only the seeded demo accounts fall back to the shared seed password, until they set their own. Every other account has a stored credential.
   const credentialFor=(user:User,data:AuthData)=>data.credentials[user.id]??(demoUserIds.has(user.id)?defaultHash():undefined)
   // ponytail: in-memory per instance, shared store needed if throttling must hold across Lambda instances
@@ -143,7 +144,7 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   })
   app.get('/api/session',(_req,res)=>send(res,sessionResponseSchema,sessionView(res.locals.user as User)))
   app.get('/api/pages/:pageId',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const query=pageQuerySchema.parse(req.query);send(res,pageResponseSchema,await getPage(repository,res.locals.user as User,pageId,query))})
-  app.post('/api/pages/:pageId/actions',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const body=actionRequestSchema.parse(req.body);send(res,actionResponseSchema,await performAction(repository,res.locals.user as User,pageId,body,saveAccount))})
+  app.post('/api/pages/:pageId/actions',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const body=actionRequestSchema.parse(req.body);send(res,actionResponseSchema,await performAction(repository,res.locals.user as User,pageId,body,saveAccount,saveProfile))})
   app.use('/api/accounts',accountRouter({repository,authStore,sessions,mailer:options.mailer??unsentMailer}))
   if(devToolbox)app.use('/api/dev',devRouter({repository,sessions,start:startSession,out:sessionOut}))
   app.use('/api',(_req,res)=>send(res,errorResponseSchema,{error:'This API resource is not available.',code:'NOT_FOUND'},404))

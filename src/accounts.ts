@@ -12,7 +12,7 @@ import {
   advisorsResponseSchema, createFacultySchema, facultyListResponseSchema, facultyQuerySchema, facultyRowSchema, importStudentsSchema, programParamsSchema,
   setActiveSchema, setAdvisorsSchema, setChairSchema, studentRowSchema, yearLevelParamsSchema, type Role, type User,
 } from './schemas.js'
-import { ApiError, deny, unavailable, type AccountChange } from './services.js'
+import { ApiError, deny, unavailable, type AccountChange, type ProfileChange } from './services.js'
 import type { SessionStore } from './sessions.js'
 import { demoUserIds, newUser, type Database, type Repository } from './store.js'
 
@@ -104,9 +104,10 @@ export function applyAccounts(db: Database, accounts: User[]) {
   for (const account of accounts) {
     const position = index.get(account.id)
     if (position === undefined) index.set(account.id, db.users.push(structuredClone(account)) - 1)
+    // Stored profile text wins; a stored account without any keeps what this instance has.
     else {
       const { title, bio, education, officeHours } = db.users[position]!
-      db.users[position] = { ...structuredClone(account), title, bio, education, officeHours }
+      db.users[position] = { ...structuredClone(account), title: account.title ?? title, bio: account.bio ?? bio, education: account.education ?? education, officeHours: account.officeHours ?? officeHours }
     }
     for (const space of db.spaces) {
       if (!account.spaceIds.includes(space.id) || members.get(space.id)!.has(account.id)) continue
@@ -156,6 +157,13 @@ export async function setOwnCredentials(authStore: AuthStore, users: User[], use
 export async function saveAccountChange(authStore: AuthStore, users: User[], { id, roles, active, program, section }: AccountChange) {
   await authStore.update((data) => {
     Object.assign(edit(data, merged(users, data), id), { roles, active, ...(program ? { program } : {}), ...(section ? { section } : {}) })
+  })
+}
+
+/** Saves the profile text a person edits themselves, so every instance shows it. */
+export async function saveProfileChange(authStore: AuthStore, users: User[], id: string, change: ProfileChange) {
+  await authStore.update((data) => {
+    Object.assign(edit(data, merged(users, data), id), change)
   })
 }
 
