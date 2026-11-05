@@ -626,14 +626,16 @@ describe('over a record store that instances share', () => {
     const lists: string[] = []
     const watched: RecordStore = { list: (table, collection) => { lists.push(`${table}/${collection}`); return store.list(table, collection) }, write: (writes) => store.write(writes) }
     const app = createApp(createRecordRepository(watched), { authStore: createMemoryAuthStore(), sessionStore: createMemorySessionStore(), stack: { tablePrefix: 'accs-dev-', nodeEnv: 'production' } })
-    // Signing in, and reading the session, touch accounts only.
+    // Signing in, and reading the session, touch accounts and the account's restrictions only.
+    const restrictions = 'ccs_discipline/restrictions'
+    const besides = () => lists.filter((list) => list !== restrictions)
     const { agent: admin } = await signIn(app, 'QCU-ADMIN')
-    expect(lists).toEqual([])
+    expect(lists).toEqual([restrictions])
     expect((await admin.post('/api/admin/accounts/QCU-STU-IT-A/reset-code').send({})).status).toBe(200)
-    expect(lists).toEqual(['ccs_audit/audit'])
+    expect(besides()).toEqual(['ccs_audit/audit'])
     const { agent: dean } = await signIn(app, 'QCU-DEAN')
     expect((await dean.post('/api/dev/switch-user').send({ userId: 'QCU-STU-IT-A' })).status).toBe(200)
-    expect(lists).toEqual(['ccs_audit/audit', 'ccs_audit/audit'])
+    expect(besides()).toEqual(['ccs_audit/audit', 'ccs_audit/audit'])
     expect(store.all().map((item) => `${item.table}/${item.collection}`)).toEqual(['ccs_audit/audit', 'ccs_audit/audit'])
   })
 
