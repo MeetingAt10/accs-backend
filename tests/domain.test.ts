@@ -2,11 +2,12 @@ import request from 'supertest'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.js'
 import { createMemoryRepository } from '../src/store.js'
+import { concernChoices } from './helpers.js'
 
 let repo=createMemoryRepository();let app=createApp(repo)
 beforeEach(()=>{repo=createMemoryRepository();app=createApp(repo)})
 async function login(id:string){const agent=request.agent(app);expect((await agent.post('/api/auth/sign-in').send({emailOrId:id,password:'Accs@Qcu2026!'})).status).toBe(200);return agent}
-const reportPayload={narrative:'A laboratory timetable change needs review.',category:'General concern',severity:'medium',identity:'anonymous'}
+const reportPayload={narrative:'A laboratory timetable change needs review.',category:'General concern',severity:'medium',identity:'anonymous',...concernChoices}
 describe('report and case workflow',()=>{
  it('STU-06-V/I and GUD-01-B validates submission without partial writes and begins as a Report',async()=>{const student=await login('QCU-STU-IT-A');const before=repo.read().reports.length;expect((await student.post('/api/pages/P19/actions').send({action:'createReport',payload:{...reportPayload,narrative:''}})).status).toBe(400);expect(repo.read().reports).toHaveLength(before);const result=await student.post('/api/pages/P19/actions').send({action:'createReport',payload:reportPayload});expect(result.status).toBe(200);expect(result.body.record.type).toBe('Report');expect(result.body.record.stage).toBe('adviser');expect(result.body.record).not.toHaveProperty('caseFileId')})
  it('PRO-06-B / CHR-02-V/B bypasses a named adviser without disclosing the report to them',async()=>{const student=await login('QCU-STU-IT-A');const created=await student.post('/api/pages/P19/actions').send({action:'createReport',payload:{...reportPayload,involvedUserIds:['QCU-PROF-IT']}});const id=created.body.record.id;expect(created.body.record.stage).toBe('chair');const prof=await login('QCU-PROF-IT');expect((await prof.get(`/api/pages/P22?id=${id}`)).status).toBe(404);expect((await prof.post('/api/pages/P22/actions').send({action:'caseAction',recordId:id,reason:'Should be rejected',payload:{type:'resolve',update:'Invalid action'}})).status).toBe(404);const chair=await login('QCU-CHAIR-IT');const r=await chair.get(`/api/pages/P22?id=${id}`);expect(r.body.data.record.bypassed).toBe(true);expect(JSON.stringify(created.body.record)).not.toContain('Adviser involvement declared')})

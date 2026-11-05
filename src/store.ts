@@ -1,9 +1,22 @@
-import type { Role, User } from './schemas.js'
+import { consentWording } from './consent.js'
+import { ulid } from './ids.js'
+import type { Role, TalkMode, User } from './schemas.js'
 
 export type Stage = 'adviser' | 'chair' | 'dean' | 'guidance' | 'osas' | 'executive'
 export type Message = { id: string; authorId: string; body: string; at: string }
 export type History = { id: string; at: string; actorId: string; actorRole: string; action: string; reason: string; update: string; public: boolean; stage: Stage }
-export type Report = { id: string; ownerId: string; program: string; adviserId: string; stage: Stage; status: string; narrative: string; category: string; severity: 'low' | 'medium' | 'high'; identity: 'named' | 'anonymous'; alias: string; disclosedTo: string[]; involvedUserIds: string[]; bypassed: boolean; createdAt: string; updatedAt: string; caseFileId?: string; sourcePostId?: string; location?: string; occurredOn?: string; history: History[]; notes: Message[]; messages: Message[] }
+/** The student's agreement to send a concern, stamped by the server with the exact wording they were shown. */
+export type ReportConsent = { readStatement: true; at: string; userId: string; version: string; wording: string }
+/** One agreement to talk in one way. A student who changes the way adds another; earlier ones stay. */
+export type TalkConsent = { mode: TalkMode; participate: true; recordCall?: boolean; wording: string; at: string }
+/** How the student and the office handling the concern talk. `meetingLink` (video, voice) and `place` (face to face) are added by that office. */
+export type Talk = { mode: TalkMode; consents: TalkConsent[]; slotId?: string; consultationId?: string; preferredAt?: string; scheduledAt?: string; meetingLink?: string; place?: string; updatedAt: string }
+/**
+ * `aboutAdvisor` is true when the concern goes around the adviser: the student said so, or the adviser is named in it.
+ * Then the adviser never sees it. `allowChair` and `allowDean` are the student's choice; an office they did not allow
+ * cannot read the concern. A report stored before these fields existed has none of them, which reads as "not allowed".
+ */
+export type Report = { id: string; ownerId: string; program: string; adviserId?: string; stage: Stage; status: string; narrative: string; category: string; severity: 'low' | 'medium' | 'high'; identity: 'named' | 'anonymous'; alias: string; disclosedTo: string[]; involvedUserIds: string[]; bypassed: boolean; aboutAdvisor: boolean; allowChair: boolean; allowDean: boolean; consent: ReportConsent; talk?: Talk; createdAt: string; updatedAt: string; caseFileId?: string; sourcePostId?: string; location?: string; occurredOn?: string; history: History[]; notes: Message[]; messages: Message[] }
 export type Post = {
   id: string
   authorId: string
@@ -54,7 +67,7 @@ export type Thread = {
   readMessageCounts: Record<string, number>
 }
 export type Slot = { id: string; facultyId: string; date: string; start: string; end: string; state: 'open' | 'requested' | 'booked' | 'unavailable' }
-export type Consultation = { id: string; studentId: string; facultyId: string; slotId: string; purpose: string; status: 'Requested' | 'Approved' | 'Booked' | 'Completed' | 'Declined' | 'Cancelled'; createdAt: string; updatedAt: string; history: { at: string; status: string; note: string; actorId: string }[] }
+export type Consultation = { id: string; studentId: string; facultyId: string; slotId: string; /** The concern this time is for, when the student booked it to talk about one. */ reportId?: string; purpose: string; status: 'Requested' | 'Approved' | 'Booked' | 'Completed' | 'Declined' | 'Cancelled'; createdAt: string; updatedAt: string; history: { at: string; status: string; note: string; actorId: string }[] }
 export type Question = { id: string; criterion: string; text: string; type: 'rating' | 'text'; required: boolean }
 export type Cycle = { id: string; title: string; term: string; opens: string; closes: string; status: 'Draft' | 'In review' | 'Published' | 'Closed'; instructions: string; questions: Question[]; forms: string[]; resultsPublished: boolean; reviews: { userId: string; decision: string; note: string; at: string }[] }
 export type Assignment = { id: string; evaluatorId: string; facultyId: string; cycleId: string; relation: string; subject: string; answers?: Record<string, string | number>; comment?: string; submittedAt?: string }
@@ -64,16 +77,54 @@ export type Notification = { id: string; recipientId: string; kind: string; titl
 export type Audit = { id: string; at: string; actorId: string; action: string; module: string; reference: string; result: string; purpose?: string; reason?: string }
 export type Moderation = { id: string; itemType: 'post' | 'comment' | 'message'; itemId: string; parentId: string; authorId: string; reporterId?: string; source: 'Filter' | 'User'; reason: string; excerpt: string; status: string; at: string; history: { at: string; actorId: string; decision: string; reason: string }[] }
 export type Database = {
-  sequence: number; users: User[]; spaces: Space[]; organizations: Organization[]; posts: Post[]; threads: Thread[]; slots: Slot[]; consultations: Consultation[]; reports: Report[]; drafts: Record<string, Record<string, unknown>>; todos: { id: string; ownerId: string; title: string; date: string; done: boolean }[];
+  users: User[]; spaces: Space[]; organizations: Organization[]; posts: Post[]; threads: Thread[]; slots: Slot[]; consultations: Consultation[]; reports: Report[]; drafts: Record<string, Record<string, unknown>>; todos: { id: string; ownerId: string; title: string; date: string; done: boolean }[];
   events: Event[]; cycles: Cycle[]; assignments: Assignment[]; restrictions: Restriction[]; referrals: Referral[]; offenses: { id: string; studentId: string; level: number; summary: string; decisionReference: string; actorRole: string; at: string; status: string }[]; goodMoral: { studentId: string; status: string; decisionSource: string; notes: string; actorId: string; at: string }[]; clusters: { id: string; program: string; title: string; reportIds: string[]; similarity: number; supporting: string; dissenting: string; phrases: string[]; status: string; history: { at: string; actorId: string; decision: string; reason: string }[] }[]; notifications: Notification[]; audit: Audit[]; moderation: Moderation[]; settings: Record<string, { theme: string; density: string; priorities: Record<string, string> }>; permissionOverrides: Record<string, boolean>; telemetry: { at: string; category: string; durationMs: number; success: boolean }[]; followUps: { facultyId: string; actorId: string; note: string; at: string }[];
 }
-export interface Repository { read(): Database; nextId(prefix: string): string }
-// One process owns this in-memory state. Replace this repository when persistent storage is chosen.
-export function createMemoryRepository(): Repository { const data = seed(); return { read: () => data, nextId: (prefix) => `${prefix}-${String(++data.sequence).padStart(4, '0')}` } }
+/** What domain rules see while they run. They stay synchronous, so one unit of work is never interleaved with another. */
+export interface UnitOfWork { read(): Database; nextId(prefix: string): string }
+/** The collections a shared backend keeps in its record store. Every other collection stays per instance (`persist.ts`). */
+export type Collection = 'reports' | 'consultations' | 'slots' | 'threads' | 'notifications' | 'audit'
+/**
+ * The storage boundary. A backend does its I/O around the work: it loads, runs the work, then commits.
+ * - `view`: read-only. Anything the work changes is discarded, and what it returns is detached from the store.
+ * - `transact`: all or nothing. If the work throws, nothing it changed is kept.
+ * `collections` names the stored collections the work touches (default: all). A backend that loads on demand skips the
+ * others, and the work throws if it reads one that was not named. Memory ignores it.
+ */
+export interface Repository {
+  view<T>(work: (unit: UnitOfWork) => T, collections?: readonly Collection[]): Promise<T>
+  transact<T>(work: (unit: UnitOfWork) => T, collections?: readonly Collection[]): Promise<T>
+}
+/** Adds direct access to the live state, for tests and seeding. Application code goes through `view` and `transact`. */
+export interface MemoryRepository extends Repository { read(): Database }
+// One process owns this in-memory state, so on Lambda it is per instance and lost on a cold start. Domains move
+// to DynamoDB behind `Repository` one at a time (accs-architecture adr/0004).
+export function createMemoryRepository(): MemoryRepository {
+  const data = seed()
+  const nextId = (prefix: string) => `${prefix}-${ulid()}`
+  return {
+    read: () => data,
+    view: async (work) => {
+      const copy = structuredClone(data)
+      return work({ read: () => copy, nextId: () => { throw new Error('A read-only view cannot allocate IDs.') } })
+    },
+    transact: async (work) => {
+      const before = structuredClone(data)
+      try {
+        return structuredClone(work({ read: () => data, nextId }))
+      } catch (error) {
+        Object.assign(data, before)
+        throw error
+      }
+    },
+  }
+}
 
 function user(id: string, name: string, roles: Role[], extra: Partial<User> = {}): User { return { id, name, email: `${id.toLowerCase().replaceAll('qcu-', '').replaceAll('-', '.')}@qcu.edu.ph`, roles, restrictions: [], title: roles.includes('student') ? 'CCS student' : 'CCS personnel', bio: roles.includes('student') ? 'Student, QCU College of Computer Studies.' : 'QCU College of Computer Studies.', education: roles.includes('student') ? 'Quezon City University' : 'Quezon City University, College of Computer Studies', officeHours: 'By appointment. Request a time under Consultations.', spaceIds: [], organizationIds: [], active: true, ...extra } }
+/** The account shape with its default profile text, for accounts created after the seed. */
+export const newUser = user
 const at = '2026-10-20T02:00:00.000Z'
-function seed(): Database {
+export function seed(): Database {
   const users: User[] = [
     user('QCU-STU-IT-A', 'Mira Solis', ['student'], { program: 'BSIT', section: 'A', year: 3, studentId: 'QCU-2024-0101', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], organizationIds: ['ORG-COMPUTING'] }),
     user('QCU-STU-IT-B', 'Luca Reed', ['student'], { program: 'BSIT', section: 'B', year: 3, studentId: 'QCU-2024-0102', adviserId: 'QCU-PROF-OTHER', spaceIds: ['SPACE-IT-B'] }),
@@ -91,6 +142,8 @@ function seed(): Database {
     user('QCU-GUIDANCE', 'Alex Fern', ['guidance'], { office: 'Guidance Office', title: 'Guidance officer', officeHours: 'Weekdays, 9:00 AM to 4:00 PM' }),
     user('QCU-OSAS', 'Jamie Alder', ['osas'], { office: 'Office of Student Affairs and Services', title: 'OSAS officer', officeHours: 'Weekdays, 9:00 AM to 4:00 PM' }),
     user('QCU-PRESIDENT', 'Taylor Rowan', ['president'], { office: 'Office of the University President', title: 'Staff, Office of the University President' }),
+    // Inactive until the Dean activates it. The email is a placeholder: activation can replace it.
+    user('QCU-SECRETARY', 'CCS Secretary', ['secretary'], { active: false, email: 'secretary@example.invalid', office: 'CCS Office', title: 'CCS secretary', officeHours: 'Monday to Friday, 8:00 AM to 5:00 PM' }),
   ]
   const spaces: Space[] = [
     { id: 'SPACE-IT-A', title: 'BSIT 3A', program: 'BSIT', section: 'A', subject: 'Section group', professorIds: ['QCU-PROF-IT'], studentIds: ['QCU-STU-IT-A', 'QCU-STU-RESTRICTED'] },
@@ -110,7 +163,7 @@ function seed(): Database {
   function report(id: string, ownerId: string, stage: Stage, bypassed = false, converted = false): Report {
     const owner = users.find(u => u.id === ownerId)!
     const history = stages.slice(0, stages.indexOf(stage) + 1).filter(s => !bypassed || s !== 'adviser').map((s, index): History => ({ id: `H-${id}-${index}`, at, actorId: s === 'adviser' ? owner.adviserId! : s === 'chair' && owner.program === 'BSCS' ? 'QCU-CHAIR-CS' : actorIds[s], actorRole: stageRoles[s], action: index === 0 ? 'Submitted' : 'Transferred', reason: 'Routine routing', update: 'The office is reviewing your report.', public: true, stage: s }))
-    return { id, ownerId, program: owner.program!, adviserId: owner.adviserId!, stage, status: stage === 'guidance' && converted ? 'Case File at Guidance' : `With ${stage}`, narrative: 'The IC 301 lab timetable changed on Monday and nobody told us. Our group missed a scheduled activity. Please look into how lab schedule changes are announced.', category: 'General concern', severity: 'medium', identity: 'anonymous', alias: `Reporter A-${id.slice(-2)}`, disclosedTo: [], involvedUserIds: bypassed ? [owner.adviserId!] : [], bypassed, createdAt: at, updatedAt: at, ...(converted ? { caseFileId: `CF-${id.slice(-4)}` } : {}), history, notes: [{ id: `NOTE-${id}`, authorId: actorIds[stage], body: 'Asked the lab coordinator about the Monday timetable change. Waiting for a reply.', at }], messages: [{ id: `MSG-${id}`, authorId: actorIds[stage], body: 'We received your report. Reply here if you have more details.', at }] }
+    return { id, ownerId, program: owner.program!, adviserId: owner.adviserId!, stage, status: stage === 'guidance' && converted ? 'Case File at Guidance' : `With ${stage}`, narrative: 'The IC 301 lab timetable changed on Monday and nobody told us. Our group missed a scheduled activity. Please look into how lab schedule changes are announced.', category: 'General concern', severity: 'medium', identity: 'anonymous', alias: `Reporter A-${id.slice(-2)}`, disclosedTo: [], involvedUserIds: bypassed ? [owner.adviserId!] : [], bypassed, aboutAdvisor: bypassed, allowChair: true, allowDean: true, consent: { readStatement: true, at, userId: ownerId, version: consentWording.version, wording: consentWording.report }, talk: { mode: 'chat', consents: [{ mode: 'chat', participate: true, wording: consentWording.talk.chat, at }], updatedAt: at }, createdAt: at, updatedAt: at, ...(converted ? { caseFileId: `CF-${id.slice(-4)}` } : {}), history, notes: [{ id: `NOTE-${id}`, authorId: actorIds[stage], body: 'Asked the lab coordinator about the Monday timetable change. Waiting for a reply.', at }], messages: [{ id: `MSG-${id}`, authorId: actorIds[stage], body: 'We received your report. Reply here if you have more details.', at }] }
   }
   const reports = [report('RPT-0241', 'QCU-STU-IT-A', 'adviser'), report('RPT-0242', 'QCU-STU-IT-A', 'chair', true), report('RPT-0243', 'QCU-STU-IT-B', 'dean'), report('RPT-0244', 'QCU-STU-RESTRICTED', 'guidance'), report('RPT-0245', 'QCU-STU-IT-A', 'guidance', false, true), report('RPT-0246', 'QCU-STU-IT-A', 'osas', false, true), report('RPT-0247', 'QCU-STU-IT-A', 'executive', false, true), report('RPT-0248', 'QCU-STU-CS', 'chair')]
   reports[0]!.sourcePostId = 'POST-0102'
@@ -130,7 +183,7 @@ function seed(): Database {
   for (const faculty of users.filter(u => u.roles.some(r => ['professor', 'chair', 'dean'].includes(r)))) for (let n = 0; n < 5; n++) assignments.push({ id: `EVAL-SAMPLE-${faculty.id}-${n}`, evaluatorId: `SAMPLE-EVALUATOR-${n}`, facultyId: faculty.id, cycleId: 'CYCLE-2026-1', relation: 'Aggregate response', subject: 'Course evaluation', answers: { Q1: n % 2 ? 4 : 5, Q2: 4, Q3: n % 2 ? 5 : 4 }, submittedAt: at, comment: '' })
   const restrictions: Restriction[] = [{ id: 'RST-0101', studentId: 'QCU-STU-RESTRICTED', features: ['post.create', 'post.comment', 'report.anonymous'], basis: 'OSAS decision on file', decisionReference: 'QCU-DEC-001', starts: at, until: '2026-12-01', actorId: 'QCU-ADMIN', active: true }]
   return {
-    sequence: 1000, users, spaces, organizations: [{ id: 'ORG-COMPUTING', name: 'CCS Computing Society', description: 'Student organization of the College of Computer Studies. Runs workshops and peer tutoring.', representativeId: 'QCU-ORG', memberIds: ['QCU-STU-IT-A'] }], posts, reports, drafts: {},
+    users, spaces, organizations: [{ id: 'ORG-COMPUTING', name: 'CCS Computing Society', description: 'Student organization of the College of Computer Studies. Runs workshops and peer tutoring.', representativeId: 'QCU-ORG', memberIds: ['QCU-STU-IT-A'] }], posts, reports, drafts: {},
     threads: [
       {
         id: 'THREAD-IT-A',
@@ -167,3 +220,5 @@ function seed(): Database {
     moderation: [{ id: 'MOD-0101', itemType: 'comment', itemId: 'COMMENT-0101', parentId: 'POST-0102', authorId: 'QCU-STU-IT-B', reporterId: 'QCU-STU-IT-A', source: 'User', reason: 'Reported by a classmate as off-topic', excerpt: 'Same problem in BSIT 3B. A posted lab schedule would help us plan.', status: 'Pending', at, history: [] }], settings: {}, permissionOverrides: {}, telemetry: [], followUps: [],
   }
 }
+/** The seeded accounts that sign in with the shared seed password until they set their own. Inactive ones (the secretary) never do. */
+export const demoUserIds: ReadonlySet<string> = new Set(seed().users.filter(u => u.active).map(u => u.id))

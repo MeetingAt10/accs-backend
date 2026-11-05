@@ -5,11 +5,13 @@ import { createApp } from '../src/app.js'
 import { createMemoryAuthStore, hashPassword, passwordProblem, verifyPassword } from '../src/auth.js'
 import { createMemoryResetStore } from '../src/resets.js'
 import { createMemorySessionStore, sessionIdOf, sessionPolicy } from '../src/sessions.js'
+import type { User } from '../src/schemas.js'
 import { createMemoryRepository } from '../src/store.js'
 
 const password = 'Str0ng!Passw0rd'
-const student = { fullName: 'Ana Reyes', email: 'Ana.Reyes@example.com', identifier: '24-1234', role: 'student', program: 'BSIT', yearLevel: 3, section: 'A', password }
-const newApp = () => createApp(createMemoryRepository(), { authStore: createMemoryAuthStore() })
+const ana: User = { id: 'USR-ANA', name: 'Ana Reyes', email: 'ana.reyes@example.com', roles: ['student'], program: 'BSIT', section: 'A', year: 3, studentId: '24-1234', restrictions: [], title: '', bio: '', education: '', officeHours: '', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], organizationIds: [], active: true }
+const withAna = (authStore = createMemoryAuthStore()) => { void authStore.update(data => { data.users.push(ana); data.credentials[ana.id] = hashPassword(password) }); return authStore }
+const newApp = () => createApp(createMemoryRepository(), { authStore: withAna() })
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -28,54 +30,47 @@ describe('password helpers', () => {
   })
 })
 
-describe('registration and sign-in', () => {
-  it('registers, restores the session, signs out and signs back in by email and ID', async () => {
+describe('sign-in', () => {
+  it('signs in by email and ID, restores the session and signs out', async () => {
     const app = newApp()
-    const agent = request.agent(app)
-    const created = await agent.post('/api/auth/register').send(student)
-    expect(created.status).toBe(201)
-    expect(String(created.headers['set-cookie'])).toContain('accs_session=')
-    expect(created.body.user).toMatchObject({ name: 'Ana Reyes', email: 'ana.reyes@example.com', roles: ['student'], studentId: '24-1234', program: 'BSIT', section: 'A', year: 3, spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'] })
-    expect((await agent.get('/api/session')).body.user.id).toBe(created.body.user.id)
-    expect((await agent.get('/api/pages/P03')).status).toBe(200)
-
-    await agent.post('/api/auth/sign-out').send({})
-    expect((await request(app).get('/api/session')).status).toBe(401)
-
     const byEmail = await request(app).post('/api/auth/sign-in').send({ emailOrId: 'ANA.REYES@example.com', password })
     expect(byEmail.status).toBe(200)
-    expect(byEmail.body.user.id).toBe(created.body.user.id)
+    expect(byEmail.body.user).toMatchObject({ id: 'USR-ANA', roles: ['student'], studentId: '24-1234', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'] })
+    const agent = request.agent(app)
+    await agent.post('/api/auth/sign-in').send({ emailOrId: '24-1234', password })
+    expect((await agent.get('/api/session')).body.user.id).toBe('USR-ANA')
+    expect((await agent.get('/api/pages/P03')).status).toBe(200)
+    await agent.post('/api/auth/sign-out').send({})
+    expect((await agent.get('/api/session')).status).toBe(401)
+
     const byId = await request(app).post('/api/auth/sign-in').send({ emailOrId: '24-1234', password, remember: true })
-    expect(byId.status).toBe(200)
     expect(String(byId.headers['set-cookie'])).toMatch(/Max-Age=2592000/)
     expect(String((await request(app).post('/api/auth/sign-in').send({ emailOrId: '24-1234', password })).headers['set-cookie'])).not.toMatch(/Max-Age/)
   })
 
-  it('shares a registered user across app instances through the auth store', async () => {
-    const authStore = createMemoryAuthStore()
+  it('shares a stored user across app instances through the auth store', async () => {
+    const authStore = withAna()
     const first = createApp(createMemoryRepository(), { authStore })
     const second = createApp(createMemoryRepository(), { authStore })
-    const created = await request(first).post('/api/auth/register').send(student)
-    const cookie = String(created.headers['set-cookie'][0]).split(';')[0]
+    const cookie = String((await request(first).post('/api/auth/sign-in').send({ emailOrId: ana.email, password })).headers['set-cookie'][0]).split(';')[0]
     // Separate session stores, so the second instance does not know this session.
     expect((await request(second).get('/api/session').set('Cookie', cookie)).status).toBe(401)
-    expect((await request(second).post('/api/auth/sign-in').send({ emailOrId: 'ana.reyes@example.com', password })).status).toBe(200)
+    expect((await request(second).post('/api/auth/sign-in').send({ emailOrId: ana.email, password })).status).toBe(200)
   })
 
   it('accepts a session on every instance that shares the session store', async () => {
-    const authStore = createMemoryAuthStore()
+    const authStore = withAna()
     const sessionStore = createMemorySessionStore()
     const first = createApp(createMemoryRepository(), { authStore, sessionStore })
     const second = createApp(createMemoryRepository(), { authStore, sessionStore })
-    const created = await request(first).post('/api/auth/register').send(student)
+    const created = await request(first).post('/api/auth/sign-in').send({ emailOrId: ana.email, password })
     const cookie = String(created.headers['set-cookie'][0]).split(';')[0]
-    expect((await request(second).get('/api/session').set('Cookie', cookie)).body.user.id).toBe(created.body.user.id)
+    expect((await request(second).get('/api/session').set('Cookie', cookie)).body.user.id).toBe('USR-ANA')
   })
 
   it('rejects wrong passwords with a generic error', async () => {
     const app = newApp()
-    await request(app).post('/api/auth/register').send(student)
-    const wrong = await request(app).post('/api/auth/sign-in').send({ emailOrId: 'ana.reyes@example.com', password: 'Wrong!Passw0rd' })
+    const wrong = await request(app).post('/api/auth/sign-in').send({ emailOrId: ana.email, password: 'Wrong!Passw0rd' })
     const unknown = await request(app).post('/api/auth/sign-in').send({ emailOrId: 'nobody@example.com', password })
     for (const response of [wrong, unknown]) {
       expect(response.status).toBe(401)
@@ -83,24 +78,11 @@ describe('registration and sign-in', () => {
     }
   })
 
-  it('rejects weak passwords, bad identifiers, missing student fields and privileged roles', async () => {
-    const app = newApp()
-    for (const bad of [{ ...student, password: 'weak' }, { ...student, identifier: '2024-1234' }, { ...student, program: undefined }, { ...student, section: 'Z' }, { ...student, role: 'administrator' }, { ...student, role: 'guidance' }, { ...student, role: 'chair' }]) {
-      const response = await request(app).post('/api/auth/register').send(bad)
-      expect(response.status).toBe(400)
-      expect(response.body.code).toBe('VALIDATION_ERROR')
-    }
-    expect((await request(app).post('/api/auth/register').send({ ...student, role: 'professor', program: undefined, yearLevel: undefined, section: undefined, identifier: '2024-1234' })).status).toBe(201)
-  })
-
-  it('rejects duplicate emails and identifiers, including seeded ones', async () => {
-    const app = newApp()
-    expect((await request(app).post('/api/auth/register').send(student)).status).toBe(201)
-    const email = await request(app).post('/api/auth/register').send({ ...student, email: 'ANA.REYES@example.com', identifier: '24-9999' })
-    expect(email.status).toBe(409)
-    expect(email.body.code).toBe('CONFLICT')
-    expect((await request(app).post('/api/auth/register').send({ ...student, email: 'other@example.com' })).status).toBe(409)
-    expect((await request(app).post('/api/auth/register').send({ ...student, email: 'stu.it.a@qcu.edu.ph', identifier: '24-9999' })).status).toBe(409)
+  it('has no public registration route', async () => {
+    // Without a session the shared auth gate answers 401 first; signed in, the route is simply unknown.
+    const agent = request.agent(newApp())
+    await agent.post('/api/auth/sign-in').send({ emailOrId: ana.email, password })
+    expect((await agent.post('/api/auth/register').send({ email: ana.email, password })).status).toBe(404)
   })
 
   it('throttles after five failures per identifier', async () => {
@@ -124,7 +106,6 @@ describe('password reset and change', () => {
   it('issues a single-use code that resets the password', async () => {
     const app = newApp()
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
-    await request(app).post('/api/auth/register').send(student)
     const forgot = await request(app).post('/api/auth/forgot-password').send({ emailOrId: 'ana.reyes@example.com' })
     expect(forgot.status).toBe(200)
     expect(forgot.body.ok).toBe(true)
@@ -151,7 +132,7 @@ describe('password reset and change', () => {
     expect(log).not.toHaveBeenCalled()
   })
 
-  it('changes the password for a signed-in user, seeded or registered', async () => {
+  it('changes the password for a signed-in user, seeded or stored', async () => {
     const app = newApp()
     expect((await request(app).post('/api/auth/change-password').send({ currentPassword: password, password })).status).toBe(401)
 
