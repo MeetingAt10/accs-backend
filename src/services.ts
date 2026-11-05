@@ -622,10 +622,13 @@ const actionPages: Record<string, string[]> = {
 }
 /** The fields `updateRoles` changes, as the auth store keeps them. */
 export type AccountChange = Pick<User,'id'|'roles'|'active'> & Partial<Pick<User,'program'|'section'>>
-// Accounts live in the auth store, shared by every instance, so a role change is saved there once the action has committed.
-export async function performAction(repo:Repository,user:User,pageId:string,request:ActionRequest,saveAccount?:(change:AccountChange)=>Promise<void>){
+/** The fields `saveProfile` changes. */
+export type ProfileChange = { title: string; bio: string; education: string; officeHours: string }
+// Accounts live in the auth store, shared by every instance, so a role or profile change is saved there once the action has committed.
+export async function performAction(repo:Repository,user:User,pageId:string,request:ActionRequest,saveAccount?:(change:AccountChange)=>Promise<void>,saveProfile?:(id:string,change:ProfileChange)=>Promise<void>){
   const result=await repo.transact(unit=>runAction(unit,user,pageId,request))
   if(request.action==='updateRoles')await saveAccount?.(result.record as AccountChange)
+  if(request.action==='saveProfile')await saveProfile?.(user.id,actionPayloads.saveProfile.parse(request.payload))
   return result
 }
 function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest){
