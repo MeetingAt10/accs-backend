@@ -1,12 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { createApp } from '../src/app.js'
 import { createMemoryAuthStore } from '../src/auth.js'
 import { createRecordRepository, persisted } from '../src/persist.js'
 import { createMemoryRecordStore, type RecordStore } from '../src/records.js'
 import { createMemorySessionStore } from '../src/sessions.js'
-import type { Database } from '../src/store.js'
-import { signIn } from './helpers.js'
+import { createMemoryRepository, type Database } from '../src/store.js'
+import { secretaryPassword, secretarySession, signIn } from './helpers.js'
 
 const at = '2026-11-05T02:00:00.000Z'
 
@@ -213,5 +213,41 @@ describe('accounts across a restart', () => {
     expect(granted.status, JSON.stringify(granted.body)).toBe(200)
     const { agent: restarted } = await signIn(instance(), 'QCU-STAFF')
     expect((await restarted.get('/api/session')).body.user.roles).toEqual(['staff', 'guidance'])
+  })
+})
+
+describe('the record repository behaves like memory', () => {
+  beforeAll(() => { vi.spyOn(console, 'log').mockImplementation(() => {}) })
+  afterAll(() => vi.restoreAllMocks())
+
+  const accounts = ['QCU-STU-IT-A', 'QCU-ORG', 'QCU-PROF-IT', 'QCU-STAFF', 'QCU-CHAIR-IT', 'QCU-DEAN', 'QCU-ADMIN', 'QCU-GUIDANCE', 'QCU-OSAS', 'QCU-PRESIDENT']
+  const pageIds = Array.from({ length: 50 }, (_, n) => `P${String(n + 3).padStart(2, '0')}`)
+
+  it.each(accounts)('%s gets the same status on every page', async (id) => {
+    const { instance } = stack()
+    const { agent: stored } = await signIn(instance(), id)
+    const { agent: memory } = await signIn(createApp(createMemoryRepository(), { authStore: createMemoryAuthStore(), sessionStore: createMemorySessionStore() }), id)
+    for (const page of pageIds) {
+      const [a, b] = await Promise.all([stored.get(`/api/pages/${page}`), memory.get(`/api/pages/${page}`)])
+      expect(a.status, `${id} ${page}: ${JSON.stringify(a.body).slice(0, 200)}`).toBe(b.status)
+      expect(a.status).not.toBe(500)
+    }
+  })
+
+  it('serves the routes that name their collections', async () => {
+    const { instance } = stack()
+    const app = instance()
+    const secretary = await secretarySession(app)
+    for (const path of ['/api/accounts/types', '/api/accounts', '/api/accounts/faculty', '/api/accounts/advisors']) {
+      expect((await secretary.get(path)).status, path).toBe(200)
+    }
+    const created = await secretary.post('/api/accounts/students').send({ students: [{ name: 'New Student', email: 'new.student@qcu.edu.ph', studentId: '24-9999', program: 'BSIT', year: 2, section: 'A' }] })
+    expect(created.status, JSON.stringify(created.body)).toBe(200)
+    expect(created.body.record.created).toBe(1)
+    expect((await secretary.post('/api/auth/change-password').send({ currentPassword: secretaryPassword, password: 'Sec#Passw0rd-2027' })).status).toBe(200)
+    const { agent: admin } = await signIn(app, 'QCU-ADMIN')
+    expect((await admin.post('/api/admin/accounts/QCU-STU-CS/reset-code').send({})).status).toBe(200)
+    expect((await admin.post('/api/auth/sign-out').send({})).status).toBe(200)
+    expect((await admin.get('/api/session')).status).toBe(401)
   })
 })
