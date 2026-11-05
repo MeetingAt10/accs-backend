@@ -10,7 +10,7 @@ pnpm test
 pnpm build && pnpm start
 ```
 
-`CORS_ORIGIN` is a comma-separated list of allowed browser origins (default `http://localhost:5173`). Every ACCS module site calls this one API with credentials, so list all seven site origins in deployed environments; see `.env.example`.
+`CORS_ORIGIN` is a comma-separated list of allowed browser origins (default `http://localhost:5173`). The portal calls this API with credentials, so list the portal origin in deployed environments; see `.env.example`.
 
 `tests/doc003-modules.test.ts` checks the DOC003 module inventory (`tests/fixtures/doc003-modules.json`, 58 modules): for each module, every owning role can sign in as its seeded account and reach at least one of the module's pages.
 
