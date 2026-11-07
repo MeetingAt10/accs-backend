@@ -4,13 +4,23 @@ Node + Express 5 + TypeScript. Zod-validated env, helmet, cors. Tests with Vites
 
 ```
 cp .env.example .env
-pnpm install   # or npm install
-pnpm dev       # http://localhost:3000, GET /api/health
-pnpm test
-pnpm build && pnpm start
+npm install
+npm run dev          # http://localhost:3000, GET /api/health
+npm test
+npm run typecheck
+npm run build && npm start
+npm run build:lambda # bundles src/lambda.ts to dist-lambda/index.cjs
 ```
 
-`CORS_ORIGIN` is a comma-separated list of allowed browser origins (default `http://localhost:5173`). The portal calls this API with credentials, so list the portal origin in deployed environments; see `.env.example`.
+Node 22 or later. Environment variables are parsed in `src/env.ts`:
+
+- `PORT` (default 3000) and `NODE_ENV` (`development`, `test`, `production`; default `development`).
+- `CORS_ORIGIN`: comma-separated allowed browser origins (default `http://localhost:5173`). All modules are served from the one portal host, and the portal calls this API with credentials, so list only the portal origin in deployed environments.
+- `TABLE_PREFIX`: DynamoDB table prefix. Set on the Lambda; see Storage boundary and Sessions.
+- `AUTH_STORE_BUCKET`, `AUTH_STORE_KEY`, `AUTH_STORE_FILE`: where accounts live; see Accounts and sign-in.
+- `SEED_PASSWORD` (at least 10 characters): the shared sign-in password of the seeded demo accounts. Deployed stacks set it. Without it, production disables seeded sign-in and local runs use a built-in default. It is not in `.env.example`.
+
+CI (`.github/workflows/ci.yml`) runs `typecheck`, `test`, and `build:lambda` on pull requests. A push to `main` or `dev` (`deploy.yml`) runs the same checks, then uploads `dist-lambda/index.cjs` as the code of the API Lambda in the `accs-prod` (`main`) or `accs-dev` (`dev`) stack.
 
 `tests/doc003-modules.test.ts` checks the DOC003 module inventory (`tests/fixtures/doc003-modules.json`, 58 modules): for each module, every owning role can sign in as its seeded account and reach at least one of the module's pages.
 
@@ -59,9 +69,9 @@ Four collections stay on the seed, per instance: `users` (accounts come from the
 
 | Endpoint | Body | Result |
 |---|---|---|
-| `POST /api/auth/sign-in` | `{ emailOrId, password, remember? }` | 200 + session cookie + session; 401 `INVALID_CREDENTIALS`; 429 `TOO_MANY_ATTEMPTS` after 5 failures in 15 minutes from one client (source IP) for one identifier, so failures elsewhere do not block the owner. `emailOrId` is the email, account ID, student ID, or username, in any case. A deactivated account gets the same 401 |
+| `POST /api/auth/sign-in` | `{ emailOrId, password, remember? }` | 200 + session cookie + session; 401 `INVALID_CREDENTIALS`; 429 `TOO_MANY_ATTEMPTS` after 5 failures in 15 minutes from one client (source IP) for one identifier, so failures elsewhere do not block the owner. The count is kept in memory on each instance, so it is not shared across Lambda instances. `emailOrId` is the email, account ID, student ID, or username, in any case. A deactivated account gets the same 401 |
 | `POST /api/auth/complete-first-login` | `{ currentPassword, username, password }` (signed in) | 200 + session; 400 `INVALID_CREDENTIALS` (wrong temporary password), 400 `VALIDATION_ERROR` (weak password, bad username, or either one unchanged), 409 `CONFLICT` (username taken, or already done); sets both, clears `mustChangeCredentials`, keeps this session, signs out the others |
-| `POST /api/auth/forgot-password` | `{ emailOrId }` | Always 200, same answer for unknown accounts. Outside production issues a 6-digit code and logs it; in production issues nothing until email delivery exists |
+| `POST /api/auth/forgot-password` | `{ emailOrId }` | Always 200, same answer for unknown accounts. Outside production issues a 6-digit code and logs it; in production issues nothing until email delivery exists. Within the 60-second cooldown or past 5 codes per hour it issues nothing and still answers the same 200 |
 | `POST /api/auth/reset-password` | `{ emailOrId, code, password }` | 200 and signs out every session; 400 `INVALID_CODE` |
 | `POST /api/admin/accounts/:id/reset-code` | `{}` (administrator) | 200 with `record.code`, shown once; audited as `Password reset code issued`; 403 for other roles |
 | `POST /api/auth/change-password` | `{ currentPassword, password }` (signed in) | 200; 400 `INVALID_CREDENTIALS` |
@@ -74,7 +84,7 @@ Passwords are hashed with `crypto.scryptSync` and need 10+ characters with upper
 
 **Where accounts live.** All account state is in the auth store (`src/auth.ts`): an S3 object when `AUTH_STORE_BUCKET` is set (Lambda; `AUTH_STORE_KEY`, default `auth-store.json`), otherwise a JSON file at `AUTH_STORE_FILE` (default `/tmp/accs-auth-store.json`). Tests use an in-memory store. It holds the accounts created after the seed, any change to a seeded account, the password hashes, and `advisorAssignments`. A stored account record replaces the seeded user with the same ID on every instance (role, program, `active`, username, adviser), so changes persist across instances and cold starts, including the profile text a person edits themselves (title, bio, education, office hours). Role and active changes made on the administrator's pages (`updateRoles`) are saved there too. Writes carry the object's ETag; a write that loses the race reloads and runs its change again, up to 5 attempts. Each request reads the store once (cached for 2 seconds, then a conditional GET) and touches the repository only when the stored data changed.
 
-Seeded demo accounts (`QCU-STU-IT-A`, `QCU-ADMIN`, ...) sign in with their ID or email and `Accs@Qcu2026!` until they set a password; rotate or disable this shared password before real users join. The seeded secretary, `QCU-SECRETARY`, is inactive and never accepts the shared password: it signs in only with credentials the Dean issued.
+Seeded demo accounts (`QCU-STU-IT-A`, `QCU-ADMIN`, ...) sign in with their ID or email and the shared `SEED_PASSWORD` until they set a password; rotate or disable this shared password before real users join. The seeded secretary, `QCU-SECRETARY`, is inactive and never accepts the shared password: it signs in only with credentials the Dean issued.
 
 ## Account provisioning
 
