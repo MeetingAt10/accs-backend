@@ -1,0 +1,40 @@
+name: No Claude co-author trailers
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  check-commit-messages:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reject Claude co-author trailers
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          zeros=0000000000000000000000000000000000000000
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            messages=$(git log "origin/$BASE_REF..HEAD" --format=%B)
+          elif [ "$BEFORE_SHA" = "$zeros" ]; then
+            # New branch: only the pushed head commit is checked.
+            messages=$(git log -1 --format=%B "$HEAD_SHA")
+          else
+            messages=$(git log "$BEFORE_SHA..$HEAD_SHA" --format=%B)
+          fi
+          if printf '%s\n' "$messages" | grep -iE 'co-authored-by:.*claude'; then
+            echo "::error::Found a 'Co-Authored-By: Claude' trailer in a commit message. Remove it (amend or rewrite the commit message) and push again."
+            exit 1
+          fi
+          echo "No Claude co-author trailers found."

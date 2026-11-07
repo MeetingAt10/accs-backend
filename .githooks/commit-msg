@@ -1,0 +1,4 @@
+#!/bin/sh
+# Removes "Co-Authored-By: Claude ..." trailers from the commit message file ($1).
+# Enabled per clone with: git config core.hooksPath .githooks
+sed -i '/^co-authored-by:.*claude/Id' "$1"
