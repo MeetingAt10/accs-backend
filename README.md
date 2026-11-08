@@ -18,7 +18,7 @@ Node 22 or later. Environment variables are parsed in `src/env.ts`:
 - `CORS_ORIGIN`: comma-separated allowed browser origins (default `http://localhost:5173`). All modules are served from the one portal host, and the portal calls this API with credentials, so list only the portal origin in deployed environments.
 - `TABLE_PREFIX`: DynamoDB table prefix. Set on the Lambda; see Storage boundary and Sessions.
 - `AUTH_STORE_BUCKET`, `AUTH_STORE_KEY`, `AUTH_STORE_FILE`: where accounts live; see Accounts and sign-in.
-- `SEED_PASSWORD` (at least 10 characters): the shared sign-in password of the seeded demo accounts. Deployed stacks set it. Without it, production disables seeded sign-in and local runs use a built-in default. It is not in `.env.example`.
+- `SEED_PASSWORD` (at least 10 characters): the shared sign-in password of the seeded demo accounts. Deployed stacks set it. Without it, production disables seeded sign-in, and local runs and tests use a built-in default. On Lambda with any other `NODE_ENV` (including an unset one, which defaults to `development`), the API fails at startup rather than accept the built-in password. It is not in `.env.example`.
 
 CI (`.github/workflows/ci.yml`) runs `typecheck`, `test`, and `build:lambda` on pull requests. A push to `main` or `dev` (`deploy.yml`) runs the same checks, then uploads `dist-lambda/index.cjs` as the code of the API Lambda in the `accs-prod` (`main`) or `accs-dev` (`dev`) stack.
 
