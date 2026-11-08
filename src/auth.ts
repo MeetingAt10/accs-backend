@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 
-import { env } from './env.js'
+import { env, onLambda } from './env.js'
 import type { User } from './schemas.js'
 
 // Password hashing: scrypt, stored as `scrypt$<salt b64>$<hash b64>`.
@@ -33,10 +33,17 @@ export function passwordProblem(password: string) {
 }
 
 // Every seeded active user signs in with this until they set their own password.
-// Deployed stacks set SEED_PASSWORD; the built-in value is for local runs and tests only. Production without
-// SEED_PASSWORD gets an unguessable random value, which disables seeded sign-in instead of falling back.
-export const defaultPassword =
-  env.SEED_PASSWORD ?? (env.NODE_ENV === 'production' ? randomBytes(32).toString('base64url') : 'Accs@Qcu2026!')
+// Deployed stacks set SEED_PASSWORD. Production without it gets an unguessable random value, which disables seeded
+// sign-in (an empty SeedPassword stack parameter). The built-in value is public, so it is used only for local runs and
+// tests; a deployed stack whose NODE_ENV is not production fails at startup instead of falling back to it.
+export function resolveSeedPassword(options: { seedPassword?: string; nodeEnv: string; onLambda: boolean }) {
+  if (options.seedPassword) return options.seedPassword
+  if (options.nodeEnv === 'production') return randomBytes(32).toString('base64url')
+  if (options.onLambda)
+    throw new Error(`SEED_PASSWORD is not set and NODE_ENV is "${options.nodeEnv}" on Lambda. Set NODE_ENV=production (an empty SEED_PASSWORD then disables seeded sign-in) or set SEED_PASSWORD; the built-in password is for local runs and tests only.`)
+  return 'Accs@Qcu2026!'
+}
+export const defaultPassword = resolveSeedPassword({ seedPassword: env.SEED_PASSWORD, nodeEnv: env.NODE_ENV, onLambda })
 let cachedDefaultHash: string | undefined
 export const defaultHash = () => (cachedDefaultHash ??= hashPassword(defaultPassword))
 
