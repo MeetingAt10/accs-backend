@@ -14,16 +14,18 @@ import { send } from './http.js'
 import { createRepository } from './persist.js'
 import { ApiError, getPage, performAction, refreshRestrictions, sessionView, unavailable, type AccountChange, type ProfileChange } from './services.js'
 import { createResetStore, resetPolicy, type ResetStore } from './resets.js'
+import { createThrottleStore, type ThrottleStore } from './throttle.js'
 import { createSessionStore, isWellFormedToken, newSessionToken, sessionIdOf, sessionPolicy, sessionState, type SessionStore } from './sessions.js'
 import { demoUserIds, type Repository } from './store.js'
 
-export function createApp(repository:Repository=createRepository({nodeEnv:env.NODE_ENV,tableName}),options:{authStore?:AuthStore;sessionStore?:SessionStore;resetStore?:ResetStore;mailer?:InviteMailer;stack?:Stack}={}){
+export function createApp(repository:Repository=createRepository({nodeEnv:env.NODE_ENV,tableName}),options:{authStore?:AuthStore;sessionStore?:SessionStore;resetStore?:ResetStore;throttleStore?:ThrottleStore;mailer?:InviteMailer;stack?:Stack}={}){
   const app=express()
   // The account switcher for testers exists only on the development stack and on local runs (src/dev.ts).
   const devToolbox=devToolboxEnabled(options.stack??{tablePrefix:env.TABLE_PREFIX,nodeEnv:env.NODE_ENV})
   const authStore=options.authStore??createAuthStore()
   const sessions=options.sessionStore??createSessionStore({nodeEnv:env.NODE_ENV,tableName:tableName('ccs_identity'),onLambda})
   const resets=options.resetStore??createResetStore({nodeEnv:env.NODE_ENV,tableName:tableName('ccs_identity'),onLambda})
+  const throttle=options.throttleStore??createThrottleStore({nodeEnv:env.NODE_ENV,tableName:tableName('ccs_identity'),onLambda})
   // The deployed app and API sit on different domains, so the session cookie must be cross-site there.
   const cookieOptions={httpOnly:true,sameSite:env.NODE_ENV==='production'?'none' as const:'lax' as const,secure:env.NODE_ENV==='production',path:'/'}
   app.use(helmet());app.use(cors({origin:env.CORS_ORIGIN,credentials:true}));app.use(express.json({limit:'128kb'}))
@@ -58,22 +60,21 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   const saveProfile=async(id:string,change:ProfileChange)=>saveProfileChange(authStore,await repository.view(unit=>unit.read().users,[]),id,change)
   // Only the seeded demo accounts fall back to the shared seed password, until they set their own. Every other account has a stored credential.
   const credentialFor=(user:User,data:AuthData)=>data.credentials[user.id]??(demoUserIds.has(user.id)?defaultHash():undefined)
-  // ponytail: in-memory per instance, shared store needed if throttling must hold across Lambda instances
-  const attempts=new Map<string,{n:number;until:number}>()
-  const blocked=(key:string)=>{const a=attempts.get(key);if(a&&a.until<=Date.now()){attempts.delete(key);return false}return !!a&&a.n>=5}
-  const bump=(key:string)=>{const a=attempts.get(key);if(!a||a.until<=Date.now()){if(attempts.size>5000)for(const [k,v] of attempts)if(v.until<=Date.now())attempts.delete(k);attempts.set(key,{n:1,until:Date.now()+15*60*1000})}else a.n++}
   const tooMany=()=>new ApiError(429,'Too many attempts. Try again in 15 minutes.','TOO_MANY_ATTEMPTS')
+  // Attempt limits live in ccs_identity (src/throttle.ts), so they hold across Lambda instances. An attempt is counted
+  // before the password or code is checked, so parallel guesses cannot exceed the limit; a success clears the count.
+  const claim=async(key:string)=>{if(!await throttle.claim(key,Date.now()))throw tooMany()}
   const sessionOut=async(res:Response,user:User,status=200)=>send(res,sessionResponseSchema,sessionView(await repository.view(unit=>refreshRestrictions(unit.read(),user),['restrictions'])),status)
   app.use('/api',async(_req,_res,next)=>{await syncUsers();next()})
   app.post('/api/auth/sign-in',async(req,res)=>{
     // Per client as well as per identifier, so guesses from elsewhere cannot lock the owner out. On Lambda, serverless-http sets req.ip to API Gateway's source IP; elsewhere trust proxy stays off. Either way X-Forwarded-For cannot change it.
     const {emailOrId,password,remember}=signInSchema.parse(req.body);const key=`${req.ip}|${emailOrId.trim().toLowerCase()}`
-    if(blocked(key))throw tooMany()
+    await claim(key)
     const user=await findUser(emailOrId);const stored=user&&credentialFor(user,await authStore.load())
     // Always run one scrypt verification so unknown accounts and wrong passwords cost the same.
     const matches=verifyPassword(password,stored||defaultHash())
-    if(!user||!stored||!matches){bump(key);throw new ApiError(401,'The email, ID, or password is incorrect.','INVALID_CREDENTIALS')}
-    attempts.delete(key);await startSession(req,res,user,remember);await sessionOut(res,user)
+    if(!user||!stored||!matches)throw new ApiError(401,'The email, ID, or password is incorrect.','INVALID_CREDENTIALS')
+    await throttle.clear(key);await startSession(req,res,user,remember);await sessionOut(res,user)
   })
   // TBD(SES): no email channel yet. Outside production the code is logged; in production an administrator
   // issues it (POST /api/admin/accounts/:id/reset-code) and hands it over, so self-service issues nothing.
@@ -89,18 +90,18 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   })
   app.post('/api/auth/reset-password',async(req,res)=>{
     const {emailOrId,code,password}=resetPasswordSchema.parse(req.body);const key=`reset:${emailOrId.trim().toLowerCase()}`
-    if(blocked(key))throw tooMany()
+    await claim(key)
     const user=await findUser(emailOrId)
     // The guess is counted before the code is checked, so parallel requests cannot exceed the per-code limit.
     const claimed=user?await resets.claimAttempt(user.id,Date.now()):undefined
     const matches=verifyPassword(code,claimed?.codeHash??defaultHash())
-    if(!user||!claimed||!matches){bump(key);throw new ApiError(400,'The code is incorrect or has expired.','INVALID_CODE')}
+    if(!user||!claimed||!matches)throw new ApiError(400,'The code is incorrect or has expired.','INVALID_CODE')
     // Single use: only one request can delete this code, even if two arrive with it at once.
-    if(!await resets.consume(user.id,claimed.codeHash)){bump(key);throw new ApiError(400,'The code is incorrect or has expired.','INVALID_CODE')}
+    if(!await resets.consume(user.id,claimed.codeHash))throw new ApiError(400,'The code is incorrect or has expired.','INVALID_CODE')
     await authStore.update(data=>{data.credentials[user.id]=hashPassword(password)})
     // A reset means the old password may be known to someone else: end every session.
     await sessions.revokeUser(user.id)
-    attempts.delete(key);send(res,actionResponseSchema,{ok:true,message:'Password updated. Sign in with your new password.'})
+    await throttle.clear(key);send(res,actionResponseSchema,{ok:true,message:'Password updated. Sign in with your new password.'})
   })
   app.post('/api/auth/sign-out',async(req,res)=>{emptyBodySchema.parse(req.body??{});const token=cookieValue(req);if(isWellFormedToken(token))await sessions.revoke(sessionIdOf(token));res.clearCookie('accs_session',cookieOptions);send(res,actionResponseSchema,{ok:true,message:'Signed out.'})})
   app.use('/api',async(req,res,next)=>{const user=await sessionUser(req,res);if(!user)return send(res,errorResponseSchema,{error:'Sign in to continue.',code:'UNAUTHENTICATED'},401);res.locals.user=user
@@ -111,27 +112,29 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     next()})
   app.post('/api/auth/complete-first-login',async(req,res)=>{
     const user=res.locals.user as User;const {currentPassword,username,password}=completeFirstLoginSchema.parse(req.body);const key=`first:${user.id}`
-    if(blocked(key))throw tooMany()
     if(!user.mustChangeCredentials)throw new ApiError(409,'Your sign-in details are already set.','CONFLICT')
+    await claim(key)
     const stored=credentialFor(user,await authStore.load())
-    if(!stored||!verifyPassword(currentPassword,stored)){bump(key);throw new ApiError(400,'Your current password is incorrect.','INVALID_CREDENTIALS')}
+    if(!stored||!verifyPassword(currentPassword,stored))throw new ApiError(400,'Your current password is incorrect.','INVALID_CREDENTIALS')
+    // The temporary password was right, so the checks below are not guesses and must not use up attempts.
+    await throttle.clear(key)
     if(password===currentPassword)throw new ApiError(400,'Choose a password that is different from the temporary one.','VALIDATION_ERROR')
     if(username===user.username?.toLowerCase())throw new ApiError(400,'Choose a username that is different from the temporary one.','VALIDATION_ERROR')
     await setOwnCredentials(authStore,await repository.view(unit=>unit.read().users,[]),user,username,hashPassword(password))
     // Keep this session; the temporary credentials may be on other devices.
-    await sessions.revokeUser(user.id,res.locals.sessionId as string);attempts.delete(key)
+    await sessions.revokeUser(user.id,res.locals.sessionId as string)
     await recordAudit(repository,user,[{action:'Sign-in details set',reference:user.id}])
     await sessionOut(res,{...user,username,mustChangeCredentials:false})
   })
   app.post('/api/auth/change-password',async(req,res)=>{
     const user=res.locals.user as User;const {currentPassword,password}=changePasswordSchema.parse(req.body);const key=`change:${user.id}`
-    if(blocked(key))throw tooMany()
+    await claim(key)
     const stored=credentialFor(user,await authStore.load())
-    if(!stored||!verifyPassword(currentPassword,stored)){bump(key);throw new ApiError(400,'Your current password is incorrect.','INVALID_CREDENTIALS')}
+    if(!stored||!verifyPassword(currentPassword,stored))throw new ApiError(400,'Your current password is incorrect.','INVALID_CREDENTIALS')
     await authStore.update(data=>{data.credentials[user.id]=hashPassword(password)})
     // Keep this session; sign out every other device.
     await sessions.revokeUser(user.id,res.locals.sessionId as string)
-    attempts.delete(key);send(res,actionResponseSchema,{ok:true,message:'Password changed.'})
+    await throttle.clear(key);send(res,actionResponseSchema,{ok:true,message:'Password changed.'})
   })
   // Office-assisted reset: an administrator issues a code, shown once, and gives it to the account holder.
   app.post('/api/admin/accounts/:id/reset-code',async(req,res)=>{

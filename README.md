@@ -69,7 +69,7 @@ Four collections stay on the seed, per instance: `users` (accounts come from the
 
 | Endpoint | Body | Result |
 |---|---|---|
-| `POST /api/auth/sign-in` | `{ emailOrId, password, remember? }` | 200 + session cookie + session; 401 `INVALID_CREDENTIALS`; 429 `TOO_MANY_ATTEMPTS` after 5 failures in 15 minutes from one client (source IP) for one identifier, so failures elsewhere do not block the owner. The count is kept in memory on each instance, so it is not shared across Lambda instances. `emailOrId` is the email, account ID, student ID, or username, in any case. A deactivated account gets the same 401 |
+| `POST /api/auth/sign-in` | `{ emailOrId, password, remember? }` | 200 + session cookie + session; 401 `INVALID_CREDENTIALS`; 429 `TOO_MANY_ATTEMPTS` after 5 failures in 15 minutes from one client (source IP) for one identifier, so failures elsewhere do not block the owner. The count is shared by every Lambda instance (see Attempt limits). `emailOrId` is the email, account ID, student ID, or username, in any case. A deactivated account gets the same 401 |
 | `POST /api/auth/complete-first-login` | `{ currentPassword, username, password }` (signed in) | 200 + session; 400 `INVALID_CREDENTIALS` (wrong temporary password), 400 `VALIDATION_ERROR` (weak password, bad username, or either one unchanged), 409 `CONFLICT` (username taken, or already done); sets both, clears `mustChangeCredentials`, keeps this session, signs out the others |
 | `POST /api/auth/forgot-password` | `{ emailOrId }` | Always 200, same answer for unknown accounts. Outside production issues a 6-digit code and logs it; in production issues nothing until email delivery exists. Within the 60-second cooldown or past 5 codes per hour it issues nothing and still answers the same 200 |
 | `POST /api/auth/reset-password` | `{ emailOrId, code, password }` | 200 and signs out every session; 400 `INVALID_CODE` |
@@ -141,6 +141,10 @@ A student files a concern (a *report* until it reaches Guidance) and chooses how
 ## Password reset codes
 
 Codes live in `ccs_identity` as the `RESET` item `USER#<id>` / `RESET` (hash only, TTL on `expires_epoch`), so limits hold on every Lambda instance: 5 guesses per code (counted before the check, so parallel guesses cannot exceed it), 15-minute expiry, single use, 60-second cooldown, and 5 self-service codes per account per hour (a new code keeps the count). An administrator-issued code skips the cooldown and the cap. There is no email channel yet (SES is planned): in production the CCS office gets a code from an administrator and hands it to the account holder. Limits are provisional until D-08.
+
+## Attempt limits
+
+Sign-in (per source IP and identifier), password reset (per identifier), first sign-in, and password change (per account) allow 5 failures in 15 minutes, then answer 429 `TOO_MANY_ATTEMPTS`. Counters live in `ccs_identity` as the `THROTTLE` item `THROTTLE#<sha256 of the key>` / `THROTTLE` (`src/throttle.ts`), so the limit holds across Lambda instances and the table stores no typed identifiers or IP addresses. An attempt is counted before the password or code is checked, so parallel requests cannot exceed the limit, and a success clears the count. TTL on `expires_epoch` removes a counter after its window; because TTL deletes late, the code checks the window itself. Without `TABLE_PREFIX`, counters stay in memory locally, and on Lambda these routes fail rather than enforce a limit per instance. `THROTTLE` is not yet in DOC006 or ADR 0004.
 
 ## Sessions
 
