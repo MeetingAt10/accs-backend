@@ -89,7 +89,16 @@ export function canActCase(user: User, report: Report) {
 }
 /** For counts that span every stage (analytics): the reports this person's office may see, whichever stage they are at. */
 export function canCountCase(user: User, report: Report) { return overseesCase(user,report) }
-export function canViewCase(user: User, report: Report) { return report.ownerId !== user.id && !isConflicted(user,report) && (canActCase(user,report) || overseesCase(user,report) || report.history.some(entry => entry.actorId === user.id && entry.actorRole !== 'student' && user.roles.includes(entry.actorRole as Role) && (entry.actorRole !== 'chair' || user.program === report.program))) }
+/** Who handles a stage: the adviser of the report, the Program Chair of its program, the Dean, Guidance, OSAS. */
+function handlesStage(user: User, report: Report, stage: Report['stage']) {
+  return stage === 'adviser' ? hasRole(user,'professor') && report.adviserId === user.id : stage === 'chair' ? chairMay(user,report) : stage === 'dean' ? deanMay(user,report) : hasRole(user,stage)
+}
+/** An office the case has moved past: it handled a stage in the history that is not the current one. It keeps the status updates (#30). */
+export function isEarlierHandler(user: User, report: Report) {
+  if (report.ownerId === user.id || isConflicted(user,report) || canActCase(user,report)) return false
+  return report.history.some(entry => entry.stage !== report.stage && handlesStage(user,report,entry.stage))
+}
+export function canViewCase(user: User, report: Report) { return report.ownerId !== user.id && !isConflicted(user,report) && (canActCase(user,report) || overseesCase(user,report) || isEarlierHandler(user,report) || report.history.some(entry => entry.actorId === user.id && entry.actorRole !== 'student' && user.roles.includes(entry.actorRole as Role) && (entry.actorRole !== 'chair' || user.program === report.program))) }
 export function canStudentRecord(db: Database, user: User, student: User) { return hasRole(student,'student') && (hasRole(user,'dean') || hasRole(user,'chair') && user.program === student.program || hasRole(user,'guidance') && db.reports.some(r => r.ownerId === student.id && ['guidance','osas'].includes(r.stage)) || hasRole(user,'osas') && db.reports.some(r=>r.ownerId === student.id && r.stage === 'osas')) }
 export function canFacultyResult(user: User, faculty: User) { return hasRole(user,'dean') || hasRole(user,'chair') && user.program === faculty.program || hasRole(user,'professor') && user.id === faculty.id }
 export function scopeLabel(user: User) { return hasRole(user,'administrator') ? 'Platform administration' : hasRole(user,'chair') ? `${user.program} program` : hasRole(user,'dean') ? 'College of Computer Studies' : user.office || [user.program,user.section && `Section ${user.section}`].filter(Boolean).join(' · ') || 'Your permitted workspace' }

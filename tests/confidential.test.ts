@@ -123,14 +123,14 @@ describe('what readers who are not handling the concern see (issue #31)', () => 
     }
   })
 
-  it('shows an office that handled the case earlier only its own entries, not the statement', async () => {
+  it('shows an office that handled the case earlier its status, not the statement (issue #30)', async () => {
     const [dean, guidance] = await Promise.all(['QCU-DEAN', 'QCU-GUIDANCE'].map(login))
     const act = (agent: Agent, type: string) => agent.post('/api/pages/P22/actions').send({ action: 'caseAction', recordId: 'RPT-0243', reason: 'Next step', payload: { type, update: 'Moved on.' } })
     expect((await act(dean!, 'transfer')).status).toBe(200)
     expect((await act(guidance!, 'convert')).status).toBe(200)
     expect((await act(guidance!, 'transfer')).status).toBe(200)
     const seen = await view(guidance!, 'RPT-0243')
-    expect(seen).toMatchObject({ historyOnly: true, stage: 'osas' })
+    expect(seen).toMatchObject({ statusOnly: true, stage: 'osas', office: 'OSAS' })
     expect(seen).not.toHaveProperty('narrative')
     expect(seen).not.toHaveProperty('messages')
   })
