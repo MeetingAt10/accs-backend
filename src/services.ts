@@ -62,16 +62,27 @@ function caseActions(user:User,r:Report) { if(!canActCase(user,r))return[]; if(r
 function consultationView(db:Database,c:Database['consultations'][number]) { return {...c,student:person(find(db.users,c.studentId)),faculty:person(find(db.users,c.facultyId)),slot:find(db.slots,c.slotId)} }
 function assignmentView(db:Database,a:Assignment,receipt=false) { const cycle=find(db.cycles,a.cycleId); return {id:a.id,faculty:person(find(db.users,a.facultyId)),cycleId:a.cycleId,cycleTitle:cycle.title,relation:a.relation,subject:a.subject,due:cycle.closes,status:a.submittedAt?'Submitted':'Not started',submittedAt:a.submittedAt,questions:receipt?cycle.questions:undefined,instructions:receipt?cycle.instructions:undefined,cycleStatus:cycle.status,answers:receipt?a.answers:undefined,comment:receipt?a.comment:undefined} }
 function resultViews(db:Database,user:User,cycleId?:string) { return db.users.filter(u=>hasRole(u,'professor','chair','dean')&&canFacultyResult(user,u)).map(faculty=>{const entries=db.assignments.filter(a=>a.facultyId===faculty.id&&a.submittedAt&&(!cycleId||a.cycleId===cycleId)&&find(db.cycles,a.cycleId).resultsPublished);const ratings=entries.flatMap(a=>Object.values(a.answers??{}).filter((v):v is number=>typeof v==='number'));const criteria=['Q1','Q2','Q3'].map((id,index)=>{const values=entries.map(a=>a.answers?.[id]).filter((v):v is number=>typeof v==='number');return {label:['Clarity','Support','Fairness'][index],value:values.length?Number((values.reduce((s,n)=>s+n,0)/values.length).toFixed(2)):0}});return {id:faculty.id,faculty:person(faculty),responses:entries.length,average:ratings.length?Number((ratings.reduce((s,n)=>s+n,0)/ratings.length).toFixed(2)):0,completion:entries.length?100:0,criteria,themes:entries.length?[{title:'Clear guidance',count:entries.length,summary:'Students describe the requirements as clear and say they get help when they ask.'}]:[]}}) }
-function programResultCriteria(db:Database,program?:string,cycleId?:string) {
+/** Every evaluation assigned to the program's faculty in the published cycles in scope, submitted or not. */
+function programAssignments(db:Database,program?:string,cycleId?:string) {
   const facultyIds = db.users
     .filter(user => hasRole(user,'professor','chair','dean') && (!program || user.program === program))
     .map(user => user.id)
-  const responses = db.assignments.filter(assignment =>
+  return db.assignments.filter(assignment =>
     facultyIds.includes(assignment.facultyId)
-    && assignment.submittedAt
     && (!cycleId || assignment.cycleId === cycleId)
     && find(db.cycles,assignment.cycleId).resultsPublished,
   )
+}
+// D-08 (approved 2026-11-10): evaluation is mandatory for clearance, so a program average is released only when every
+// assigned evaluation in scope is submitted. Until then it carries the counts and no criteria.
+function programAverageView(db:Database,program?:string,cycleId?:string) {
+  const population = programAssignments(db,program,cycleId)
+  const submitted = population.filter(assignment => assignment.submittedAt).length
+  const released = population.length > 0 && submitted === population.length
+  return { program: program ?? 'College', released, submitted, assigned: population.length, criteria: released ? programResultCriteria(db,program,cycleId) : [] }
+}
+function programResultCriteria(db:Database,program?:string,cycleId?:string) {
+  const responses = programAssignments(db,program,cycleId).filter(assignment => assignment.submittedAt)
   return ['Q1','Q2','Q3'].map((questionId,index) => {
     const values = responses
       .map(assignment => assignment.answers?.[questionId])
@@ -295,7 +306,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
           threadId: spaceThreadId(db, user, space.id),
           students: space.studentIds.map(id => {
             const student = refreshRestrictions(db, find(db.users, id))
-            // TBD(D-08): classmate visibility awaits approval; students see names and roles only.
+            // D-08 (approved 2026-11-10): students see classmates' names and roles only.
             return academicRoster ? { ...person(student), enrollmentStatus: 'Enrolled' } : { name: student.name, roles: student.roles }
           }),
           academicRoster,
@@ -447,11 +458,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
         const result = pick(results,query.id)
         if (result) {
           data.record = result
-          // TBD(D-08): QCU must approve a minimum release threshold for program aggregates.
-          data.programAverage = {
-            program: result.faculty.program ?? 'College',
-            criteria: programResultCriteria(db,result.faculty.program,query.cycle),
-          }
+          data.programAverage = programAverageView(db,result.faculty.program,query.cycle)
         }
       }
       break

@@ -29,7 +29,7 @@ export type Session = {
   status: SessionStatus
 }
 
-// TBD(D-08): retention and timeout values are not approved yet. These are provisional defaults.
+// Session timeouts approved under DOC003 D-08 on 2026-11-10.
 export const sessionPolicy = {
   normal: { idleMs: 30 * 60 * 1000, absoluteMs: 12 * 60 * 60 * 1000 },
   remember: { idleMs: 7 * 24 * 60 * 60 * 1000, absoluteMs: 30 * 24 * 60 * 60 * 1000 },
