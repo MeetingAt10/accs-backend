@@ -1,7 +1,7 @@
 import request from 'supertest'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { canActCase, canCountCase } from '../src/access.js'
+import { canActCase, canCountCase, canReadCase, overseesCase } from '../src/access.js'
 import { createApp } from '../src/app.js'
 import { createMemoryAuthStore } from '../src/auth.js'
 import { consentWording } from '../src/consent.js'
@@ -41,10 +41,10 @@ describe('the concern flow', () => {
   const snapshot = () => JSON.stringify([repo.read().reports, repo.read().notifications, repo.read().audit, repo.read().consultations, repo.read().slots])
 
   describe('filing', () => {
-    it('needs the agreement and all three choices, and stores and sends nothing without them', async () => {
+    it('needs the agreement and the about-the-adviser answer, and stores and sends nothing without them', async () => {
       const student = await login('QCU-STU-CS')
       const before = snapshot()
-      for (const missing of [{ consent: undefined }, { consent: {} }, { consent: { readStatement: false } }, { consent: { readStatement: 'yes' } }, { allowChair: undefined }, { allowDean: undefined }, { aboutAdvisor: undefined }, { aboutAdvisor: 'no' }]) {
+      for (const missing of [{ consent: undefined }, { consent: {} }, { consent: { readStatement: false } }, { consent: { readStatement: 'yes' } }, { aboutAdvisor: undefined }, { aboutAdvisor: 'no' }]) {
         const response = await file(student, missing)
         expect([JSON.stringify(missing), response.status, response.body.code]).toEqual([JSON.stringify(missing), 400, 'VALIDATION_ERROR'])
       }
@@ -59,9 +59,12 @@ describe('the concern flow', () => {
       expect(filed.status).toBe(200)
       const report = stored(filed.body.record.id)
       expect(report.consent).toEqual({ readStatement: true, at: report.createdAt, userId: 'QCU-STU-CS', version: consentWording.version, wording: consentWording.report })
-      expect(report).toMatchObject({ allowChair: true, allowDean: false, aboutAdvisor: false, stage: 'adviser', adviserId: 'QCU-PROF-CS' })
-      // The owner reads back the summary and the choices, but not the account behind the agreement.
-      expect(filed.body.record).toMatchObject({ allowChair: true, allowDean: false, aboutAdvisor: false, consent: { readStatement: true, at: report.createdAt, version: consentWording.version, wording: consentWording.report } })
+      expect(report).toMatchObject({ aboutAdvisor: false, stage: 'adviser', adviserId: 'QCU-PROF-CS' })
+      // The old allowChair / allowDean answers are accepted from older clients but no longer stored.
+      expect(report).not.toHaveProperty('allowChair')
+      expect(report).not.toHaveProperty('allowDean')
+      // The owner reads back who can read it (adviser, Program Chair, Dean), but not the account behind the agreement.
+      expect(filed.body.record).toMatchObject({ allowChair: true, allowDean: true, confidential: false, aboutAdvisor: false, consent: { readStatement: true, at: report.createdAt, version: consentWording.version, wording: consentWording.report } })
       expect(filed.body.record.consent).not.toHaveProperty('userId')
       // The page that opens the form carries the same wording, so what is shown is what is stored.
       expect((await student.get('/api/pages/P19')).body.data.consentWording).toEqual(consentWording)
@@ -88,10 +91,10 @@ describe('the concern flow', () => {
       expect(JSON.stringify(mine)).not.toContain('QCU-STU-CS')
     })
 
-    it('shows the office what the student allowed, never the account behind the agreement', async () => {
+    it('shows the office who can read it, never the account behind the agreement', async () => {
       const id = (await file(await login('QCU-STU-CS'), { allowDean: true })).body.record.id
       const opened = (await (await login('QCU-PROF-CS')).get(`/api/pages/P22?id=${id}`)).body.data.record
-      expect(opened).toMatchObject({ allowChair: false, allowDean: true, aboutAdvisor: false, narrative: statement.narrative, reporter: { name: 'Noa Vale' }, consent: { version: consentWording.version } })
+      expect(opened).toMatchObject({ allowChair: true, allowDean: true, confidential: false, readOnly: false, aboutAdvisor: false, narrative: statement.narrative, reporter: { name: 'Noa Vale' }, consent: { version: consentWording.version } })
       expect(opened.consent).not.toHaveProperty('userId')
       expect(opened).not.toHaveProperty('talk')
     })
@@ -121,7 +124,7 @@ describe('the concern flow', () => {
       const filed = await file(student!, { aboutAdvisor: true })
       expect(filed.status).toBe(200)
       const id = filed.body.record.id as string
-      expect(filed.body.record).toMatchObject({ stage: 'chair', office: 'Program Chair', aboutAdvisor: true, allowChair: false, allowDean: false })
+      expect(filed.body.record).toMatchObject({ stage: 'chair', office: 'Program Chair', aboutAdvisor: true, allowChair: true, allowDean: true })
 
       // The adviser: no list entry, no detail, no action, no notification, no count, no help from the assistant.
       expect(await listed(adviser!)).not.toContain(id)
@@ -137,14 +140,15 @@ describe('the concern flow', () => {
       expect(asked.body.record.reply).toContain('cannot answer that one')
       expect(JSON.stringify(asked.body)).not.toContain(id)
 
-      // The Program Chair receives it, is notified, and counts it. The Dean was not allowed to read it.
+      // The Program Chair receives it, is notified, and counts it. The Dean oversees it: counts and reads it, but cannot act.
       expect(await listed(chair!)).toContain(id)
       const opened = (await chair!.get(`/api/pages/P22?id=${id}`)).body.data.record
-      expect(opened).toMatchObject({ aboutAdvisor: true, narrative: statement.narrative })
+      expect(opened).toMatchObject({ aboutAdvisor: true, narrative: statement.narrative, readOnly: false })
       expect(repo.read().notifications.some((notice) => notice.recipientId === 'QCU-CHAIR-CS' && notice.recordId === id && notice.pageId === 'P22')).toBe(true)
-      expect([await open(chair!) - chairBefore, await open(dean!) - deanBefore]).toEqual([1, 0])
-      expect(await listed(dean!)).not.toContain(id)
-      expect((await dean!.get(`/api/pages/P22?id=${id}`)).status).toBe(404)
+      expect([await open(chair!) - chairBefore, await open(dean!) - deanBefore]).toEqual([1, 1])
+      expect(await listed(dean!)).toContain(id)
+      expect((await dean!.get(`/api/pages/P22?id=${id}`)).body.data.record).toMatchObject({ readOnly: true, allowedActions: [] })
+      expect(repo.read().notifications.some((notice) => notice.recipientId === 'QCU-DEAN' && notice.recordId === id)).toBe(false)
     })
 
     it('keeps the adviser out when the concern names the adviser or the student says so with the older flag', async () => {
@@ -157,15 +161,15 @@ describe('the concern flow', () => {
         expect(await listed(adviser)).not.toContain(filed.body.record.id)
         expect(repo.read().notifications.some((notice) => notice.recipientId === 'QCU-PROF-CS' && notice.recordId === filed.body.record.id)).toBe(false)
       }
-      // The Program Chair can read each one although the student allowed nothing, because it goes around the adviser.
+      // The Program Chair reads each one: it handles every concern that goes around the adviser.
       expect((await listed(await login('QCU-CHAIR-CS'))).length).toBe(1 + 3)
     })
 
     it('keeps the adviser out of later steps too', async () => {
       const [student, adviser, chair, dean, guidance] = await Promise.all(['QCU-STU-CS', 'QCU-PROF-CS', 'QCU-CHAIR-CS', 'QCU-DEAN', 'QCU-GUIDANCE'].map(login))
-      const id = (await file(student!, { aboutAdvisor: true, allowDean: true })).body.record.id as string
+      const id = (await file(student!, { aboutAdvisor: true })).body.record.id as string
       const transfer = (agent: Agent) => act(agent, 'P22', 'caseAction', { type: 'transfer', update: 'Please take this.' }, id, 'The next office should decide')
-      // Up to the Dean, who the student allowed, and on to Guidance when the case legitimately gets there.
+      // Up to the Dean, and on to Guidance when the case legitimately gets there.
       expect((await escalate(chair!, id)).status).toBe(200)
       expect((await dean!.get(`/api/pages/P22?id=${id}`)).status).toBe(200)
       expect((await transfer(dean!)).status).toBe(200)
@@ -220,68 +224,57 @@ describe('the concern flow', () => {
     const otherChair = users.get('QCU-CHAIR-IT')!
     const dean = users.get('QCU-DEAN')!
     const owner = users.get('QCU-STU-CS')!
-    const concern = (stage: Report['stage'], allowChair: boolean, allowDean: boolean, aboutAdvisor: boolean): Report => ({ ...structuredClone(seed().reports.find((report) => report.id === 'RPT-0248')!), stage, allowChair, allowDean, aboutAdvisor, bypassed: false, involvedUserIds: [] })
+    const concern = (stage: Report['stage'], aboutAdvisor: boolean, confidential = false): Report => ({ ...structuredClone(seed().reports.find((report) => report.id === 'RPT-0248')!), stage, aboutAdvisor, confidential, bypassed: false, involvedUserIds: [] })
 
-    const cases = (['adviser', 'chair', 'dean'] as const).flatMap((stage) => [false, true].flatMap((allowChair) => [false, true].flatMap((allowDean) => [false, true].map((aboutAdvisor) => ({ stage, allowChair, allowDean, aboutAdvisor })))))
-    it.each(cases)('stage $stage, chair allowed $allowChair, Dean allowed $allowDean, about the adviser $aboutAdvisor', ({ stage, allowChair, allowDean, aboutAdvisor }) => {
-      const report = concern(stage, allowChair, allowDean, aboutAdvisor)
-      // The adviser reads it at the first stage, unless it is about them.
+    const cases = (['adviser', 'chair', 'dean'] as const).flatMap((stage) => [false, true].flatMap((aboutAdvisor) => [false, true].map((confidential) => ({ stage, aboutAdvisor, confidential }))))
+    it.each(cases)('stage $stage, about the adviser $aboutAdvisor, confidential $confidential', ({ stage, aboutAdvisor, confidential }) => {
+      const report = concern(stage, aboutAdvisor, confidential)
+      // Each office acts only at its own stage; the adviser never on a concern about them.
       expect(canActCase(adviser, report)).toBe(stage === 'adviser' && !aboutAdvisor)
-      // The Program Chair of the program reads it at the chair stage if the student allowed it, or if it came to the chair around the adviser.
-      expect(canActCase(chair, report)).toBe(stage === 'chair' && (allowChair || aboutAdvisor))
+      expect(canActCase(chair, report)).toBe(stage === 'chair')
       expect(canActCase(otherChair, report)).toBe(false)
-      // The Dean only if the student allowed it.
-      expect(canActCase(dean, report)).toBe(stage === 'dean' && allowDean)
+      expect(canActCase(dean, report)).toBe(stage === 'dean')
       expect(canActCase(owner, report)).toBe(false)
-      // Counts across every stage follow the same choices.
-      expect([canCountCase(adviser, report), canCountCase(chair, report), canCountCase(otherChair, report), canCountCase(dean, report), canCountCase(owner, report)]).toEqual([false, allowChair || aboutAdvisor, false, allowDean, false])
+      // The chair of the program and the Dean oversee it at every stage, and read it in full unless it is confidential.
+      expect([overseesCase(chair, report), overseesCase(dean, report), overseesCase(otherChair, report), overseesCase(adviser, report)]).toEqual([true, true, false, false])
+      expect([canReadCase(chair, report), canReadCase(dean, report)]).toEqual([!confidential, !confidential])
+      // Counts follow oversight, confidential or not.
+      expect([canCountCase(adviser, report), canCountCase(chair, report), canCountCase(otherChair, report), canCountCase(dean, report), canCountCase(owner, report)]).toEqual([false, true, false, true, false])
     })
 
-    it('treats a report stored before these choices existed as not shared', () => {
-      const old = concern('chair', false, false, false) as Partial<Report>
-      delete old.allowChair
-      delete old.allowDean
-      delete old.aboutAdvisor
-      expect([canActCase(chair, old as Report), canActCase(dean, { ...old, stage: 'dean' } as Report), canCountCase(chair, old as Report), canCountCase(dean, old as Report)]).toEqual([false, false, false, false])
+    it('ignores the old allowChair / allowDean answers of a stored report', () => {
+      const old = { ...concern('chair', false), allowChair: false, allowDean: false }
+      expect([canActCase(chair, old), canActCase(dean, { ...old, stage: 'dean' }), canCountCase(chair, old), canCountCase(dean, old)]).toEqual([true, true, true, true])
     })
 
-    it.each([
-      { allowChair: false, allowDean: false },
-      { allowChair: true, allowDean: false },
-      { allowChair: true, allowDean: true },
-      { allowChair: false, allowDean: true },
-    ])('follows the student when the concern moves up: chair $allowChair, Dean $allowDean', async (choices) => {
+    it('moves up to the Program Chair and the Dean without the student’s permission, and both oversee it from the start', async () => {
       const [student, adviser, chair, dean] = await Promise.all(['QCU-STU-CS', 'QCU-PROF-CS', 'QCU-CHAIR-CS', 'QCU-DEAN'].map(login))
       const [chairBefore, deanBefore] = [await open(chair!), await open(dean!)]
-      const id = (await file(student!, choices)).body.record.id as string
-      expect([await open(chair!) - chairBefore, await open(dean!) - deanBefore]).toEqual([choices.allowChair ? 1 : 0, choices.allowDean ? 1 : 0])
+      const id = (await file(student!, { allowChair: false, allowDean: false })).body.record.id as string
+      expect([await open(chair!) - chairBefore, await open(dean!) - deanBefore]).toEqual([1, 1])
       expect(await listed(adviser!)).toContain(id)
-
-      const toChair = await escalate(adviser!, id)
-      if (!choices.allowChair) {
-        expect([toChair.status, toChair.body.code]).toEqual([409, 'CONFLICT'])
-        expect(toChair.body.error).toBe('The student has not allowed the Program Chair to read this concern, so it cannot be sent there.')
-        expect(stored(id).stage).toBe('adviser')
-        expect((await chair!.get(`/api/pages/P22?id=${id}`)).status).toBe(404)
-        expect(await listed(chair!)).not.toContain(id)
-        return
+      // At the adviser stage the chair and the Dean read it, but only the adviser acts and is notified.
+      for (const overseer of [chair!, dean!]) {
+        expect(await listed(overseer)).toContain(id)
+        expect((await overseer.get(`/api/pages/P22?id=${id}`)).body.data.record).toMatchObject({ narrative: statement.narrative, readOnly: true, allowedActions: [] })
+        expect((await escalate(overseer, id)).status).toBe(404)
       }
-      expect(toChair.status).toBe(200)
-      expect((await chair!.get(`/api/pages/P22?id=${id}`)).status).toBe(200)
+      expect(repo.read().notifications.some((notice) => ['QCU-CHAIR-CS', 'QCU-DEAN'].includes(notice.recipientId) && notice.recordId === id)).toBe(false)
+
+      expect((await escalate(adviser!, id)).status).toBe(200)
+      expect((await chair!.get(`/api/pages/P22?id=${id}`)).body.data.record).toMatchObject({ readOnly: false, stage: 'chair' })
       expect(repo.read().notifications.some((notice) => notice.recipientId === 'QCU-CHAIR-CS' && notice.recordId === id)).toBe(true)
+      expect((await escalate(chair!, id)).status).toBe(200)
+      expect((await dean!.get(`/api/pages/P22?id=${id}`)).body.data.record).toMatchObject({ readOnly: false, stage: 'dean' })
+      // The chair still reads it after it moves on, but can no longer act.
+      expect((await chair!.get(`/api/pages/P22?id=${id}`)).body.data.record).toMatchObject({ readOnly: true, allowedActions: [] })
+    })
 
-      const toDean = await escalate(chair!, id)
-      if (!choices.allowDean) {
-        expect([toDean.status, toDean.body.code]).toEqual([409, 'CONFLICT'])
-        expect(toDean.body.error).toBe('The student has not allowed the Dean to read this concern, so it cannot be sent there.')
-        expect(stored(id).stage).toBe('chair')
-        expect((await dean!.get(`/api/pages/P22?id=${id}`)).status).toBe(404)
-        expect(await listed(dean!)).not.toContain(id)
-        return
-      }
-      expect(toDean.status).toBe(200)
-      expect((await dean!.get(`/api/pages/P22?id=${id}`)).status).toBe(200)
-      expect(await listed(dean!)).toContain(id)
+    it('keeps an anonymous reporter anonymous to the chair and the Dean until the student shares their name with that office', async () => {
+      const [student, chair, dean] = await Promise.all(['QCU-STU-CS', 'QCU-CHAIR-CS', 'QCU-DEAN'].map(login))
+      const id = (await file(student!, { identity: 'anonymous' })).body.record.id as string
+      for (const overseer of [chair!, dean!]) expect((await overseer.get(`/api/pages/P22?id=${id}`)).body.data.record.reporter).toMatchObject({ anonymous: true })
+      expect(JSON.stringify((await dean!.get(`/api/pages/P22?id=${id}`)).body)).not.toContain('Noa Vale')
     })
   })
 
@@ -696,7 +689,7 @@ describe.each(backends)('the first concern, start to finish, %s', (name, backend
     const filed = await file(student, { narrative: 'The lab timetable changed on Monday and nobody told us.', allowChair: true })
     expect(filed.status).toBe(200)
     const id = filed.body.record.id as string
-    expect(filed.body.record).toMatchObject({ stage: 'adviser', office: 'Adviser', aboutAdvisor: false, allowChair: true, allowDean: false })
+    expect(filed.body.record).toMatchObject({ stage: 'adviser', office: 'Adviser', aboutAdvisor: false, allowChair: true, allowDean: true })
 
     // The adviser signs in for the first time, finds a notice and the concern in the list, and reads the statement.
     const { agent: adviser, response: adviserSignIn } = await signIn(app, adviserAccount.credentials.username, adviserAccount.credentials.temporaryPassword)
@@ -725,8 +718,9 @@ describe.each(backends)('the first concern, start to finish, %s', (name, backend
     const conversation = ['Hello Prof, here is what happened.', 'Thank you, Ben. I will look into it.', 'Thank you.']
     expect(messagesOf((await adviser.get(`/api/pages/P22?id=${id}`)).body.data.record)).toEqual(conversation)
 
-    // The chair, the Dean, and another adviser were never part of it.
-    for (const other of ['QCU-CHAIR-IT', 'QCU-DEAN', 'QCU-PROF-IT']) expect([other, (await (await signIn(app, other)).agent.get(`/api/pages/P22?id=${id}`)).status]).toEqual([other, 404])
+    // The chair of the program and the Dean oversee it read-only; another adviser was never part of it.
+    for (const overseer of ['QCU-CHAIR-IT', 'QCU-DEAN']) expect([overseer, (await (await signIn(app, overseer)).agent.get(`/api/pages/P22?id=${id}`)).body.data.record.readOnly]).toEqual([overseer, true])
+    expect((await (await signIn(app, 'QCU-PROF-IT')).agent.get(`/api/pages/P22?id=${id}`)).status).toBe(404)
 
     if (name === 'over a shared record store') {
       // A cold instance shows the same conversation to both people.

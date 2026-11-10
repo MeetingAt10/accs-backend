@@ -134,9 +134,12 @@ export const actionPayloads = {
   react: z.object({}).strict(),
   flag: z.object({ reason, itemType: z.enum(['post', 'comment', 'message']).default('post'), itemId: z.string().optional() }).strict(),
   // The agreement and the three choices have no defaults: a concern is never sent on a guess about what the student allowed.
-  createReport: z.object({ narrative: text, category: text.max(80), severity: z.enum(['low', 'medium', 'high']), identity: z.enum(['named', 'anonymous']), involvedUserIds: z.array(z.string()).default([]), conflictedAdviser: z.boolean().default(false), sourcePostId: z.string().optional(), location: z.string().max(200).optional(), occurredOn: date.optional(), consent: z.object({ readStatement: z.literal(true, { error: agree }) }, { error: agree }).strict(), allowChair: z.boolean({ error: yesOrNo }), allowDean: z.boolean({ error: yesOrNo }), aboutAdvisor: z.boolean({ error: yesOrNo }) }).strict(),
+  createReport: z.object({ narrative: text, category: text.max(80), severity: z.enum(['low', 'medium', 'high']), identity: z.enum(['named', 'anonymous']), involvedUserIds: z.array(z.string()).default([]), conflictedAdviser: z.boolean().default(false), sourcePostId: z.string().optional(), location: z.string().max(200).optional(), occurredOn: date.optional(), consent: z.object({ readStatement: z.literal(true, { error: agree }) }, { error: agree }).strict(), // The Program Chair and the Dean have access without the student's permission (baseline of 10 November 2026). The two
+  // answers are still accepted from clients that send them, and ignored.
+  allowChair: z.boolean().optional(), allowDean: z.boolean().optional(), aboutAdvisor: z.boolean({ error: yesOrNo }) }).strict(),
   saveDraft: z.object({ narrative: z.string().max(4000), category: z.string().max(80).optional(), severity: z.enum(['low', 'medium', 'high']).optional(), identity: z.enum(['named', 'anonymous']).optional() }).strict(),
   sendReportMessage: z.object({ body: text }).strict(),
+  setConfidential: z.object({ confidential: z.boolean() }).strict(),
   chooseTalkMode: z.object({
     reportId: z.string().min(1).max(100),
     mode: z.enum(talkModes),
