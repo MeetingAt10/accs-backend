@@ -153,6 +153,20 @@ function earlierHandlerIds(db:Database,r:Report) { return db.users.filter(u=>u.a
 const faq=[{id:'FAQ-1',question:'How do I request a consultation?',answer:'Open Consultations, pick one of your professors, and request an open time. The professor confirms or declines.',href:'/consultations',roles:['student']},{id:'FAQ-2',question:'What does anonymous reporting mean?',answer:'Your report stays linked to your verified account. Handlers see an alias until you choose to share your name with their office.',href:'/reports/new',roles:['student']},{id:'FAQ-3',question:'How are reports routed?',answer:'A report goes to the student\'s adviser first. If the report involves that adviser, it goes to the program chair instead. The program chair and the Dean can read a report only if the student allowed it. Each office decides the next step.',href:'/cases',roles:['professor','chair','dean','guidance','osas']},{id:'FAQ-4',question:'What can the assistant do?',answer:'It explains ACCS pages, your schedule, and the milestones on your own reports. It cannot decide cases or restrictions. Staff do that.',href:'/assistant',roles:roles as readonly string[]},{id:'FAQ-5',question:'Where do I find official contact details?',answer:'The directory lists faculty and staff offices and their QCU email addresses.',href:'/directory',roles:roles as readonly string[]},{id:'FAQ-6',question:'What still works when features are paused?',answer:'You can still read announcements and class information, use the assistant, and message your professors.',href:'/standing',roles:['student']},{id:'FAQ-7',question:'What does a moderation flag mean?',answer:'A flag asks a moderator to read the post in context. It does not mean anyone did something wrong, and it does not restrict anyone.',href:'/admin/moderation',roles:['administrator']}]
 function notificationCategories(user:User){return ['announcement',...(hasPermission(user,'message.send')?['message']:[]),...(hasRole(user,'student','professor')?['consultation']:[]),...(hasRole(user,'student','professor','chair','dean','guidance','osas')?['report','case']:[]),...(hasPermission(user,'evaluation.fill')||hasPermission(user,'evaluation.configure')?['evaluation']:[]),...(hasRole(user,'administrator')||hasPermission(user,'moderation.referral')?['moderation']:[])]}
 function filteredFaq(user:User){return faq.filter(entry=>entry.roles.some(role=>user.roles.includes(role as User['roles'][number])))}
+// Three unsettled strikes hold a student's clearance until OSAS records the settlement (#34). Settled strikes stay on the
+// record and do not count again; strikes recorded after a settlement start a new count.
+export const strikeLimit = 3
+function clearanceOf(db:Database,studentId:string) {
+  const settled = new Set(db.strikeSettlements.filter(s=>s.studentId===studentId).flatMap(s=>s.strikeIds))
+  const strikes = db.strikes.filter(s=>s.studentId===studentId)
+  const unsettled = strikes.filter(s=>!settled.has(s.id))
+  return { onHold: unsettled.length >= strikeLimit, unsettledStrikes: unsettled.length, totalStrikes: strikes.length, limit: strikeLimit, unsettled }
+}
+const clearanceView = (db:Database,studentId:string) => { const { unsettled: _unsettled, ...view } = clearanceOf(db,studentId); return view }
+function strikeViews(db:Database,studentId:string) {
+  const settled = new Set(db.strikeSettlements.filter(s=>s.studentId===studentId).flatMap(s=>s.strikeIds))
+  return db.strikes.filter(s=>s.studentId===studentId).map(s=>{const r=db.reports.find(item=>item.id===s.reportId);return {id:s.id,kind:s.kind,note:s.note,at:s.at,caseReference:r?.caseFileId??s.reportId,settled:settled.has(s.id),recordedBy:author(db,s.actorId)}})
+}
 function restrictionViews(db:Database,user:User,studentId?:string) {
   const today = now().slice(0, 10)
   return db.restrictions
@@ -555,7 +569,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
     }
     case'P32':{const c=pick(db.cycles.filter(c=>db.assignments.some(a=>a.cycleId===c.id&&a.facultyId===user.id)),query.id);if(c){data.record={...c,reviews:c.reviews.filter(r=>r.userId===user.id)};data.canReview=c.status==='In review'&&!c.reviews.some(r=>r.userId===user.id)}break}
     case'P33':data.students=db.users.filter(u=>canStudentRecord(db,user,u)&&match(`${u.name} ${u.studentId}`)).map(u=>person(refreshRestrictions(db,u)));break
-    case'P34':{if(!query.purpose){data.purposeRequired=true;break}const students=db.users.filter(u=>canStudentRecord(db,user,u));const s=pick(students,query.id);if(s){const entry=audit(repo,user,'Record opened','records',s.studentId??s.id,query.purpose);data.record={...person(refreshRestrictions(db,s)),offenses:db.offenses.filter(o=>o.studentId===s.id),restrictions:restrictionViews(db,user,s.id),goodMoral:hasPermission(user,'goodmoral.review')?db.goodMoral.find(g=>g.studentId===s.id):undefined,openedAt:entry.at,accessHistory:hasRole(user,'dean')?safeAudit(db,db.audit.filter(a=>a.action==='Record opened'&&a.reference===(s.studentId??s.id))):undefined}}break}
+    case'P34':{if(!query.purpose){data.purposeRequired=true;break}const students=db.users.filter(u=>canStudentRecord(db,user,u));const s=pick(students,query.id);if(s){const entry=audit(repo,user,'Record opened','records',s.studentId??s.id,query.purpose);data.record={...person(refreshRestrictions(db,s)),offenses:db.offenses.filter(o=>o.studentId===s.id),restrictions:restrictionViews(db,user,s.id),goodMoral:hasPermission(user,'goodmoral.review')?db.goodMoral.find(g=>g.studentId===s.id):undefined,strikes:strikeViews(db,s.id),strikeSettlements:db.strikeSettlements.filter(x=>x.studentId===s.id).map(x=>({id:x.id,kind:x.kind,reference:x.reference,note:x.note,at:x.at,strikeCount:x.strikeIds.length,settledBy:author(db,x.actorId)})),clearance:clearanceView(db,s.id),canRecordStrikes:hasPermission(user,'strike.record'),openedAt:entry.at,accessHistory:hasRole(user,'dean')?safeAudit(db,db.audit.filter(a=>a.action==='Record opened'&&a.reference===(s.studentId??s.id))):undefined}}break}
     case'P35':{const students=db.users.filter(u=>hasRole(u,'student')&&(hasRole(user,'administrator')||canStudentRecord(db,user,u)));data.students=students.map(u=>person(refreshRestrictions(db,u)));data.restrictions=restrictionViews(db,user);data.referrals=db.referrals.filter(r=>hasRole(user,'administrator')||r.actorId===user.id).map(r=>({...r,student:person(find(db.users,r.studentId)),actor:author(db,r.actorId)}));data.canApply=hasRole(user,'administrator');break}
     case 'P36': {
       const activeRestrictions = restrictionViews(db, user, user.id).filter(restriction => restriction.active)
@@ -639,6 +653,8 @@ const actionPages: Record<string, string[]> = {
   saveFollowUp: ['P29'],
   openRecord: ['P34'],
   reviewGoodMoral: ['P34'],
+  recordStrike: ['P34'],
+  settleStrikes: ['P34'],
   applyRestriction: ['P35'],
   liftRestriction: ['P35'],
   referRestriction: ['P34', 'P35'],
@@ -958,6 +974,37 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
     case'saveFollowUp':{requireRole(user,'chair','dean');const p=actionPayloads.saveFollowUp.parse(request.payload);const faculty=find(db.users,id);if(!canFacultyResult(user,faculty))throw unavailable();db.followUps.push({id:repo.nextId('FOLLOWUP'),facultyId:faculty.id,actorId:user.id,note:p.note,at:now()});audit(repo,user,'Evaluation follow-up recorded','evaluations',faculty.id);message='Follow-up note saved.';break}
     case'openRecord':{const p=actionPayloads.openRecord.parse(request.payload);record=readPage(repo,user,'P34',{id,...p}).data.record;message='Record opened and logged.';break}
     case'reviewGoodMoral':{requirePermission(user,'goodmoral.review');const p=actionPayloads.reviewGoodMoral.parse(request.payload);const student=find(db.users,id);if(!canStudentRecord(db,user,student))throw unavailable();const review={studentId:student.id,...p,actorId:user.id,at:now()};db.goodMoral=db.goodMoral.filter(g=>g.studentId!==student.id);db.goodMoral.push(review);audit(repo,user,'Good Moral prerequisite reviewed','records',student.studentId??student.id);record=review;message='Review saved.';break}
+    case 'recordStrike': {
+      requirePermission(user, 'strike.record')
+      const p = actionPayloads.recordStrike.parse(request.payload)
+      const student = find(db.users, p.studentId)
+      if (!hasRole(student, 'student') || !canStudentRecord(db, user, student)) throw unavailable()
+      // The strike comes from a case OSAS is handling, and never falls on the student who reported it.
+      const r = find(db.reports, p.reportId)
+      if (!canActCase(user, r)) throw unavailable()
+      if (r.ownerId === student.id) throw conflict('A strike is recorded against the reported student, not the student who filed the concern.')
+      const wasOnHold = clearanceOf(db, student.id).onHold
+      db.strikes.push({ id: repo.nextId('STRIKE'), studentId: student.id, reportId: r.id, kind: p.kind, note: p.note, actorId: user.id, at: now() })
+      audit(repo, user, 'Strike recorded', 'records', student.studentId ?? student.id)
+      const clearance = clearanceView(db, student.id)
+      if (clearance.onHold && !wasOnHold) audit(repo, user, 'Clearance hold placed', 'records', student.studentId ?? student.id)
+      record = { strikes: strikeViews(db, student.id), clearance }
+      message = clearance.onHold && !wasOnHold ? 'Strike recorded. The student’s clearance is now on hold.' : 'Strike recorded.'
+      break
+    }
+    case 'settleStrikes': {
+      requirePermission(user, 'strike.record')
+      const p = actionPayloads.settleStrikes.parse(request.payload)
+      const student = find(db.users, p.studentId)
+      if (!hasRole(student, 'student') || !canStudentRecord(db, user, student)) throw unavailable()
+      const before = clearanceOf(db, student.id)
+      if (!before.onHold) throw conflict('This student has no clearance hold to settle.')
+      db.strikeSettlements.push({ id: repo.nextId('SETTLE'), studentId: student.id, kind: p.kind, reference: p.reference, note: p.note, strikeIds: before.unsettled.map(s => s.id), actorId: user.id, at: now() })
+      audit(repo, user, 'Clearance hold settled', 'records', student.studentId ?? student.id)
+      record = { strikes: strikeViews(db, student.id), clearance: clearanceView(db, student.id) }
+      message = 'Settlement recorded. The clearance hold is lifted; the strikes stay on the record.'
+      break
+    }
     case'applyRestriction':{requireRole(user,'administrator');const p=actionPayloads.applyRestriction.parse(request.payload);reasonOf(request);const student=find(db.users,p.studentId);if(!hasRole(student,'student'))throw unavailable();if(p.until<now().slice(0,10))throw new ApiError(400,'The end date must be today or later.','VALIDATION_ERROR');const r={id:repo.nextId('RST'),...p,starts:now(),actorId:user.id,active:true};db.restrictions.push(r);audit(repo,user,'Restriction applied','restrictions',r.id);notify(repo,student.id,'restriction','P36');record=r;message='Selected features paused.';break}
     case'liftRestriction':{requireRole(user,'administrator');actionPayloads.liftRestriction.parse(request.payload);reasonOf(request);const r=find(db.restrictions,id);if(!r.active||r.until<now().slice(0,10))throw conflict('This restriction has already ended.');r.active=false;audit(repo,user,'Restriction lifted','restrictions',r.id);notify(repo,r.studentId,'restriction','P36');record=r;message='Restriction lifted.';break}
     case'referRestriction':{requireRole(user,'guidance','osas');const p=actionPayloads.referRestriction.parse(request.payload);const reason=reasonOf(request);const student=find(db.users,p.studentId);if(!canStudentRecord(db,user,student))throw unavailable();const referral={id:repo.nextId('REF'),studentId:student.id,change:p.change,decisionReference:p.decisionReference??'',reason,actorId:user.id,at:now(),status:'Awaiting administrator review'};db.referrals.push(referral);audit(repo,user,'Restriction change requested','restrictions',referral.id);for(const admin of db.users.filter(u=>hasRole(u,'administrator')))notify(repo,admin.id,'restriction','P35');record=referral;message='Request sent. Existing restrictions are unchanged.';break}
