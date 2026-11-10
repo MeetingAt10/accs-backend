@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { type AuthData, type AuthStore, AuthStoreConflict, createAuthStore, defaultHash, hashPassword, verifyPassword } from './auth.js'
 import { env, onLambda, tableName } from './env.js'
 import { actionRequestSchema, actionResponseSchema, changePasswordSchema, completeFirstLoginSchema, emptyBodySchema, errorResponseSchema, forgotPasswordSchema, healthResponseSchema, idParamsSchema, pageQuerySchema, pageResponseSchema, resetPasswordSchema, sessionResponseSchema, signInSchema, type User } from './schemas.js'
+import { createResetMailer, type ResetCodeMailer } from './mail.js'
 import { accountRouter, applyAccounts, recordAudit, saveAccountChange, saveProfileChange, setOwnCredentials, unsentMailer, type InviteMailer } from './accounts.js'
 import { hasPermission } from './access.js'
 import { devRouter, devToolboxEnabled, isDevToolboxCall, type Stack } from './dev.js'
@@ -18,7 +19,7 @@ import { createThrottleStore, type ThrottleStore } from './throttle.js'
 import { createSessionStore, isWellFormedToken, newSessionToken, sessionIdOf, sessionPolicy, sessionState, type SessionStore } from './sessions.js'
 import { demoUserIds, type Repository } from './store.js'
 
-export function createApp(repository:Repository=createRepository({nodeEnv:env.NODE_ENV,tableName}),options:{authStore?:AuthStore;sessionStore?:SessionStore;resetStore?:ResetStore;throttleStore?:ThrottleStore;mailer?:InviteMailer;stack?:Stack}={}){
+export function createApp(repository:Repository=createRepository({nodeEnv:env.NODE_ENV,tableName}),options:{authStore?:AuthStore;sessionStore?:SessionStore;resetStore?:ResetStore;throttleStore?:ThrottleStore;mailer?:InviteMailer;resetMailer?:ResetCodeMailer;stack?:Stack}={}){
   const app=express()
   // The account switcher for testers exists only on the development stack and on local runs (src/dev.ts).
   const devToolbox=devToolboxEnabled(options.stack??{tablePrefix:env.TABLE_PREFIX,nodeEnv:env.NODE_ENV})
@@ -76,17 +77,29 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     if(!user||!stored||!matches)throw new ApiError(401,'The email, ID, or password is incorrect.','INVALID_CREDENTIALS')
     await throttle.clear(key);await startSession(req,res,user,remember);await sessionOut(res,user)
   })
-  // TBD(SES): no email channel yet. Outside production the code is logged; in production an administrator
-  // issues it (POST /api/admin/accounts/:id/reset-code) and hands it over, so self-service issues nothing.
-  const deliverResetCode=(user:User,code:string)=>{if(env.NODE_ENV==='production')return false;console.log(`[accs] password reset code for ${user.id}: ${code}`);return true}
-  const selfServiceReset=env.NODE_ENV!=='production'
+  // Reset codes go out by email when MAIL_FROM is set, and are logged on local runs without it (src/mail.ts). Production
+  // without a channel issues nothing: an administrator issues the code (POST /api/admin/accounts/:id/reset-code).
+  const resetMailer=options.resetMailer??createResetMailer({nodeEnv:env.NODE_ENV,mailFrom:env.MAIL_FROM})
+  const selfServiceReset=resetMailer.channel!=='none'
+  // Seeded demo accounts carry made-up addresses on the real qcu.edu.ph domain, so a code for one of them (QCU-ADMIN
+  // included) would reach whoever owns that mailbox. They are never emailed; an administrator issues their codes.
+  const resetCodeMinutes=Math.round(resetPolicy.codeTtlMs/60000)
+  // A failed send is logged without the code or the address, and the caller still gives the generic answer.
+  const deliverResetCode=async(user:User,code:string)=>{
+    try{await resetMailer.send({userId:user.id,to:user.email,name:user.name,code,expiresInMinutes:resetCodeMinutes})}
+    catch(error){console.error(JSON.stringify({level:'error',message:'Reset code email not sent',userId:user.id,error:error instanceof Error?error.name:'Unknown'}))}
+  }
+  const forgotMessage=resetMailer.channel==='email'
+    ?`If an account matches, a reset code has been emailed to it. The code expires in ${resetCodeMinutes} minutes. Ask an ACCS administrator if it does not arrive.`
+    :selfServiceReset?'If an account matches, a reset code has been issued. Ask an ACCS administrator if you do not receive it.'
+    :'To reset your password, ask an ACCS administrator for a reset code, then enter it here with your new password.'
   const newResetCode=()=>{const code=String(randomInt(100000,1000000));return {code,codeHash:hashPassword(code)}}
   app.post('/api/auth/forgot-password',async(req,res)=>{
     const {emailOrId}=forgotPasswordSchema.parse(req.body);const user=await findUser(emailOrId)
     // Hash a code whether or not the account exists, so the response time does not reveal it.
     const {code,codeHash}=newResetCode()
-    if(user&&selfServiceReset&&await resets.issue({userId:user.id,codeHash,now:Date.now()})==='issued')deliverResetCode(user,code)
-    send(res,actionResponseSchema,{ok:true,message:selfServiceReset?'If an account matches, a reset code has been issued. Ask an ACCS administrator if you do not receive it.':'To reset your password, ask an ACCS administrator for a reset code, then enter it here with your new password.'})
+    if(user&&selfServiceReset&&(resetMailer.channel!=='email'||!demoUserIds.has(user.id))&&await resets.issue({userId:user.id,codeHash,now:Date.now()})==='issued')await deliverResetCode(user,code)
+    send(res,actionResponseSchema,{ok:true,message:forgotMessage})
   })
   app.post('/api/auth/reset-password',async(req,res)=>{
     const {emailOrId,code,password}=resetPasswordSchema.parse(req.body);const key=`reset:${emailOrId.trim().toLowerCase()}`
