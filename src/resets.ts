@@ -12,7 +12,7 @@ import {
 // PK USER#<user_id>, SK RESET; timestamps ISO-8601 like the rest of DOC006; TTL on expires_epoch.
 // Limits live on the item, so every Lambda instance enforces them.
 
-// TBD(D-08): provisional values.
+// Approved under DOC003 D-08 on 2026-11-10.
 export const resetPolicy = {
   codeTtlMs: 15 * 60 * 1000,
   // Wrong guesses allowed per code. A guess is counted before the code is checked, so parallel guesses cannot exceed it.

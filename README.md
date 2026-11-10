@@ -145,7 +145,7 @@ Codes live in `ccs_identity` as the `RESET` item `USER#<id>` / `RESET` (hash onl
 
 - **`MAIL_FROM` set:** Amazon SES sends a plain-text email from that address to the account's email. The code is never logged. If SES refuses or fails, one JSON line goes to stderr (`level`, `message`, `userId`, and the error name, never the code or the address) and the caller gets the usual answer. Seeded demo accounts are never emailed, because their made-up addresses are on the real `qcu.edu.ph` domain and a code could reach whoever owns that mailbox; forgot-password for one issues nothing and answers the same, and an administrator issues their codes. The Lambda needs `ses:SendEmail` on the `MAIL_FROM` identity, and while the SES account is in the sandbox it can only send to verified addresses.
 - **No `MAIL_FROM`, not production:** the code is logged (`[accs] password reset code for <id>: <code>`), for local runs and tests.
-- **No `MAIL_FROM`, production:** no code is issued; the CCS office gets one from an administrator and hands it to the account holder. Limits are provisional until D-08.
+- **No `MAIL_FROM`, production:** no code is issued; the CCS office gets one from an administrator and hands it to the account holder. The limits were approved under DOC003 D-08 on 2026-11-10.
 
 ## Attempt limits
 
@@ -153,7 +153,7 @@ Sign-in (per source IP and identifier), password reset (per identifier), first s
 
 ## Sessions
 
-Sign-in creates a server-side session. The `accs_session` cookie holds an opaque random token; the `ccs_identity` table (`<TABLE_PREFIX>ccs_identity`, a DOC006 `SESSION` item keyed `SESSION#<sha256 of token>`) stores only its hash, so a leaked table cannot be replayed. Every request reads the session and the account, so sign-out, a role change, and deactivation apply at once. Sessions end after 30 minutes idle or 12 hours (remember me: 7 days idle, 30 days); these are provisional until DOC003 decision D-08. Changing a password signs out other devices; a password reset signs out all of them. Without `TABLE_PREFIX`, sessions stay in memory locally, and on Lambda sign-in fails rather than issuing sessions valid on one instance only.
+Sign-in creates a server-side session. The `accs_session` cookie holds an opaque random token; the `ccs_identity` table (`<TABLE_PREFIX>ccs_identity`, a DOC006 `SESSION` item keyed `SESSION#<sha256 of token>`) stores only its hash, so a leaked table cannot be replayed. Every request reads the session and the account, so sign-out, a role change, and deactivation apply at once. Sessions end after 30 minutes idle or 12 hours (remember me: 7 days idle, 30 days); these were approved under DOC003 D-08 on 2026-11-10. Changing a password signs out other devices; a password reset signs out all of them. Without `TABLE_PREFIX`, sessions stay in memory locally, and on Lambda sign-in fails rather than issuing sessions valid on one instance only.
 
 ## Dev toolbox
 
