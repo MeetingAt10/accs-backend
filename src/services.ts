@@ -12,6 +12,37 @@ const now = () => new Date().toISOString()
 const offices: Record<Stage,string> = { adviser:'Adviser',chair:'Program Chair',dean:'Dean',guidance:'Guidance Office',osas:'OSAS',executive:"President's Office" }
 const stageRoles: Record<Stage,string> = { adviser:'professor',chair:'chair',dean:'dean',guidance:'guidance',osas:'osas',executive:'president' }
 const statusFor = (report: Report) => ['Resolved','Closed','Draft'].includes(report.status) ? report.status : report.stage === 'guidance' && report.caseFileId ? 'Case File at Guidance' : `With ${offices[report.stage]}`
+const daysBetween = (from: string, to: string) => Math.max(0, (Date.parse(to) - Date.parse(from)) / 86400000)
+/** When the report entered its current stage: the first entry of the last unbroken run of history entries in that stage. */
+function stageEnteredAt(report: Report) {
+  let at = report.createdAt
+  for (let i = report.history.length - 1; i >= 0 && report.history[i]!.stage === report.stage; i--) at = report.history[i]!.at
+  return at
+}
+/** Median rounded to one decimal, or undefined for no values. */
+function median(values: number[]) {
+  if (!values.length) return undefined
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  const value = sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2
+  return Math.round(value * 10) / 10
+}
+/** Opened and resolved counts per week (weeks start Monday, UTC), from the first week with activity to the last. */
+function weeklyTrend(opened: string[], resolved: string[]) {
+  const weekOf = (iso: string) => { const d = new Date(iso); d.setUTCHours(0, 0, 0, 0); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.getTime() }
+  const all = [...opened, ...resolved].map(weekOf)
+  if (!all.length) return []
+  const week = 7 * 86400000
+  const rows: { label: string; opened: number; resolved: number }[] = []
+  for (let start = Math.min(...all); start <= Math.max(...all); start += week) {
+    rows.push({
+      label: new Date(start).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }),
+      opened: opened.filter((at) => weekOf(at) === start).length,
+      resolved: resolved.filter((at) => weekOf(at) === start).length,
+    })
+  }
+  return rows
+}
 function requirePermission(user: User, key: string) { if (!hasPermission(user,key)) throw deny() }
 const referredStatus = 'Referred to the CCS Secretary'
 /** Moderators see every item; the CCS Secretary sees only items referred to them, including ones they have decided. */
@@ -405,22 +436,28 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
         && (!query.to || report.createdAt <= `${query.to}T23:59:59.999Z`),
       )
       if (query.period === 'none') records = []
+      // Times come from the report's own history: resolution is its first Resolved or Closed entry, and waiting in a stage
+      // counts from when the report entered it (stageEnteredAt).
+      const resolvedAt = (report: Report) => report.history.find((entry) => entry.action === 'Resolved' || entry.action === 'Closed')?.at
+      const resolvedDays = records.flatMap((report) => { const at = resolvedAt(report); return at ? [daysBetween(report.createdAt, at)] : [] })
       data.stats = [
         { label: 'Open', value: records.filter((report) => !['Resolved', 'Closed'].includes(report.status)).length, note: 'Not yet resolved' },
         { label: 'Escalated', value: records.filter((report) => report.stage !== 'adviser').length, note: 'Past the adviser' },
         { label: 'Resolved', value: records.filter((report) => ['Resolved', 'Closed'].includes(report.status)).length, note: 'Resolved or closed' },
-        { label: 'Median days to resolve', value: 0, note: 'No resolved reports yet' },
+        { label: 'Median days to resolve', value: median(resolvedDays) ?? 0, note: resolvedDays.length ? `Across ${resolvedDays.length} resolved report${resolvedDays.length === 1 ? '' : 's'}` : 'No resolved reports yet' },
         { label: 'Adviser bypassed', value: records.filter((report) => report.bypassed).length, note: 'Sent straight to the chair' },
       ]
       data.byStage = Object.keys(offices).map((stage) => ({
         label: offices[stage as Stage],
         value: records.filter((report) => report.stage === stage).length,
       }))
-      data.trend = [{
-        label: '20 Oct',
-        opened: records.length,
-        resolved: records.filter((report) => ['Resolved', 'Closed'].includes(report.status)).length,
-      }]
+      data.trend = weeklyTrend(records.map((report) => report.createdAt), records.flatMap((report) => { const at = resolvedAt(report); return at ? [at] : [] }))
+      data.waitingByStage = Object.keys(offices).map((stage) => {
+        const waiting = records
+          .filter((report) => report.stage === stage && !['Resolved', 'Closed'].includes(report.status))
+          .map((report) => daysBetween(stageEnteredAt(report), new Date().toISOString()))
+        return { label: offices[stage as Stage], value: median(waiting) ?? 0, count: waiting.length }
+      })
       data.byCategory = [...new Set(records.map((report) => report.category))].map((label) => {
         const count = records.filter((report) => report.category === label).length
         return { label, value: count >= 5 ? count : null, suppressed: count < 5 }
