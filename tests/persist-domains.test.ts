@@ -35,7 +35,7 @@ describe('where each collection is stored', () => {
       posts: 'ccs_community',
       moderation: 'ccs_moderation',
       cycles: 'ccs_evaluation', assignments: 'ccs_evaluation', followUps: 'ccs_evaluation',
-      restrictions: 'ccs_discipline', referrals: 'ccs_discipline', goodMoral: 'ccs_discipline',
+      restrictions: 'ccs_discipline', referrals: 'ccs_discipline', strikes: 'ccs_discipline', strikeSettlements: 'ccs_discipline', goodMoral: 'ccs_discipline',
       drafts: 'ccs_assistant', telemetry: 'ccs_assistant',
       permissionOverrides: 'ccs_identity',
     })

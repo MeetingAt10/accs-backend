@@ -312,7 +312,7 @@ describe('the record repository', () => {
     await expect(repo.view((unit) => unit.read().reports, ['audit'])).rejects.toThrow('reports collection was not loaded')
     await expect(repo.transact((unit) => unit.read().slots, [])).rejects.toThrow('slots collection was not loaded')
     await repo.view((unit) => unit.read().reports)
-    expect(spy.lists.slice(-21).sort()).toEqual(Object.entries(persisted).map(([name, table]) => `${table}/${name}`).sort())
+    expect(spy.lists.slice(-Object.keys(persisted).length).sort()).toEqual(Object.entries(persisted).map(([name, table]) => `${table}/${name}`).sort())
   })
 
   it('takes turns when transactions arrive together, so none of them is lost', async () => {

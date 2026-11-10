@@ -38,7 +38,7 @@ Two implementations:
 
 ### Shared state (record repository)
 
-The seed is the base. Twenty-one collections are shared by every instance and survive a cold start; each lives in its domain table (accs-architecture ADR 0004):
+The seed is the base. Twenty-three collections are shared by every instance and survive a cold start; each lives in its domain table (accs-architecture ADR 0004):
 
 | Collection | Table |
 |---|---|
@@ -49,7 +49,7 @@ The seed is the base. Twenty-one collections are shared by every instance and su
 | `posts` (with their comments and reactions) | `ccs_community` |
 | `moderation` | `ccs_moderation` |
 | `cycles`, `assignments`, `followUps` | `ccs_evaluation` |
-| `restrictions`, `referrals`, `goodMoral` | `ccs_discipline` |
+| `restrictions`, `referrals`, `strikes`, `strikeSettlements`, `goodMoral` | `ccs_discipline` |
 | `drafts`, `telemetry` | `ccs_assistant` |
 | `permissionOverrides` | `ccs_identity` |
 | `audit` | `ccs_audit` (add-only: entries are only ever put, never changed or deleted) |
@@ -61,7 +61,7 @@ One item per record: `PK = STATE#<collection>`, `SK` the record ID, `data` the r
 - `view` queries each collection it needs (strongly consistent, every page of the result, in parallel), lays the records over the seed, and runs the work on that private copy.
 - `transact` does the same, then writes only the records that changed, each conditioned on the version it read (`attribute_not_exists(PK)` for a new record), in one `TransactWriteItems` per 100 writes. If another instance changed a record first, the work runs again on fresh data, up to 3 times in all, and then the call fails with `409 CONFLICT`. A change of more than 100 records is split into several transactions; if a later one loses a race the work is not run again, since the earlier ones are already stored, and the call fails with `409`. Transactions on one instance take turns.
 - The write check is per record: two instances changing the same record cannot both win (one slot, one consultation), but a unit of work that only reads a record and acts on it is not re-checked.
-- Every `view` and action loads all 21 collections (one parallel query each) unless it names fewer. The session check on every authenticated request names only `restrictions`. Notifications, telemetry, and the audit trail grow without bound; they need a per-user key or a time window before the pilot gets large.
+- Every `view` and action loads all 23 collections (one parallel query each) unless it names fewer. The session check on every authenticated request names only `restrictions`. Notifications, telemetry, and the audit trail grow without bound; they need a per-user key or a time window before the pilot gets large.
 - A post is one record, so comments racing on the same post retry, and can reach the `409`. A cycle that generates more than 100 assignments is written in several transactions, so that change is not atomic.
 
 Four collections stay on the seed, per instance: `users` (accounts come from the auth store below), `spaces` (only changed from the auth store), and `organizations` and `offenses` (no route writes them). `src/records.ts` holds the small `RecordStore` interface (`list`, `write`), its DynamoDB implementation, and an in-memory one the tests use to run two app instances over one store.
@@ -140,6 +140,10 @@ A student files a concern (a *report* until it reaches Guidance) and chooses how
 **What the views return.** The student's views (P18, P20) and the office's (P21 rows, P22) carry `consent` (`{ readStatement, at, version, wording }`; the account behind it is never returned), `allowChair` and `allowDean` (always `true`: the chair and the Dean can read it), `confidential`, `aboutAdvisor`, and `talk`; the office's view also has `readOnly`. A P21 row also has `reporter` (the name, or the alias), `category`, `createdAt`, and `updatedAt`. There is no unread mark per report; an unread notice for the report on P40 (`recordId`, `read`) is the signal.
 
 **Stages.** A case moves in a fixed order: Adviser, Program Chair, Dean, Guidance, OSAS. The adviser and the chair escalate; the Dean forwards to Guidance; Guidance opens a Case File and then forwards to OSAS. OSAS is the last stage: it can respond, record actions, add milestones, resolve and close, but not forward. Any stage can resolve a case, and a resolved case can be closed. The President's Office stage and role were removed on 2026-11-10; a report stored with stage `executive` is read as being with OSAS, and a stored account's `president` role is dropped (an account left with no role cannot sign in).
+
+## Strikes and the clearance hold
+
+In a student-on-student complaint, **OSAS** records a strike against the reported student (`recordStrike` on P34: `{ studentId, reportId, kind: 'report' | 'no-show', note }`). The case must be one OSAS is handling, and the student who filed it can never receive a strike (409). At **three** unsettled strikes the student's clearance is on hold. OSAS records the settlement (`settleStrikes`: `{ studentId, kind: 'letter' | 'reprimand', reference, note }`), which lifts the hold; the strikes stay on the record, and strikes recorded later start a new count. Settling without a hold is a 409. P34 shows `strikes`, `strikeSettlements` and `clearance` (`{ onHold, unsettledStrikes, totalStrikes, limit }`) to the offices that may open the record; Guidance and OSAS may now also open the records of students named in their cases. Every strike, hold and settlement is audited.
 
 ## Password reset codes
 
