@@ -220,7 +220,7 @@ describe('the record repository behaves like memory', () => {
   beforeAll(() => { vi.spyOn(console, 'log').mockImplementation(() => {}) })
   afterAll(() => vi.restoreAllMocks())
 
-  const accounts = ['QCU-STU-IT-A', 'QCU-ORG', 'QCU-PROF-IT', 'QCU-STAFF', 'QCU-CHAIR-IT', 'QCU-DEAN', 'QCU-ADMIN', 'QCU-GUIDANCE', 'QCU-OSAS', 'QCU-PRESIDENT']
+  const accounts = ['QCU-STU-IT-A', 'QCU-ORG', 'QCU-PROF-IT', 'QCU-STAFF', 'QCU-CHAIR-IT', 'QCU-DEAN', 'QCU-ADMIN', 'QCU-GUIDANCE', 'QCU-OSAS']
   const pageIds = Array.from({ length: 50 }, (_, n) => `P${String(n + 3).padStart(2, '0')}`)
 
   it.each(accounts)('%s gets the same status on every page', async (id) => {

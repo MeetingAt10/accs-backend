@@ -10,7 +10,7 @@ import { ulid } from './ids.js'
 import {
   accountIdParamsSchema, accountListResponseSchema, accountsQuerySchema, accountTypesResponseSchema, actionResponseSchema, activateSecretarySchema,
   advisorsResponseSchema, createFacultySchema, facultyListResponseSchema, facultyQuerySchema, facultyRowSchema, importStudentsSchema, programParamsSchema,
-  setActiveSchema, setAdvisorsSchema, setChairSchema, studentRowSchema, yearLevelParamsSchema, type Role, type User,
+  roles, setActiveSchema, setAdvisorsSchema, setChairSchema, studentRowSchema, yearLevelParamsSchema, type Role, type User,
 } from './schemas.js'
 import { ApiError, deny, unavailable, type AccountChange, type ProfileChange } from './services.js'
 import type { SessionStore } from './sessions.js'
@@ -101,7 +101,11 @@ function edit(data: AuthData, accounts: Map<string, User>, id: string) {
 export function applyAccounts(db: Database, accounts: User[]) {
   const index = new Map(db.users.map((user, position) => [user.id, position]))
   const members = new Map(db.spaces.map((space) => [space.id, new Set(space.studentIds)]))
-  for (const account of accounts) {
+  for (const stored of accounts) {
+    // A role that no longer exists (the President's Office, removed on 2026-11-10) is dropped; an account left with no
+    // role cannot sign in.
+    const knownRoles = stored.roles.filter((role) => (roles as readonly string[]).includes(role))
+    const account = knownRoles.length === stored.roles.length ? stored : { ...stored, roles: knownRoles, active: stored.active && knownRoles.length > 0 }
     const position = index.get(account.id)
     if (position === undefined) index.set(account.id, db.users.push(structuredClone(account)) - 1)
     // Stored profile text wins; a stored account without any keeps what this instance has.

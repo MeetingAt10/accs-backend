@@ -2,7 +2,8 @@ import { consentWording } from './consent.js'
 import { ulid } from './ids.js'
 import type { Role, TalkMode, User } from './schemas.js'
 
-export type Stage = 'adviser' | 'chair' | 'dean' | 'guidance' | 'osas' | 'executive'
+// The President's Office stage was removed on 2026-11-10; a record stored with `executive` is read as `osas` (persist.ts).
+export type Stage = 'adviser' | 'chair' | 'dean' | 'guidance' | 'osas'
 export type Message = { id: string; authorId: string; body: string; at: string }
 export type History = { id: string; at: string; actorId: string; actorRole: string; action: string; reason: string; update: string; public: boolean; stage: Stage }
 /** The student's agreement to send a concern, stamped by the server with the exact wording they were shown. */
@@ -140,7 +141,6 @@ export function seed(): Database {
     user('QCU-ADMIN', 'Casey Hart', ['administrator'], { office: 'ACCS administration', title: 'ACCS administrator and moderator' }),
     user('QCU-GUIDANCE', 'Alex Fern', ['guidance'], { office: 'Guidance Office', title: 'Guidance officer', officeHours: 'Weekdays, 9:00 AM to 4:00 PM' }),
     user('QCU-OSAS', 'Jamie Alder', ['osas'], { office: 'Office of Student Affairs and Services', title: 'OSAS officer', officeHours: 'Weekdays, 9:00 AM to 4:00 PM' }),
-    user('QCU-PRESIDENT', 'Taylor Rowan', ['president'], { office: 'Office of the University President', title: 'Staff, Office of the University President' }),
     // Inactive until the Dean activates it. The email is a placeholder: activation can replace it.
     user('QCU-SECRETARY', 'CCS Secretary', ['secretary'], { active: false, email: 'secretary@example.invalid', office: 'CCS Office', title: 'CCS secretary', officeHours: 'Monday to Friday, 8:00 AM to 5:00 PM' }),
   ]
@@ -156,15 +156,15 @@ export function seed(): Database {
   posts[4]!.private = false
   posts.push(post('POST-0106', 'QCU-PROF-IT', 'Faculty meeting items', 'Add items for the semester coordination meeting before Monday.', 'faculty'))
   posts[1]!.comments.push({ id: 'COMMENT-0101', authorId: 'QCU-STU-IT-B', body: 'Same problem in BSIT 3B. A posted lab schedule would help us plan.', anonymous: false, at })
-  const stageRoles: Record<Stage, string> = { adviser: 'professor', chair: 'chair', dean: 'dean', guidance: 'guidance', osas: 'osas', executive: 'president' }
-  const actorIds: Record<Stage, string> = { adviser: 'QCU-PROF-IT', chair: 'QCU-CHAIR-IT', dean: 'QCU-DEAN', guidance: 'QCU-GUIDANCE', osas: 'QCU-OSAS', executive: 'QCU-PRESIDENT' }
-  const stages: Stage[] = ['adviser', 'chair', 'dean', 'guidance', 'osas', 'executive']
+  const stageRoles: Record<Stage, string> = { adviser: 'professor', chair: 'chair', dean: 'dean', guidance: 'guidance', osas: 'osas' }
+  const actorIds: Record<Stage, string> = { adviser: 'QCU-PROF-IT', chair: 'QCU-CHAIR-IT', dean: 'QCU-DEAN', guidance: 'QCU-GUIDANCE', osas: 'QCU-OSAS' }
+  const stages: Stage[] = ['adviser', 'chair', 'dean', 'guidance', 'osas']
   function report(id: string, ownerId: string, stage: Stage, bypassed = false, converted = false): Report {
     const owner = users.find(u => u.id === ownerId)!
     const history = stages.slice(0, stages.indexOf(stage) + 1).filter(s => !bypassed || s !== 'adviser').map((s, index): History => ({ id: `H-${id}-${index}`, at, actorId: s === 'adviser' ? owner.adviserId! : s === 'chair' && owner.program === 'BSCS' ? 'QCU-CHAIR-CS' : actorIds[s], actorRole: stageRoles[s], action: index === 0 ? 'Submitted' : 'Transferred', reason: 'Routine routing', update: 'The office is reviewing your report.', public: true, stage: s }))
     return { id, ownerId, program: owner.program!, adviserId: owner.adviserId!, stage, status: stage === 'guidance' && converted ? 'Case File at Guidance' : `With ${stage}`, narrative: 'The IC 301 lab timetable changed on Monday and nobody told us. Our group missed a scheduled activity. Please look into how lab schedule changes are announced.', category: 'General concern', severity: 'medium', identity: 'anonymous', alias: `Reporter A-${id.slice(-2)}`, disclosedTo: [], involvedUserIds: bypassed ? [owner.adviserId!] : [], bypassed, aboutAdvisor: bypassed, allowChair: true, allowDean: true, consent: { readStatement: true, at, userId: ownerId, version: consentWording.version, wording: consentWording.report }, talk: { mode: 'chat', consents: [{ mode: 'chat', participate: true, wording: consentWording.talk.chat, at }], updatedAt: at }, createdAt: at, updatedAt: at, ...(converted ? { caseFileId: `CF-${id.slice(-4)}` } : {}), history, notes: [{ id: `NOTE-${id}`, authorId: actorIds[stage], body: 'Asked the lab coordinator about the Monday timetable change. Waiting for a reply.', at }], messages: [{ id: `MSG-${id}`, authorId: actorIds[stage], body: 'We received your report. Reply here if you have more details.', at }] }
   }
-  const reports = [report('RPT-0241', 'QCU-STU-IT-A', 'adviser'), report('RPT-0242', 'QCU-STU-IT-A', 'chair', true), report('RPT-0243', 'QCU-STU-IT-B', 'dean'), report('RPT-0244', 'QCU-STU-RESTRICTED', 'guidance'), report('RPT-0245', 'QCU-STU-IT-A', 'guidance', false, true), report('RPT-0246', 'QCU-STU-IT-A', 'osas', false, true), report('RPT-0247', 'QCU-STU-IT-A', 'executive', false, true), report('RPT-0248', 'QCU-STU-CS', 'chair')]
+  const reports = [report('RPT-0241', 'QCU-STU-IT-A', 'adviser'), report('RPT-0242', 'QCU-STU-IT-A', 'chair', true), report('RPT-0243', 'QCU-STU-IT-B', 'dean'), report('RPT-0244', 'QCU-STU-RESTRICTED', 'guidance'), report('RPT-0245', 'QCU-STU-IT-A', 'guidance', false, true), report('RPT-0246', 'QCU-STU-IT-A', 'osas', false, true), report('RPT-0247', 'QCU-STU-IT-B', 'osas', false, true), report('RPT-0248', 'QCU-STU-CS', 'chair')]
   reports[0]!.sourcePostId = 'POST-0102'
   const questions: Question[] = [{ id: 'Q1', criterion: 'Clarity', text: 'Explains concepts and requirements clearly.', type: 'rating', required: true }, { id: 'Q2', criterion: 'Support', text: 'Helps students who ask for support.', type: 'rating', required: true }, { id: 'Q3', criterion: 'Fairness', text: 'Explains how work will be graded and grades it the same way each time.', type: 'rating', required: true }]
   const cycles: Cycle[] = [{ id: 'CYCLE-2026-1', title: '1st Semester AY 2026-2027', term: '1st Semester', opens: '2026-10-01', closes: '2026-11-30', status: 'Published', instructions: 'Rate each statement from 1 to 5 based on this semester.', questions, forms: ['student', 'peer', 'upward-chair', 'upward-dean'], resultsPublished: true, reviews: [{ userId: 'QCU-PROF-IT', decision: 'reviewed', note: 'Questions fit the listed duties.', at }] }, { id: 'CYCLE-2026-2', title: '2nd Semester AY 2026-2027 draft', term: '2nd Semester', opens: '2027-01-10', closes: '2027-03-30', status: 'In review', instructions: 'Read the proposed questions. Tell the Dean\'s Office if any do not fit your duties.', questions: structuredClone(questions), forms: ['student', 'peer'], resultsPublished: false, reviews: [] }]

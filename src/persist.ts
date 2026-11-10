@@ -36,6 +36,16 @@ const stored = Object.keys(persisted) as Collection[]
 const attempts = 3
 
 type Row = Record<string, unknown>
+
+// The President's Office stage was removed on 2026-11-10. A report stored at that stage, or with it in its history or
+// disclosures, is read as being with OSAS, now the last stage; it is written back that way only when it next changes.
+function upgrade(name: Collection, row: Row): Row {
+  if (name !== 'reports') return row
+  const stage = (value: unknown) => (value === 'executive' ? 'osas' : value)
+  const history = Array.isArray(row.history) ? row.history.map((entry: Row) => ({ ...entry, stage: stage(entry.stage) })) : row.history
+  const disclosedTo = Array.isArray(row.disclosedTo) ? [...new Set(row.disclosedTo.map(stage))] : row.disclosedTo
+  return { ...row, stage: stage(row.stage), history, disclosedTo }
+}
 type Loaded = Partial<Record<Collection, StoredRecord[]>>
 const addOnly = () => new Error('Audit entries are add-only.')
 
@@ -88,9 +98,9 @@ export function createRecordRepository(store: RecordStore): Repository {
       for (const row of seedRows) {
         const record = byId.get(keyOf(name, row))
         if (!record) merged.push(row)
-        else if (record.data !== undefined) merged.push(JSON.parse(record.data))
+        else if (record.data !== undefined) merged.push(upgrade(name, JSON.parse(record.data)))
       }
-      for (const record of records) if (!seeded.has(record.id) && record.data !== undefined) merged.push(JSON.parse(record.data))
+      for (const record of records) if (!seeded.has(record.id) && record.data !== undefined) merged.push(upgrade(name, JSON.parse(record.data)))
       collections[name] = fromRows(name, merged)
       baseline.set(name, new Map(merged.map((row) => [keyOf(name, row), JSON.stringify(row)])))
       versions.set(name, new Map(records.map((record) => [record.id, record.version])))

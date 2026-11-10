@@ -2,10 +2,10 @@ import { z } from 'zod'
 
 import { passwordProblem } from './auth.js'
 
-export const roles = ['student', 'organization', 'professor', 'staff', 'chair', 'dean', 'administrator', 'guidance', 'osas', 'president', 'secretary'] as const
+export const roles = ['student', 'organization', 'professor', 'staff', 'chair', 'dean', 'administrator', 'guidance', 'osas', 'secretary'] as const
 export const roleSchema = z.enum(roles)
 export type Role = z.infer<typeof roleSchema>
-export const roleLabels: Record<Role, string> = { student: 'Student', organization: 'CCS Student Organization', professor: 'Professor', staff: 'CCS Staff', chair: 'Program Chair', dean: 'Dean', administrator: 'Administrator / Moderator', guidance: 'Guidance', osas: 'OSAS', president: "President’s Office", secretary: 'CCS Secretary' }
+export const roleLabels: Record<Role, string> = { student: 'Student', organization: 'CCS Student Organization', professor: 'Professor', staff: 'CCS Staff', chair: 'Program Chair', dean: 'Dean', administrator: 'Administrator / Moderator', guidance: 'Guidance', osas: 'OSAS', secretary: 'CCS Secretary' }
 export const programs = ['BSIT', 'BSCS', 'BSIS'] as const
 /** The ways a student can choose to talk about a concern. */
 export const talkModes = ['chat', 'video', 'voice', 'face_to_face'] as const
@@ -152,7 +152,7 @@ export const actionPayloads = {
     place: z.string().trim().min(1).max(200).optional(),
   }).strict().refine(details => details.scheduledAt || details.meetingLink || details.place, { message: 'Add a time, a meeting link, or a place.' }),
   discloseIdentity: z.object({ office: z.string().min(1).optional() }).strict(),
-  caseAction: z.object({ type: z.enum(['respond', 'recordAction', 'escalate', 'transfer', 'resolve', 'close', 'convert', 'milestone', 'return']), update: text, nextStage: z.enum(['adviser', 'chair', 'dean', 'guidance', 'osas', 'executive']).optional() }).strict(),
+  caseAction: z.object({ type: z.enum(['respond', 'recordAction', 'escalate', 'transfer', 'resolve', 'close', 'convert', 'milestone']), update: text, nextStage: z.enum(['adviser', 'chair', 'dean', 'guidance', 'osas']).optional() }).strict(),
   addNote: z.object({ body: text }).strict(),
   reviewCluster: z.object({ decision: z.enum(['confirmed', 'dismissed']) }).strict(),
   createConsultation: z.object({ slotId: z.string().min(1), purpose: z.string().trim().min(1).max(300) }).strict(),
