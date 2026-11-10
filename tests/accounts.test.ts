@@ -261,7 +261,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
     it('keeps the secretary to students, faculty, and chairs, and the secretary account to the Dean', async () => {
       const { app } = setup()
       const secretary = await secretarySession(app)
-      for (const id of ['QCU-DEAN', 'QCU-ADMIN', 'QCU-STAFF', 'QCU-GUIDANCE', 'QCU-OSAS', 'QCU-PRESIDENT', 'QCU-ORG']) {
+      for (const id of ['QCU-DEAN', 'QCU-ADMIN', 'QCU-STAFF', 'QCU-GUIDANCE', 'QCU-OSAS', 'QCU-ORG']) {
         expect((await secretary.post(`/api/accounts/${id}/active`).send({ active: false })).status, id).toBe(403)
       }
       expect((await signIn(app, 'QCU-DEAN')).response.status).toBe(200)

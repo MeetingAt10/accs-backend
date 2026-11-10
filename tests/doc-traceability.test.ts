@@ -22,7 +22,7 @@ const cookieOf = (response: { headers: Record<string, unknown> }) => String((res
 
 describe('ALL-01 sign-in', () => {
   it('ALL-01-A / ALL-01-H signs each role in to its own view: the session lists exactly the pages that role may open', async () => {
-    for (const id of ['QCU-STU-IT-A', 'QCU-PROF-IT', 'QCU-CHAIR-IT', 'QCU-DEAN', 'QCU-GUIDANCE', 'QCU-OSAS', 'QCU-PRESIDENT', 'QCU-STAFF', 'QCU-ORG', 'QCU-ADMIN']) {
+    for (const id of ['QCU-STU-IT-A', 'QCU-PROF-IT', 'QCU-CHAIR-IT', 'QCU-DEAN', 'QCU-GUIDANCE', 'QCU-OSAS', 'QCU-STAFF', 'QCU-ORG', 'QCU-ADMIN']) {
       const response = await signIn(id)
       expect(response.status, id).toBe(200)
       const { user, allowedPages } = response.body

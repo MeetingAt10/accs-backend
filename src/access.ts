@@ -2,12 +2,12 @@ import type { Role, User } from './schemas.js'
 import type { Database, Report, Space, Thread } from './store.js'
 
 export const permissionRoles: Record<string, Role[]> = {
-  'feed.read': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','president','secretary'],
+  'feed.read': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'],
   'post.create': ['student','organization','professor','chair','dean','guidance','osas'], 'post.anonymous': ['student'], 'announcement.publish': ['organization','professor','chair','dean'],
   'message.send': ['student','professor','chair','dean','guidance','osas'], 'roster.view': ['student','organization','professor','chair','dean'], 'calendar.view': ['student','organization','professor','chair','dean','guidance','osas'], 'todo.manage': ['student'], 'consultation.request': ['student'], 'consultation.decide': ['professor'],
-  'report.create': ['student'], 'report.viewOwn': ['student'], 'case.view': ['professor','chair','dean','guidance','osas','president'], 'case.act': ['professor','chair','dean','guidance','osas','president'], 'case.convert': ['guidance'], 'cluster.review': ['chair'], 'analytics.view': ['chair','dean'],
+  'report.create': ['student'], 'report.viewOwn': ['student'], 'case.view': ['professor','chair','dean','guidance','osas'], 'case.act': ['professor','chair','dean','guidance','osas'], 'case.convert': ['guidance'], 'cluster.review': ['chair'], 'analytics.view': ['chair','dean'],
   'evaluation.fill': ['student','professor'], 'evaluation.review': ['professor'], 'evaluation.configure': ['dean'], 'evaluation.results': ['professor','chair','dean'], 'offense.view': ['chair','dean','guidance','osas'], 'goodmoral.review': ['guidance','osas'], 'restriction.manage': ['administrator','guidance','osas'], 'standing.viewOwn': ['student'], 'moderation.review': ['administrator'], 'moderation.referral': ['secretary'], 'role.manage': ['administrator'], 'audit.view': ['administrator'],
-  'directory.view': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','president','secretary'], 'self.manage': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','president','secretary'], 'assistant.use': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','president','secretary'],
+  'directory.view': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'], 'self.manage': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'], 'assistant.use': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'],
   // Account provisioning has no page; it is the /api/accounts routes. The Dean activates the secretary, who creates every other account.
   'account.activateSecretary': ['dean'], 'account.provision': ['secretary'],
 }
@@ -62,7 +62,7 @@ export function canReach(db: Database, user: User, target: User) {
   if (hasRole(user,'chair') && targetFaculty && user.program === target.program) return true
   if (hasRole(user,'dean') && targetFaculty) return true
   if (hasRole(user,'guidance','osas') && targetFaculty) {
-    const relevantPrograms = db.reports.filter(r => hasRole(user,'guidance') ? ['guidance','osas','executive'].includes(r.stage) : ['osas','executive'].includes(r.stage)).map(r=>r.program)
+    const relevantPrograms = db.reports.filter(r => hasRole(user,'guidance') ? ['guidance','osas'].includes(r.stage) : r.stage === 'osas').map(r=>r.program)
     return !!target.program && relevantPrograms.includes(target.program)
   }
   return false
@@ -81,11 +81,11 @@ const chairMay = (user: User, report: Report) => hasRole(user,'chair') && user.p
 const deanMay = (user: User, report: Report) => hasRole(user,'dean') && report.allowDean === true
 export function canActCase(user: User, report: Report) {
   if (isConflicted(user,report) || report.ownerId === user.id) return false
-  return report.stage === 'adviser' && hasRole(user,'professor') && report.adviserId === user.id || report.stage === 'chair' && chairMay(user,report) || report.stage === 'dean' && deanMay(user,report) || report.stage === 'guidance' && hasRole(user,'guidance') || report.stage === 'osas' && hasRole(user,'osas') || report.stage === 'executive' && hasRole(user,'president')
+  return report.stage === 'adviser' && hasRole(user,'professor') && report.adviserId === user.id || report.stage === 'chair' && chairMay(user,report) || report.stage === 'dean' && deanMay(user,report) || report.stage === 'guidance' && hasRole(user,'guidance') || report.stage === 'osas' && hasRole(user,'osas')
 }
 /** For counts that span every stage (analytics): the reports this person's office may see, whichever stage they are at. */
 export function canCountCase(user: User, report: Report) { return !isConflicted(user,report) && report.ownerId !== user.id && (chairMay(user,report) || deanMay(user,report)) }
 export function canViewCase(user: User, report: Report) { return report.ownerId !== user.id && !isConflicted(user,report) && (canActCase(user,report) || report.history.some(entry => entry.actorId === user.id && entry.actorRole !== 'student' && user.roles.includes(entry.actorRole as Role) && (entry.actorRole !== 'chair' || user.program === report.program))) }
-export function canStudentRecord(db: Database, user: User, student: User) { return hasRole(student,'student') && (hasRole(user,'dean') || hasRole(user,'chair') && user.program === student.program || hasRole(user,'guidance') && db.reports.some(r => r.ownerId === student.id && ['guidance','osas','executive'].includes(r.stage)) || hasRole(user,'osas') && db.reports.some(r=>r.ownerId === student.id && ['osas','executive'].includes(r.stage))) }
+export function canStudentRecord(db: Database, user: User, student: User) { return hasRole(student,'student') && (hasRole(user,'dean') || hasRole(user,'chair') && user.program === student.program || hasRole(user,'guidance') && db.reports.some(r => r.ownerId === student.id && ['guidance','osas'].includes(r.stage)) || hasRole(user,'osas') && db.reports.some(r=>r.ownerId === student.id && r.stage === 'osas')) }
 export function canFacultyResult(user: User, faculty: User) { return hasRole(user,'dean') || hasRole(user,'chair') && user.program === faculty.program || hasRole(user,'professor') && user.id === faculty.id }
 export function scopeLabel(user: User) { return hasRole(user,'administrator') ? 'Platform administration' : hasRole(user,'chair') ? `${user.program} program` : hasRole(user,'dean') ? 'College of Computer Studies' : user.office || [user.program,user.section && `Section ${user.section}`].filter(Boolean).join(' · ') || 'Your permitted workspace' }
