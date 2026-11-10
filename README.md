@@ -18,6 +18,7 @@ Node 22 or later. Environment variables are parsed in `src/env.ts`:
 - `CORS_ORIGIN`: comma-separated allowed browser origins (default `http://localhost:5173`). All modules are served from the one portal host, and the portal calls this API with credentials, so list only the portal origin in deployed environments.
 - `TABLE_PREFIX`: DynamoDB table prefix. Set on the Lambda; see Storage boundary and Sessions.
 - `AUTH_STORE_BUCKET`, `AUTH_STORE_KEY`, `AUTH_STORE_FILE`: where accounts live; see Accounts and sign-in.
+- `MAIL_FROM`: verified Amazon SES sender of password reset emails; see Password reset codes.
 - `SEED_PASSWORD` (at least 10 characters): the shared sign-in password of the seeded demo accounts. Deployed stacks set it. Without it, production disables seeded sign-in, and local runs and tests use a built-in default. On Lambda with any other `NODE_ENV` (including an unset one, which defaults to `development`), the API fails at startup rather than accept the built-in password. It is not in `.env.example`.
 
 CI (`.github/workflows/ci.yml`) runs `typecheck`, `test`, and `build:lambda` on pull requests. A push to `main` or `dev` (`deploy.yml`) runs the same checks, then uploads `dist-lambda/index.cjs` as the code of the API Lambda in the `accs-prod` (`main`) or `accs-dev` (`dev`) stack.
@@ -71,7 +72,7 @@ Four collections stay on the seed, per instance: `users` (accounts come from the
 |---|---|---|
 | `POST /api/auth/sign-in` | `{ emailOrId, password, remember? }` | 200 + session cookie + session; 401 `INVALID_CREDENTIALS`; 429 `TOO_MANY_ATTEMPTS` after 5 failures in 15 minutes from one client (source IP) for one identifier, so failures elsewhere do not block the owner. The count is shared by every Lambda instance (see Attempt limits). `emailOrId` is the email, account ID, student ID, or username, in any case. A deactivated account gets the same 401 |
 | `POST /api/auth/complete-first-login` | `{ currentPassword, username, password }` (signed in) | 200 + session; 400 `INVALID_CREDENTIALS` (wrong temporary password), 400 `VALIDATION_ERROR` (weak password, bad username, or either one unchanged), 409 `CONFLICT` (username taken, or already done); sets both, clears `mustChangeCredentials`, keeps this session, signs out the others |
-| `POST /api/auth/forgot-password` | `{ emailOrId }` | Always 200, same answer for unknown accounts. Outside production issues a 6-digit code and logs it; in production issues nothing until email delivery exists. Within the 60-second cooldown or past 5 codes per hour it issues nothing and still answers the same 200 |
+| `POST /api/auth/forgot-password` | `{ emailOrId }` | Always 200, same answer for unknown accounts. Issues a 6-digit code and delivers it on the configured channel (see Password reset codes): emailed when `MAIL_FROM` is set, logged on local runs without it, and not issued in production without it. A failed email is logged and still answers the same 200. Within the 60-second cooldown or past 5 codes per hour it issues nothing and still answers the same 200 |
 | `POST /api/auth/reset-password` | `{ emailOrId, code, password }` | 200 and signs out every session; 400 `INVALID_CODE` |
 | `POST /api/admin/accounts/:id/reset-code` | `{}` (administrator) | 200 with `record.code`, shown once; audited as `Password reset code issued`; 403 for other roles |
 | `POST /api/auth/change-password` | `{ currentPassword, password }` (signed in) | 200; 400 `INVALID_CREDENTIALS` |
@@ -140,7 +141,11 @@ A student files a concern (a *report* until it reaches Guidance) and chooses how
 
 ## Password reset codes
 
-Codes live in `ccs_identity` as the `RESET` item `USER#<id>` / `RESET` (hash only, TTL on `expires_epoch`), so limits hold on every Lambda instance: 5 guesses per code (counted before the check, so parallel guesses cannot exceed it), 15-minute expiry, single use, 60-second cooldown, and 5 self-service codes per account per hour (a new code keeps the count). An administrator-issued code skips the cooldown and the cap. There is no email channel yet (SES is planned): in production the CCS office gets a code from an administrator and hands it to the account holder. Limits are provisional until D-08.
+Codes live in `ccs_identity` as the `RESET` item `USER#<id>` / `RESET` (hash only, TTL on `expires_epoch`), so limits hold on every Lambda instance: 5 guesses per code (counted before the check, so parallel guesses cannot exceed it), 15-minute expiry, single use, 60-second cooldown, and 5 self-service codes per account per hour (a new code keeps the count). An administrator-issued code skips the cooldown and the cap. Delivery goes through a `ResetCodeMailer` (`src/mail.ts`), chosen at startup:
+
+- **`MAIL_FROM` set:** Amazon SES sends a plain-text email from that address to the account's email. The code is never logged. If SES refuses or fails, one JSON line goes to stderr (`level`, `message`, `userId`, and the error name, never the code or the address) and the caller gets the usual answer. Seeded demo accounts are never emailed, because their made-up addresses are on the real `qcu.edu.ph` domain and a code could reach whoever owns that mailbox; forgot-password for one issues nothing and answers the same, and an administrator issues their codes. The Lambda needs `ses:SendEmail` on the `MAIL_FROM` identity, and while the SES account is in the sandbox it can only send to verified addresses.
+- **No `MAIL_FROM`, not production:** the code is logged (`[accs] password reset code for <id>: <code>`), for local runs and tests.
+- **No `MAIL_FROM`, production:** no code is issued; the CCS office gets one from an administrator and hands it to the account holder. Limits are provisional until D-08.
 
 ## Attempt limits
 

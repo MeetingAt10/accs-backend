@@ -14,6 +14,9 @@ const schema = z.object({
   // without it, production disables seeded sign-in, local runs and tests use the built-in default in auth.ts, and
   // Lambda with any other NODE_ENV fails at startup.
   SEED_PASSWORD: z.string().min(10).optional(),
+  // Sender of password reset emails, a verified Amazon SES identity. Without it, local runs log the code and
+  // production leaves resets to an administrator (src/mail.ts).
+  MAIL_FROM: z.email().optional(),
   // Comma-separated list: every ACCS site (portal, forums, ...) calls the same API with credentials.
   CORS_ORIGIN: z
     .string()
