@@ -85,10 +85,15 @@ function programResultCriteria(db:Database,program?:string,cycleId?:string) {
   })
 }
 function audit(repo:UnitOfWork,user:User,action:string,module:string,reference:string,purpose?:string,reason?:string) { const entry={id:repo.nextId('AUDIT'),at:now(),actorId:user.id,action,module,reference,result:'Recorded',...(purpose?{purpose}:{}),...(reason?{reason}:{})};repo.read().audit.push(entry);return entry }
-function notify(repo:UnitOfWork,recipientId:string,kind:string,pageId:string,recordId?:string) {
+// Categories nobody can mute: a person always hears about their own concern (decided 2026-11-10).
+export const requiredNotificationCategories: readonly string[] = ['report']
+/** `urgent` (an urgent announcement) reaches the recipient even if they muted its category. */
+function notify(repo:UnitOfWork,recipientId:string,kind:string,pageId:string,recordId?:string,options:{urgent?:boolean}={}) {
   const db = repo.read()
-  const preference = db.settings[recipientId]?.priorities[kind]
-  if (preference === 'muted') return
+  const stored = db.settings[recipientId]?.priorities[kind]
+  // A mute saved before a category became required is ignored, not obeyed.
+  const preference = stored === 'muted' && requiredNotificationCategories.includes(kind) ? undefined : stored
+  if (preference === 'muted' && !options.urgent) return
   if (kind === 'message' && db.threads.find(thread => thread.id === recordId)?.mutedBy.includes(recipientId)) return
   const titles:Record<string,string> = {
     announcement: 'New college announcement',
@@ -107,7 +112,7 @@ function notify(repo:UnitOfWork,recipientId:string,kind:string,pageId:string,rec
     kind,
     title: titles[kind] ?? 'New update',
     body: 'Open this update to see the details.',
-    priority: preference ?? (['report', 'case', 'restriction'].includes(kind) ? 'high' : 'normal'),
+    priority: options.urgent ? 'high' : preference && preference !== 'muted' ? preference : (['report', 'case', 'restriction'].includes(kind) ? 'high' : 'normal'),
     pageId,
     recordId,
     at: now(),
@@ -195,7 +200,7 @@ function notifyAnnouncementMembers(repo: UnitOfWork, post: Post) {
       || kind === 'space' && !!space && [...space.studentIds, ...space.professorIds].includes(recipient.id)
       || kind === 'organization' && isOrganizationMember(db, recipient, id!)
     if (member && canAudience(db, recipient, post.audience, post.private)) {
-      notify(repo, recipient.id, 'announcement', 'P06', post.id)
+      notify(repo, recipient.id, 'announcement', 'P06', post.id, { urgent: post.priority === 'urgent' })
     }
   }
 }
@@ -551,6 +556,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
       data.settings = db.settings[user.id] ?? defaultSettings(user)
       data.record = person(user)
       data.categories = notificationCategories(user)
+      data.requiredCategories = notificationCategories(user).filter(category => requiredNotificationCategories.includes(category))
       break
     }
     case'P45':data.stats=[{label:'Active accounts',value:db.users.filter(u=>u.active).length,note:'Can sign in'},{label:'Pending reviews',value:db.moderation.filter(m=>m.status==='Pending').length,note:'Waiting for a moderator'},{label:'Active restrictions',value:db.restrictions.filter(r=>r.active&&r.until>=now().slice(0,10)).length,note:'Features currently paused'},{label:'Assistant sessions',value:db.telemetry.length,note:'Questions are not stored'}];data.moderation=db.moderation.slice(0,5).map(m=>({id:m.id,itemType:m.itemType,source:m.source,status:m.status,at:m.at}));data.audit=safeAudit(db,db.audit.slice(-5).reverse());data.systemStatus={api:'Operational',assistant:'Built-in help assistant',storage:'Application store'};data.adoption=roles.map(role=>({label:roleLabels[role],value:db.users.filter(u=>u.roles.includes(role)).length}));break
@@ -917,7 +923,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
     case'referRestriction':{requireRole(user,'guidance','osas');const p=actionPayloads.referRestriction.parse(request.payload);const reason=reasonOf(request);const student=find(db.users,p.studentId);if(!canStudentRecord(db,user,student))throw unavailable();const referral={id:repo.nextId('REF'),studentId:student.id,change:p.change,decisionReference:p.decisionReference??'',reason,actorId:user.id,at:now(),status:'Awaiting administrator review'};db.referrals.push(referral);audit(repo,user,'Restriction change requested','restrictions',referral.id);for(const admin of db.users.filter(u=>hasRole(u,'administrator')))notify(repo,admin.id,'restriction','P35');record=referral;message='Request sent. Existing restrictions are unchanged.';break}
     case'saveProfile':{const p=actionPayloads.saveProfile.parse(request.payload);const saved=find(db.users,user.id);Object.assign(saved,p);Object.assign(user,p);record=person(user);message='Profile saved.';break}
     case'saveSettings':{const p=actionPayloads.saveSettings.parse(request.payload);db.settings[user.id]={...(db.settings[user.id]??defaultSettings(user)),...p};record=db.settings[user.id];message='Settings saved.';break}
-    case'saveNotificationPreferences':{const p=actionPayloads.saveNotificationPreferences.parse(request.payload);if(Object.keys(p.priorities).some(key=>!notificationCategories(user).includes(key)))throw new ApiError(400,'Your account does not have that notification category.','VALIDATION_ERROR');/* TBD(D-06): required categories await policy; saved preferences do not change source access. */db.settings[user.id]={...(db.settings[user.id]??defaultSettings(user)),priorities:p.priorities};record=db.settings[user.id];message='Notification priorities saved.';break}
+    case'saveNotificationPreferences':{const p=actionPayloads.saveNotificationPreferences.parse(request.payload);if(Object.keys(p.priorities).some(key=>!notificationCategories(user).includes(key)))throw new ApiError(400,'Your account does not have that notification category.','VALIDATION_ERROR');if(Object.entries(p.priorities).some(([key,value])=>value==='muted'&&requiredNotificationCategories.includes(key)))throw new ApiError(400,'Report updates cannot be muted.','VALIDATION_ERROR');/* Saved preferences do not change source access. */db.settings[user.id]={...(db.settings[user.id]??defaultSettings(user)),priorities:p.priorities};record=db.settings[user.id];message='Notification priorities saved.';break}
     case'updateRoles':{requirePermission(user,'role.manage');const p=actionPayloads.updateRoles.parse(request.payload);reasonOf(request);const account=find(db.users,id);if(p.roles.some(r=>['student','chair'].includes(r))&&!p.program&&!account.program)throw new ApiError(400,'Choose a program for that role.','VALIDATION_ERROR');account.roles=p.roles;if(p.program)account.program=p.program;if(p.section)account.section=p.section;if(p.active!==undefined)account.active=p.active;audit(repo,user,'Role assignment changed','identity',account.id,undefined,reasonOf(request));notify(repo,account.id,'role','P43');record={...person(account),active:account.active};message='Assignment saved. The new roles apply to the user right away.';break}
     case'updatePermission':{requirePermission(user,'role.manage');const p=actionPayloads.updatePermission.parse(request.payload);reasonOf(request);if(!permissionRoles[p.permission])throw new ApiError(400,'That permission does not exist.','VALIDATION_ERROR');/* TBD(D-06): approval workflow is undefined; save proposed cells without granting new runtime powers. */db.permissionOverrides[`${p.role}:${p.permission}`]=p.allowed;audit(repo,user,'Permission change proposed','identity',`${p.role}:${p.permission}`,undefined,reasonOf(request));record={...p,status:'Pending CCS approval'};message='Permission change saved for review.';break}
     case'moderate':{requirePermission(user,'moderation.review');const p=actionPayloads.moderate.parse(request.payload);const reason=reasonOf(request);const m=find(db.moderation,id);if(m.status!=='Pending')throw conflict('This item has already been reviewed.');if(p.decision==='refer'&&m.source!=='User')throw deny();/* TBD(D-04): a referral requires an approved routing policy; record it for human review without creating a case automatically. */m.status=p.decision==='keep'?'Kept':p.decision==='refer'?'Referred for authorized review':p.decision==='warn'?'Removed and warned':'Removed';m.history.push({at:now(),actorId:user.id,decision:p.decision,reason});if(['remove','warn'].includes(p.decision)){if(m.itemType==='post')find(db.posts,m.parentId).removed=true;else if(m.itemType==='comment'){const comment=find(find(db.posts,m.parentId).comments,m.itemId);comment.body='This content was removed after review.'}else{const message=find(find(db.threads,m.parentId).messages,m.itemId);message.body='This content was removed after review.'}}audit(repo,user,'Moderation decision','moderation',m.id);if(p.notifyAuthor)notify(repo,m.authorId,'moderation','P40');record={id:m.id,status:m.status,history:m.history};message='Decision recorded.';break}
