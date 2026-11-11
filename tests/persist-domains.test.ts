@@ -149,7 +149,7 @@ describe('a route writes through one instance', () => {
     const dates = { opens: '2027-01-01', closes: '2027-03-01' }
     const created = await dean.post('/api/pages/P30/actions').send({ action: 'createCycle', payload: { title: 'Stored cycle', term: 'Term', ...dates } })
     const id = created.body.record.id as string
-    const saved = await dean.post('/api/pages/P31/actions').send({ action: 'saveCycle', recordId: id, payload: { title: 'Stored cycle', instructions: 'Answer honestly.', ...dates, questions: [{ id: 'Q1', criterion: 'Teaching', text: 'Is the class clear?', type: 'rating', required: true }], forms: ['peer'] } })
+    const saved = await dean.post('/api/pages/P31/actions').send({ action: 'saveCycle', recordId: id, payload: { title: 'Stored cycle', instructions: 'Answer honestly.', ...dates, questions: [{ id: 'Q1', criterion: 'Teaching', text: 'Is the class clear?', type: 'rating', required: true }], forms: ['student'] } })
     expect(saved.status, JSON.stringify(saved.body)).toBe(200)
     const moved = await dean.post('/api/pages/P31/actions').send({ action: 'cycleAction', recordId: id, payload: { status: 'In review' } })
     expect(moved.status, JSON.stringify(moved.body)).toBe(200)
