@@ -717,15 +717,19 @@ export type AccountChange = Pick<User,'id'|'roles'|'active'> & Partial<Pick<User
 /** The fields `saveProfile` changes. */
 export type ProfileChange = { title: string; bio: string; education: string; officeHours: string }
 // Accounts live in the auth store, shared by every instance, so a role or profile change is saved there once the action has committed.
-export async function performAction(repo:Repository,user:User,pageId:string,request:ActionRequest,saveAccount?:(change:AccountChange)=>Promise<void>,saveProfile?:(id:string,change:ProfileChange)=>Promise<void>){
-  const result=await repo.transact(unit=>runAction(unit,user,pageId,request))
+/** An email to send after an action commits: for now, a new concern for the office receiving it (#37). */
+export type OutgoingMail = { kind: 'newConcern'; userId: string; to: string; name: string; reportId: string }
+export async function performAction(repo:Repository,user:User,pageId:string,request:ActionRequest,saveAccount?:(change:AccountChange)=>Promise<void>,saveProfile?:(id:string,change:ProfileChange)=>Promise<void>,sendMail?:(mail:OutgoingMail[])=>Promise<void>){
+  const {outbox,...result}=await repo.transact(unit=>runAction(unit,user,pageId,request))
+  // Emails go out only once the change is saved, and never reach the response.
+  if(outbox.length)await sendMail?.(outbox)
   if(request.action==='updateRoles')await saveAccount?.(result.record as AccountChange)
   if(request.action==='saveProfile')await saveProfile?.(user.id,actionPayloads.saveProfile.parse(request.payload))
   return result
 }
 function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest){
   if(!canPage(user,pageId)||!actionPages[request.action]?.includes(pageId))throw deny()
-  const db=repo.read();const id=request.recordId;let record:unknown;let message='Changes saved.'
+  const db=repo.read();const id=request.recordId;let record:unknown;let message='Changes saved.';const outbox:OutgoingMail[]=[]
   // The report is named by the record ID, or by `reportId` in the payload for the talk actions.
   const getOwnReport=(reportId=id)=>{const r=find(db.reports,reportId);if(r.ownerId!==user.id||!hasRole(user,'student'))throw unavailable();return r}
   const getCase=(reportId=id)=>{const r=find(db.reports,reportId);if(!canActCase(user,r))throw unavailable();return r}
@@ -836,6 +840,9 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       audit(repo, user, 'Report consent recorded', 'reports', r.id)
       notify(repo, user.id, 'report', 'P20', r.id)
       for (const handlerId of handlerIds(db, r)) notify(repo, handlerId, 'report', 'P22', r.id)
+      // The receiving office also gets an email, with no details (#37). handlerIds never includes a conflicted adviser.
+      const receiving = handlerIds(db, r)
+      for (const handler of db.users.filter(u => receiving.includes(u.id) && u.email)) outbox.push({ kind: 'newConcern', userId: handler.id, to: handler.email, name: handler.name, reportId: r.id })
       record = reportView(db, r, user, true)
       message = 'Report submitted.'
       break
@@ -1094,7 +1101,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       m.status=p.decision==='keep'?'Kept':p.decision==='refer'?referredStatus:p.decision==='warn'?'Removed and warned':'Removed';m.history.push({at:now(),actorId:user.id,decision:p.decision,reason});if(['remove','warn'].includes(p.decision)){if(m.itemType==='post')find(db.posts,m.parentId).removed=true;else if(m.itemType==='comment'){const comment=find(find(db.posts,m.parentId).comments,m.itemId);comment.body='This content was removed after review.'}else{const message=find(find(db.threads,m.parentId).messages,m.itemId);message.body='This content was removed after review.'}}audit(repo,user,'Moderation decision','moderation',m.id);for(const secretary of secretaries)notify(repo,secretary.id,'moderation','P50',m.id);if(p.notifyAuthor)notify(repo,m.authorId,'moderation','P40');record={id:m.id,status:m.status,history:m.history};message='Decision recorded.';break}
     default:throw new ApiError(400,'That action does not exist.','VALIDATION_ERROR')
   }
-  return JSON.parse(JSON.stringify({ok:true,message,...(record===undefined?{}:{record})})) as {ok:true;message:string;record?:unknown}
+  return {...JSON.parse(JSON.stringify({ok:true,message,...(record===undefined?{}:{record})})) as {ok:true;message:string;record?:unknown},outbox}
 }
 export interface AssistantProvider { answer(db:Database,user:User,question:string):{reply:string;sources:{title:string;href:string}[]} }
 export const demoAssistant:AssistantProvider={answer(db,user,question){const q=question.toLowerCase();const fallback={reply:'I can explain ACCS pages, your schedule, and the milestones on your own reports. I cannot answer that one. Please ask the office that handles it.',sources:[{title:'Help',href:'/help'}]};if(/guilt|guilty|verdict|punish|decide|restrict|another student|reveal|identity|who reported/.test(q))return fallback;const mentioned:string[]=question.match(/RPT-[0-9A-Z]+/g)??[];if(mentioned.some(id=>!db.reports.some(r=>r.id===id&&r.ownerId===user.id)))return fallback;if(/schedule|calendar|appointment|consultation/.test(q)){if(!canPage(user,'P13'))return fallback;const own=visibleConsultations(db,user);const tasks=db.todos.filter(t=>t.ownerId===user.id);return {reply:`Your calendar has ${visibleEvents(db,user).length} college events${hasRole(user,'student')?`, ${tasks.length} to-do${tasks.length===1?"":"s"}`:''} and ${own.length} appointment request${own.length===1?'':'s'}. Open the calendar or Consultations for dates and status.`,sources:[{title:'Calendar',href:'/calendar'},...(canPage(user,'P14')?[{title:'Appointments',href:'/consultations'}]:[])]}}if(/report|milestone|stage/.test(q)&&hasRole(user,'student')){const reports=db.reports.filter(r=>r.ownerId===user.id&&(!mentioned.length||mentioned.includes(r.id)));return {reply:reports.length?reports.map(r=>`${r.id}: ${statusFor(r)}. ${r.history.filter(h=>h.public).at(-1)?.update??'No update yet.'}`).join('\n'):'You have no submitted reports.',sources:[{title:'My reports',href:'/reports'}]}}if(/draft|write|word/.test(q)){return{reply:'Say what happened, when, and where, and what you want the office to look at. Name only the people the office needs to know about. Read it over before you submit. The assistant does not decide what happened.',sources:[{title:'Help',href:'/help'}]}}const entry=filteredFaq(user).find(f=>f.question.toLowerCase().split(/\W+/).filter(w=>w.length>4).some(w=>q.includes(w)));if(entry)return{reply:entry.answer,sources:[{title:entry.question,href:entry.href}]};if(/help|can you|what can/.test(q))return{reply:'I can explain ACCS pages and how reports, appointments, and evaluations work. Staff decide case outcomes and restrictions.',sources:[{title:'Help',href:'/help'}]};return fallback}}
