@@ -17,7 +17,7 @@ export type Talk = { mode: TalkMode; consents: TalkConsent[]; slotId?: string; c
  * Then the adviser never sees it. `allowChair` and `allowDean` are the student's choice; an office they did not allow
  * cannot read the concern. A report stored before these fields existed has none of them, which reads as "not allowed".
  */
-export type Report = { id: string; ownerId: string; program: string; adviserId?: string; stage: Stage; status: string; narrative: string; category: string; severity: 'low' | 'medium' | 'high'; identity: 'named' | 'anonymous'; alias: string; disclosedTo: string[]; involvedUserIds: string[]; bypassed: boolean; aboutAdvisor: boolean; allowChair?: boolean; allowDean?: boolean; confidential?: boolean; consent: ReportConsent; talk?: Talk; createdAt: string; updatedAt: string; caseFileId?: string; sourcePostId?: string; location?: string; occurredOn?: string; history: History[]; notes: Message[]; messages: Message[] }
+export type Report = { id: string; ownerId: string; program: string; adviserId?: string; stage: Stage; status: string; narrative: string; category: string; subcategory?: string; categoryDetail?: string; severity: 'low' | 'medium' | 'high'; identity: 'named' | 'anonymous'; alias: string; disclosedTo: string[]; involvedUserIds: string[]; bypassed: boolean; aboutAdvisor: boolean; allowChair?: boolean; allowDean?: boolean; confidential?: boolean; consent: ReportConsent; talk?: Talk; createdAt: string; updatedAt: string; caseFileId?: string; sourcePostId?: string; location?: string; occurredOn?: string; history: History[]; notes: Message[]; messages: Message[] }
 export type Post = {
   id: string
   authorId: string
