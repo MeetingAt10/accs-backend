@@ -213,7 +213,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
 
     it('denies students, faculty, and every other role that is not the secretary or the Dean', async () => {
       const { app } = setup()
-      for (const id of ['QCU-STU-IT-A', 'QCU-PROF-IT', 'QCU-CHAIR-IT', 'QCU-ADMIN', 'QCU-STAFF']) {
+      for (const id of ['QCU-STU-IT-A', 'QCU-PROF-IT', 'QCU-CHAIR-IT', 'QCU-ADMIN']) {
         const { agent } = await signIn(app, id)
         for (const [method, path, body] of routes) {
           const response = await agent[method](path).send(body)
@@ -261,7 +261,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
     it('keeps the secretary to students, faculty, and chairs, and the secretary account to the Dean', async () => {
       const { app } = setup()
       const secretary = await secretarySession(app)
-      for (const id of ['CCS-DEAN', 'QCU-ADMIN', 'QCU-STAFF', 'QCU-GUIDANCE', 'QCU-OSAS', 'QCU-ORG']) {
+      for (const id of ['CCS-DEAN', 'QCU-ADMIN', 'QCU-GUIDANCE', 'QCU-OSAS', 'QCU-ORG']) {
         expect((await secretary.post(`/api/accounts/${id}/active`).send({ active: false })).status, id).toBe(403)
       }
       expect((await signIn(app, 'CCS-DEAN')).response.status).toBe(200)
@@ -591,15 +591,15 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
     it('persists a role change made on the administrator pages', async () => {
       const context = setup()
       const { agent: admin } = await signIn(context.app, 'QCU-ADMIN')
-      const change = await admin.post('/api/pages/P47/actions').send({ action: 'updateRoles', recordId: 'QCU-STU-IT-B', reason: 'Moved to the office', payload: { roles: ['staff'] } })
+      const change = await admin.post('/api/pages/P47/actions').send({ action: 'updateRoles', recordId: 'QCU-STU-IT-B', reason: 'Moved to the office', payload: { roles: ['guidance'] } })
       expect(change.status).toBe(200)
       const cold = context.another()
-      expect((await signIn(cold, 'QCU-STU-IT-B')).response.body.user.roles).toEqual(['staff'])
+      expect((await signIn(cold, 'QCU-STU-IT-B')).response.body.user.roles).toEqual(['guidance'])
       // Only the fields the action changed are stored over the seeded user.
       const stored = (await context.authStore.load()).users.find((account) => account.id === 'QCU-STU-IT-B')!
-      expect(stored).toMatchObject({ roles: ['staff'], active: true, program: 'BSIT', section: 'B' })
+      expect(stored).toMatchObject({ roles: ['guidance'], active: true, program: 'BSIT', section: 'B' })
       expect(stored).not.toHaveProperty('standing')
-      expect((await admin.post('/api/pages/P47/actions').send({ action: 'updateRoles', recordId: 'QCU-STU-IT-B', reason: 'Account closed', payload: { roles: ['staff'], active: false } })).status).toBe(200)
+      expect((await admin.post('/api/pages/P47/actions').send({ action: 'updateRoles', recordId: 'QCU-STU-IT-B', reason: 'Account closed', payload: { roles: ['guidance'], active: false } })).status).toBe(200)
       expect((await signIn(context.another(), 'QCU-STU-IT-B')).response.status).toBe(401)
     })
 

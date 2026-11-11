@@ -267,15 +267,6 @@
    ]
   },
   {
-   "id": "STF-01",
-   "role": "staff",
-   "name": "Staff workspace",
-   "pages": [
-    "P03",
-    "P04"
-   ]
-  },
-  {
    "id": "CHR-01",
    "role": "chair",
    "name": "Program dashboard",
