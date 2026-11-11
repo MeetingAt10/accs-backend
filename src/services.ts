@@ -5,7 +5,7 @@ import { appointmentCategories, appointmentProblem, concernFollowUp, purposeOf, 
 import { actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
 import { allowedPages, canActCase, canAudience, canReadCase, isEarlierHandler, overseesCase, canCountCase, canFacultyResult, canPage, canPublish, canReach, canSpace, canStudentRecord, canThread, canViewCase, hasPermission, hasRole, isOrganizationMember, pageTitles, permissionRoles, permissions, scopeLabel } from './access.js'
 import { consentWording } from './consent.js'
-import type { Assignment, Consultation, Cycle, Database, Message, Post, Report, Repository, Slot, Stage, Strike, Thread, UnitOfWork } from './store.js'
+import type { Assignment, Consultation, Cycle, Database, Message, Moderation, Post, Report, Repository, Slot, Stage, Strike, Thread, UnitOfWork } from './store.js'
 
 export class ApiError extends Error { constructor(public status: number, message: string, public code = 'FORBIDDEN') { super(message) } }
 export const unavailable = () => new ApiError(404, "This record isn't available to you.", 'UNAVAILABLE')
@@ -51,6 +51,15 @@ const referredStatus = 'Referred to the CCS Secretary'
 /** Moderators see every item; the CCS Secretary sees only items referred to them, including ones they have decided. */
 const canSeeModeration = (user: User, m: { history: { decision: string }[] }) =>
   hasPermission(user,'moderation.review') || hasPermission(user,'moderation.referral') && m.history.some(entry => entry.decision === 'refer')
+// Flagged content is hidden until it is reviewed (#43, baseline chapter 10.4). While a post, comment or message has a
+// moderation item that is Pending (a user's flag or a word-filter match) or referred to the CCS Secretary, only its author
+// and the people reviewing it see it: moderators, and the Secretary once it is referred. "Keep" shows it again.
+const heldStatuses = ['Pending', referredStatus]
+function heldItem(db: Database, itemType: Moderation['itemType'], itemId: string) { return db.moderation.find(m => m.itemType === itemType && m.itemId === itemId && heldStatuses.includes(m.status)) }
+function canSeeItem(db: Database, user: User, itemType: Moderation['itemType'], itemId: string, authorId: string) {
+  const held = heldItem(db, itemType, itemId)
+  return !held || authorId === user.id || hasPermission(user, 'moderation.review') || hasPermission(user, 'moderation.referral') && held.status === referredStatus
+}
 function requireRole(user: User, ...roleNames: User['roles']) { if (!hasRole(user,...roleNames)) throw deny() }
 function find<T extends {id:string}>(items:T[], id:string|undefined):T { const item = items.find(entry=>entry.id===id); if (!item) throw unavailable(); return item }
 function pick<T extends {id:string}>(items:T[], id?:string):T|undefined { return id ? find(items,id) : items[0] }
@@ -82,12 +91,14 @@ function postView(db: Database, post: Post, user: User) {
     owned: post.authorId === user.id,
     reactionCount: post.reactions.length,
     reacted: post.reactions.includes(user.id),
-    commentCount: post.comments.length,
-    comments: post.removed ? [] : post.comments.map(comment => ({
+    commentCount: post.comments.filter(comment => canSeeItem(db, user, 'comment', comment.id, comment.authorId)).length,
+    comments: post.removed ? [] : post.comments.filter(comment => canSeeItem(db, user, 'comment', comment.id, comment.authorId)).map(comment => ({
       ...messageView(db, comment),
       author: author(db, comment.authorId, comment.anonymous),
+      ...(heldItem(db, 'comment', comment.id) ? { underReview: true } : {}),
     })),
     removed: post.removed,
+    ...(heldItem(db, 'post', post.id) ? { underReview: true } : {}),
   }
 }
 function reportView(db:Database,report:Report,user:User,owner=false) {
@@ -225,11 +236,11 @@ function defaultSettings(user: User) {
     priorities: { report: 'high', case: 'high', message: 'normal', consultation: 'normal', evaluation: 'normal', announcement: 'normal' },
   }
 }
-function visiblePosts(db:Database,user:User,q?:string) { return db.posts.filter(post=>canAudience(db,user,post.audience,post.private)&&(!q||`${post.title} ${post.body}`.toLowerCase().includes(q.toLowerCase()))) }
+function visiblePosts(db:Database,user:User,q?:string) { return db.posts.filter(post=>canAudience(db,user,post.audience,post.private)&&canSeeItem(db,user,'post',post.id,post.authorId)&&(!q||`${post.title} ${post.body}`.toLowerCase().includes(q.toLowerCase()))) }
 function visibleEvents(db: Database, user: User) {
   return db.events.filter(event => {
     const source = event.postId ? db.posts.find(post => post.id === event.postId) : undefined
-    return (!event.postId || !!source && !source.removed)
+    return (!event.postId || !!source && !source.removed && canSeeItem(db, user, 'post', source.id, source.authorId))
       && (!event.audience || canAudience(db, user, event.audience, event.private))
   })
 }
@@ -424,7 +435,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
           title: thread.title,
           kind: thread.spaceId ? 'group' : 'direct',
           members: thread.memberIds.map(memberId => person(find(db.users, memberId))),
-          lastMessage: thread.messages.at(-1)?.body ?? '',
+          lastMessage: thread.messages.filter(message => canSeeItem(db, user, 'message', message.id, message.authorId)).at(-1)?.body ?? '',
           updatedAt: thread.messages.at(-1)?.at,
           unread: unreadMessages(thread, user.id),
         }))
@@ -436,7 +447,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
             id: thread.id,
             title: thread.title,
             members: thread.memberIds.map(memberId => person(find(db.users, memberId))),
-            messages: thread.messages.map(message => messageView(db, message)),
+            messages: thread.messages.filter(message => canSeeItem(db, user, 'message', message.id, message.authorId)).map(message => ({ ...messageView(db, message), ...(heldItem(db, 'message', message.id) ? { underReview: true } : {}) })),
             muted: thread.mutedBy.includes(user.id),
             unread: unreadMessages(thread, user.id),
             kind: thread.spaceId ? 'group' : 'direct',
@@ -800,7 +811,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       db.posts.push(post)
       queuePostReview(repo, post)
       syncPostEvent(repo, post)
-      notifyAnnouncementMembers(repo, post)
+      if (!heldItem(db, 'post', post.id)) notifyAnnouncementMembers(repo, post)
       record = postView(db, post, user)
       message = 'Post published.'
       break
@@ -833,8 +844,8 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       message = 'Post deleted.'
       break
     }
-    case'comment':{if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();if(user.restrictions.includes('post.comment'))throw deny();const p=actionPayloads.comment.parse(request.payload);const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'comment'))throw deny();if(p.anonymous&&!hasRole(user,'student'))throw deny();post.comments.push({...addMessage([],p.body),anonymous:p.anonymous});record=postView(db,post,user);message='Comment added.';break}
-    case'react':{actionPayloads.react.parse(request.payload);if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'react'))throw deny();post.reactions=post.reactions.includes(user.id)?post.reactions.filter(v=>v!==user.id):[...post.reactions,user.id];record=postView(db,post,user);message='Reaction updated.';break}
+    case'comment':{if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();if(user.restrictions.includes('post.comment'))throw deny();const p=actionPayloads.comment.parse(request.payload);const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'comment'))throw deny();if(p.anonymous&&!hasRole(user,'student'))throw deny();post.comments.push({...addMessage([],p.body),anonymous:p.anonymous});record=postView(db,post,user);message='Comment added.';break}
+    case'react':{actionPayloads.react.parse(request.payload);if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'react'))throw deny();post.reactions=post.reactions.includes(user.id)?post.reactions.filter(v=>v!==user.id):[...post.reactions,user.id];record=postView(db,post,user);message='Reaction updated.';break}
     case'flag':{const p=actionPayloads.flag.parse(request.payload);let authorId:string,body:string,parentId:string,itemId:string;if(p.itemType==='message'){const thread=find(db.threads,id);if(!canThread(db,user,thread))throw unavailable();const m=find(thread.messages,p.itemId);authorId=m.authorId;body=m.body;parentId=thread.id;itemId=m.id}else{const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private))throw unavailable();const item=p.itemType==='comment'?find(post.comments,p.itemId):post;authorId=item.authorId;body=item.body;parentId=post.id;itemId=item.id}const mod={id:repo.nextId('MOD'),itemType:p.itemType,itemId,parentId,authorId,reporterId:user.id,source:'User' as const,reason:p.reason,excerpt:body.slice(0,160),status:'Pending',at:now(),history:[]};db.moderation.push(mod);audit(repo,user,'Content reported','moderation',mod.id);record={id:mod.id,status:mod.status};message='Sent to a moderator.';break}
     case 'createReport': {
       requirePermission(user, 'report.create')
@@ -1146,7 +1157,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       const secretaries=p.decision==='refer'?db.users.filter(u=>u.active&&hasPermission(u,'moderation.referral')):[]
       if(p.decision==='refer'&&m.source!=='User')throw deny()
       if(p.decision==='refer'&&!secretaries.length)throw conflict('The CCS Secretary account is not active, so this cannot be referred yet.')
-      m.status=p.decision==='keep'?'Kept':p.decision==='refer'?referredStatus:p.decision==='warn'?'Removed and warned':'Removed';m.history.push({at:now(),actorId:user.id,decision:p.decision,reason});if(['remove','warn'].includes(p.decision)){if(m.itemType==='post')find(db.posts,m.parentId).removed=true;else if(m.itemType==='comment'){const comment=find(find(db.posts,m.parentId).comments,m.itemId);comment.body='This content was removed after review.'}else{const message=find(find(db.threads,m.parentId).messages,m.itemId);message.body='This content was removed after review.'}}audit(repo,user,'Moderation decision','moderation',m.id);for(const secretary of secretaries)notify(repo,secretary.id,'moderation','P50',m.id);if(p.notifyAuthor)notify(repo,m.authorId,'moderation','P40');record={id:m.id,status:m.status,history:m.history};message='Decision recorded.';break}
+      const wasHeldPost=m.itemType==='post'&&m.source==='Filter'&&m.status==='Pending'&&!db.moderation.some(other=>other!==m&&other.itemType==='post'&&other.itemId===m.itemId&&heldStatuses.includes(other.status));m.status=p.decision==='keep'?'Kept':p.decision==='refer'?referredStatus:p.decision==='warn'?'Removed and warned':'Removed';m.history.push({at:now(),actorId:user.id,decision:p.decision,reason});if(['remove','warn'].includes(p.decision)){if(m.itemType==='post')find(db.posts,m.parentId).removed=true;else if(m.itemType==='comment'){const comment=find(find(db.posts,m.parentId).comments,m.itemId);comment.body='This content was removed after review.'}else{const message=find(find(db.threads,m.parentId).messages,m.itemId);message.body='This content was removed after review.'}}if(p.decision==='keep'&&wasHeldPost){const kept=db.posts.find(post=>post.id===m.itemId);if(kept&&!kept.removed)notifyAnnouncementMembers(repo,kept)}audit(repo,user,'Moderation decision','moderation',m.id);for(const secretary of secretaries)notify(repo,secretary.id,'moderation','P50',m.id);if(p.notifyAuthor)notify(repo,m.authorId,'moderation','P40');record={id:m.id,status:m.status,history:m.history};message='Decision recorded.';break}
     default:throw new ApiError(400,'That action does not exist.','VALIDATION_ERROR')
   }
   return {...JSON.parse(JSON.stringify({ok:true,message,...(record===undefined?{}:{record})})) as {ok:true;message:string;record?:unknown},outbox}
