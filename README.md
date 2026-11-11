@@ -18,7 +18,8 @@ Node 22 or later. Environment variables are parsed in `src/env.ts`:
 - `CORS_ORIGIN`: comma-separated allowed browser origins (default `http://localhost:5173`). All modules are served from the one portal host, and the portal calls this API with credentials, so list only the portal origin in deployed environments.
 - `TABLE_PREFIX`: DynamoDB table prefix. Set on the Lambda; see Storage boundary and Sessions.
 - `AUTH_STORE_BUCKET`, `AUTH_STORE_KEY`, `AUTH_STORE_FILE`: where accounts live; see Accounts and sign-in.
-- `MAIL_FROM`: verified Amazon SES sender of password reset emails; see Password reset codes.
+- `MAIL_FROM`: verified Amazon SES sender of password reset emails and new-concern emails; see Password reset codes and New-concern emails.
+- `APP_URL`: address of the portal, for links in emails (default: the first `CORS_ORIGIN`).
 - `SEED_PASSWORD` (at least 10 characters): the shared sign-in password of the seeded demo accounts. Deployed stacks set it. Without it, production disables seeded sign-in, and local runs and tests use a built-in default. On Lambda with any other `NODE_ENV` (including an unset one, which defaults to `development`), the API fails at startup rather than accept the built-in password. It is not in `.env.example`.
 
 CI (`.github/workflows/ci.yml`) runs `typecheck`, `test`, and `build:lambda` on pull requests. A push to `main` or `dev` (`deploy.yml`) runs the same checks, then uploads `dist-lambda/index.cjs` as the code of the API Lambda in the `accs-prod` (`main`) or `accs-dev` (`dev`) stack.
@@ -142,6 +143,15 @@ A student files a concern (a *report* until it reaches Guidance) and chooses how
 **What the views return.** The student's views (P18, P20) and the office's (P21 rows, P22) carry `consent` (`{ readStatement, at, version, wording }`; the account behind it is never returned), `allowChair` and `allowDean` (always `true`: the chair and the Dean can read it), `confidential`, `aboutAdvisor`, and `talk`; the office's view also has `readOnly`. A P21 row also has `reporter` (the name, or the alias), `category`, `createdAt`, and `updatedAt`. There is no unread mark per report; an unread notice for the report on P40 (`recordId`, `read`) is the signal.
 
 **Stages.** A case moves in a fixed order: Adviser, Program Chair, Dean, Guidance, OSAS. The adviser and the chair escalate; the Dean forwards to Guidance; Guidance opens a Case File and then forwards to OSAS. OSAS is the last stage: it can respond, record actions, add milestones, resolve and close, but not forward. Any stage can resolve a case, and a resolved case can be closed. The President's Office stage and role were removed on 2026-11-10; a report stored with stage `executive` is read as being with OSAS, and a stored account's `president` role is dropped (an account left with no role cannot sign in).
+
+### New-concern emails
+When a student files a concern, each office receiving it (the adviser, or the Program Chair for a concern that goes around the adviser) also gets an email, besides the in-app notification (#37). The email says only that a new concern was sent to them and links to the case (`<APP_URL>/cases/<report id>`). It never carries the statement, category, severity, the reporter's name or alias, or anything else from the concern. An adviser the concern names or goes around is never emailed, since they are never a receiving office. The email goes out only after the concern is saved, and only on filing, not on later case steps.
+
+- **`MAIL_FROM` set:** Amazon SES sends a plain-text email (subject "New concern in ACCS"). Seeded demo accounts are never emailed, for the same reason as reset codes. If SES fails, the concern stays filed and one JSON line goes to stderr (`level`, `message`, `userId`, `reportId`, and the error name, never the address).
+- **No `MAIL_FROM`, not production:** a line is logged instead (`[accs] new concern email for <id> not sent ...`).
+- **No `MAIL_FROM`, production:** nothing is sent; the in-app notification still is.
+
+The deployed stacks do not set `MAIL_FROM` yet. Sending needs a verified SES identity, the `MAIL_FROM` variable on the Lambda, and `ses:SendEmail` on that identity in `accs-architecture`.
 
 ## Appointments
 

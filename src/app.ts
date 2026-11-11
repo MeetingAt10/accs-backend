@@ -7,20 +7,20 @@ import { z } from 'zod'
 import { type AuthData, type AuthStore, AuthStoreConflict, createAuthStore, defaultHash, hashPassword, verifyPassword } from './auth.js'
 import { env, onLambda, tableName } from './env.js'
 import { actionRequestSchema, actionResponseSchema, changePasswordSchema, completeFirstLoginSchema, emptyBodySchema, errorResponseSchema, forgotPasswordSchema, healthResponseSchema, idParamsSchema, pageQuerySchema, pageResponseSchema, resetPasswordSchema, sessionResponseSchema, signInSchema, type User } from './schemas.js'
-import { createResetMailer, type ResetCodeMailer } from './mail.js'
+import { createNewConcernMailer, createResetMailer, type NewConcernMailer, type ResetCodeMailer } from './mail.js'
 import { accountRouter, applyAccounts, recordAudit, saveAccountChange, saveProfileChange, setOwnCredentials, unsentMailer, type InviteMailer } from './accounts.js'
 import { hasPermission } from './access.js'
 import { devRouter, devToolboxEnabled, isDevToolboxCall, type Stack } from './dev.js'
 import { send } from './http.js'
 import { createRepository } from './persist.js'
-import { ApiError, getPage, performAction, refreshRestrictions, sessionView, unavailable, type AccountChange, type ProfileChange } from './services.js'
+import { ApiError, getPage, performAction, refreshRestrictions, sessionView, unavailable, type AccountChange, type OutgoingMail, type ProfileChange } from './services.js'
 import { createResetStore, resetPolicy, type ResetStore } from './resets.js'
 import { createThrottleStore, type ThrottleStore } from './throttle.js'
 import { createSessionStore, isWellFormedToken, newSessionToken, sessionIdOf, sessionPolicy, sessionState, type SessionStore } from './sessions.js'
 import { demoUserIds, type Repository } from './store.js'
 import { currentAccountId, formerAccountIds } from './renames.js'
 
-export function createApp(repository:Repository=createRepository({nodeEnv:env.NODE_ENV,tableName}),options:{authStore?:AuthStore;sessionStore?:SessionStore;resetStore?:ResetStore;throttleStore?:ThrottleStore;mailer?:InviteMailer;resetMailer?:ResetCodeMailer;stack?:Stack}={}){
+export function createApp(repository:Repository=createRepository({nodeEnv:env.NODE_ENV,tableName}),options:{authStore?:AuthStore;sessionStore?:SessionStore;resetStore?:ResetStore;throttleStore?:ThrottleStore;mailer?:InviteMailer;resetMailer?:ResetCodeMailer;concernMailer?:NewConcernMailer;stack?:Stack}={}){
   const app=express()
   // The account switcher for testers exists only on the development stack and on local runs (src/dev.ts).
   const devToolbox=devToolboxEnabled(options.stack??{tablePrefix:env.TABLE_PREFIX,nodeEnv:env.NODE_ENV})
@@ -90,6 +90,17 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   const deliverResetCode=async(user:User,code:string)=>{
     try{await resetMailer.send({userId:user.id,to:user.email,name:user.name,code,expiresInMinutes:resetCodeMinutes})}
     catch(error){console.error(JSON.stringify({level:'error',message:'Reset code email not sent',userId:user.id,error:error instanceof Error?error.name:'Unknown'}))}
+  }
+  // New-concern emails (#37) go to the receiving office once the concern is saved. Like reset codes, seeded demo accounts
+  // are never emailed. A failed email is logged without the address and never undoes or blocks the filing.
+  const concernMailer=options.concernMailer??createNewConcernMailer({nodeEnv:env.NODE_ENV,mailFrom:env.MAIL_FROM})
+  const appUrl=(env.APP_URL??env.CORS_ORIGIN[0]??'').replace(/\/+$/,'')
+  const sendMail=async(mail:OutgoingMail[])=>{
+    if(concernMailer.channel==='none')return
+    await Promise.all(mail.filter(m=>concernMailer.channel!=='email'||!demoUserIds.has(m.userId)).map(async m=>{
+      try{await concernMailer.send({userId:m.userId,to:m.to,name:m.name,link:`${appUrl}/cases/${encodeURIComponent(m.reportId)}`})}
+      catch(error){console.error(JSON.stringify({level:'error',message:'New concern email not sent',userId:m.userId,reportId:m.reportId,error:error instanceof Error?error.name:'Unknown'}))}
+    }))
   }
   const forgotMessage=resetMailer.channel==='email'
     ?`If an account matches, a reset code has been emailed to it. The code expires in ${resetCodeMinutes} minutes. Ask an ACCS administrator if it does not arrive.`
@@ -163,7 +174,7 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   })
   app.get('/api/session',(_req,res)=>send(res,sessionResponseSchema,sessionView(res.locals.user as User)))
   app.get('/api/pages/:pageId',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const query=pageQuerySchema.parse(req.query);send(res,pageResponseSchema,await getPage(repository,res.locals.user as User,pageId,query))})
-  app.post('/api/pages/:pageId/actions',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const body=actionRequestSchema.parse(req.body);send(res,actionResponseSchema,await performAction(repository,res.locals.user as User,pageId,body,saveAccount,saveProfile))})
+  app.post('/api/pages/:pageId/actions',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const body=actionRequestSchema.parse(req.body);send(res,actionResponseSchema,await performAction(repository,res.locals.user as User,pageId,body,saveAccount,saveProfile,sendMail))})
   app.use('/api/accounts',accountRouter({repository,authStore,sessions,mailer:options.mailer??unsentMailer}))
   if(devToolbox)app.use('/api/dev',devRouter({repository,sessions,start:startSession,out:sessionOut}))
   app.use('/api',(_req,res)=>send(res,errorResponseSchema,{error:'This API resource is not available.',code:'NOT_FOUND'},404))
