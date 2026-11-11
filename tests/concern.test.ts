@@ -659,6 +659,7 @@ describe.each(backends)('the first concern, start to finish, %s', (name, backend
   beforeEach(() => { vi.spyOn(console, 'log').mockImplementation(() => {}) })
   afterEach(() => vi.restoreAllMocks())
 
+  // Hashes several passwords along the way: about 2 seconds alone, more when the whole suite runs in parallel.
   it('runs from the secretary account to a chat in both directions', async () => {
     const newRepository = backend()
     const authStore = createMemoryAuthStore()
@@ -731,5 +732,5 @@ describe.each(backends)('the first concern, start to finish, %s', (name, backend
       expect(messagesOf((await adviserCold.get(`/api/pages/P22?id=${id}`)).body.data.record)).toEqual(conversation)
       expect((await adviserCold.get(`/api/pages/P22?id=${id}`)).body.data.record.talk.mode).toBe('chat')
     }
-  })
+  }, 20_000)
 })
