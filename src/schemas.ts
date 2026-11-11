@@ -134,10 +134,10 @@ export const actionPayloads = {
   react: z.object({}).strict(),
   flag: z.object({ reason, itemType: z.enum(['post', 'comment', 'message']).default('post'), itemId: z.string().optional() }).strict(),
   // The agreement and the three choices have no defaults: a concern is never sent on a guess about what the student allowed.
-  createReport: z.object({ narrative: text, category: text.max(80), severity: z.enum(['low', 'medium', 'high']), identity: z.enum(['named', 'anonymous']), involvedUserIds: z.array(z.string()).default([]), conflictedAdviser: z.boolean().default(false), sourcePostId: z.string().optional(), location: z.string().max(200).optional(), occurredOn: date.optional(), consent: z.object({ readStatement: z.literal(true, { error: agree }) }, { error: agree }).strict(), // The Program Chair and the Dean have access without the student's permission (baseline of 10 November 2026). The two
+  createReport: z.object({ narrative: text, category: text.max(80), subcategory: z.string().trim().min(1).max(80).optional(), categoryDetail: z.string().trim().max(120).optional(), severity: z.enum(['low', 'medium', 'high']), identity: z.enum(['named', 'anonymous']), involvedUserIds: z.array(z.string()).default([]), conflictedAdviser: z.boolean().default(false), sourcePostId: z.string().optional(), location: z.string().max(200).optional(), occurredOn: date.optional(), consent: z.object({ readStatement: z.literal(true, { error: agree }) }, { error: agree }).strict(), // The Program Chair and the Dean have access without the student's permission (baseline of 10 November 2026). The two
   // answers are still accepted from clients that send them, and ignored.
   allowChair: z.boolean().optional(), allowDean: z.boolean().optional(), aboutAdvisor: z.boolean({ error: yesOrNo }) }).strict(),
-  saveDraft: z.object({ narrative: z.string().max(4000), category: z.string().max(80).optional(), severity: z.enum(['low', 'medium', 'high']).optional(), identity: z.enum(['named', 'anonymous']).optional() }).strict(),
+  saveDraft: z.object({ narrative: z.string().max(4000), category: z.string().max(80).optional(), subcategory: z.string().max(80).optional(), categoryDetail: z.string().max(120).optional(), severity: z.enum(['low', 'medium', 'high']).optional(), identity: z.enum(['named', 'anonymous']).optional() }).strict(),
   sendReportMessage: z.object({ body: text }).strict(),
   setConfidential: z.object({ confidential: z.boolean() }).strict(),
   chooseTalkMode: z.object({
@@ -158,7 +158,9 @@ export const actionPayloads = {
   caseAction: z.object({ type: z.enum(['respond', 'recordAction', 'escalate', 'transfer', 'resolve', 'close', 'convert', 'milestone']), update: text, nextStage: z.enum(['adviser', 'chair', 'dean', 'guidance', 'osas']).optional() }).strict(),
   addNote: z.object({ body: text }).strict(),
   reviewCluster: z.object({ decision: z.enum(['confirmed', 'dismissed']) }).strict(),
-  createConsultation: z.object({ slotId: z.string().min(1), purpose: z.string().trim().min(1).max(300) }).strict(),
+  // An appointment (called a consultation in the API). The current screen sends a free `purpose`; the new one sends
+  // `category` and `subcategory` (src/appointments.ts), with `details` required for "Other" and optional otherwise.
+  createConsultation: z.object({ slotId: z.string().min(1), purpose: z.string().trim().min(1).max(300).optional(), category: z.string().trim().min(1).max(80).optional(), subcategory: z.string().trim().min(1).max(80).optional(), details: z.string().trim().max(300).optional() }).strict(),
   decideConsultation: z.object({ decision: z.enum(['Approved', 'Booked', 'Completed', 'Declined', 'Cancelled']), note: z.string().max(2000).optional() }).strict(),
   saveAvailability: z.object({ date, start: time, end: time, state: z.enum(['open', 'unavailable']).default('open') }).strict(),
   deleteAvailability: z.object({}).strict(),
