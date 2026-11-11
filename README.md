@@ -38,7 +38,7 @@ Two implementations:
 
 ### Shared state (record repository)
 
-The seed is the base. Twenty-one collections are shared by every instance and survive a cold start; each lives in its domain table (accs-architecture ADR 0004):
+The seed is the base. Twenty-three collections are shared by every instance and survive a cold start; each lives in its domain table (accs-architecture ADR 0004):
 
 | Collection | Table |
 |---|---|
@@ -49,7 +49,7 @@ The seed is the base. Twenty-one collections are shared by every instance and su
 | `posts` (with their comments and reactions) | `ccs_community` |
 | `moderation` | `ccs_moderation` |
 | `cycles`, `assignments`, `followUps` | `ccs_evaluation` |
-| `restrictions`, `referrals`, `goodMoral` | `ccs_discipline` |
+| `restrictions`, `referrals`, `strikes`, `strikeSettlements`, `goodMoral` | `ccs_discipline` |
 | `drafts`, `telemetry` | `ccs_assistant` |
 | `permissionOverrides` | `ccs_identity` |
 | `audit` | `ccs_audit` (add-only: entries are only ever put, never changed or deleted) |
@@ -61,7 +61,7 @@ One item per record: `PK = STATE#<collection>`, `SK` the record ID, `data` the r
 - `view` queries each collection it needs (strongly consistent, every page of the result, in parallel), lays the records over the seed, and runs the work on that private copy.
 - `transact` does the same, then writes only the records that changed, each conditioned on the version it read (`attribute_not_exists(PK)` for a new record), in one `TransactWriteItems` per 100 writes. If another instance changed a record first, the work runs again on fresh data, up to 3 times in all, and then the call fails with `409 CONFLICT`. A change of more than 100 records is split into several transactions; if a later one loses a race the work is not run again, since the earlier ones are already stored, and the call fails with `409`. Transactions on one instance take turns.
 - The write check is per record: two instances changing the same record cannot both win (one slot, one consultation), but a unit of work that only reads a record and acts on it is not re-checked.
-- Every `view` and action loads all 21 collections (one parallel query each) unless it names fewer. The session check on every authenticated request names only `restrictions`. Notifications, telemetry, and the audit trail grow without bound; they need a per-user key or a time window before the pilot gets large.
+- Every `view` and action loads all 23 collections (one parallel query each) unless it names fewer. The session check on every authenticated request names only `restrictions`. Notifications, telemetry, and the audit trail grow without bound; they need a per-user key or a time window before the pilot gets large.
 - A post is one record, so comments racing on the same post retry, and can reach the `409`. A cycle that generates more than 100 assignments is written in several transactions, so that change is not atomic.
 
 Four collections stay on the seed, per instance: `users` (accounts come from the auth store below), `spaces` (only changed from the auth store), and `organizations` and `offenses` (no route writes them). `src/records.ts` holds the small `RecordStore` interface (`list`, `write`), its DynamoDB implementation, and an in-memory one the tests use to run two app instances over one store.
@@ -120,16 +120,16 @@ A student files a concern (a *report* until it reaches Guidance) and chooses how
 
 | Action (page) | Payload | Who |
 |---|---|---|
-| `createReport` (P19) | the statement fields, plus `consent: { readStatement: true }`, `allowChair`, `allowDean`, `aboutAdvisor` (all four required) | Student |
+| `createReport` (P19) | the statement fields, plus `consent: { readStatement: true }` and `aboutAdvisor` (both required). `allowChair` and `allowDean` are still accepted from older clients and ignored | Student |
 | `chooseTalkMode` (P19, P20) | `{ reportId, mode: 'chat' \| 'video' \| 'voice' \| 'face_to_face', consent: { participate: true, recordCall? }, slotId?, preferredAt? }` | The student who filed it |
 | `setTalkDetails` (P22) | `{ reportId, scheduledAt?, meetingLink?, place? }`, at least one | The office handling the concern now |
 | `sendReportMessage` (P20, P22) | `{ body }`, with the report as `recordId` | The student and the office handling it, only while the chosen way is `chat` |
 
 `scheduledAt` and `preferredAt` are ISO 8601 dates with a time, with or without a time zone (`2026-11-06T10:00`, `2026-11-06T02:00:00Z`).
 
-**Agreement.** A missing or false `consent.readStatement`, or a missing `allowChair`, `allowDean`, or `aboutAdvisor`, is a 400 `VALIDATION_ERROR`; nothing is stored, sent, or recorded. The server stamps the report with `consent: { readStatement: true, at, userId, version, wording }`. `wording` is the exact text from the one exported constant `consentWording` (`src/consent.ts`), which also holds the wording of each way to talk; changing any sentence changes its `version`. P19 and P20 return the constant as `data.consentWording`, so the app shows the text the server stores. Filing writes two `reports` audit entries (`Report submitted`, `Report consent recorded`) with the report as reference; no audit entry holds the statement or the wording.
+**Agreement.** A missing or false `consent.readStatement`, or a missing `aboutAdvisor`, is a 400 `VALIDATION_ERROR`; nothing is stored, sent, or recorded. The server stamps the report with `consent: { readStatement: true, at, userId, version, wording }`. `wording` is the exact text from the one exported constant `consentWording` (`src/consent.ts`), which also holds the wording of each way to talk; changing any sentence changes its `version`. P19 and P20 return the constant as `data.consentWording`, so the app shows the text the server stores. Filing writes two `reports` audit entries (`Report submitted`, `Report consent recorded`) with the report as reference; no audit entry holds the statement or the wording.
 
-**Who can read it.** The student owns it. The adviser (the `professor` account set as the student's `adviserId`) reads it unless `aboutAdvisor` is true. The Program Chair of the student's program reads it if `allowChair` is true or `aboutAdvisor` is true (it goes to the chair instead). The Dean reads it only if `allowDean` is true. Guidance and OSAS read it once a case reaches them. Every path applies this: the case queue and workspace (P21, P22), similar reports (P23, P24, with the count of reports in a group), the analytics counts (P25), notices, the assistant, and later steps. Moving a concern to the chair or the Dean when the student did not allow that office is a 409 `CONFLICT` ("The student has not allowed the Dean to read this concern, so it cannot be sent there."). A report stored before these fields existed has none of them, so it reads as not shared.
+**Who can read it.** The student owns it. The adviser (the `professor` account set as the student's `adviserId`) handles it at the first stage unless `aboutAdvisor` is true. The Program Chair of the student's program and the Dean **oversee** every concern in scope without the student's permission (baseline of 10 November 2026): they read it at every stage (`readOnly: true`, no actions) and act on it at their own stage. If the adviser marks it **confidential** (`setConfidential` on P22, adviser only, while it is at the adviser stage, with a reason; audited and recorded in the history), the chair and the Dean see its status only (`statusOnly: true`: status, office, dates and a timeline, never the statement, reporter, messages or notes), and it cannot be escalated until the mark is removed. A concern about the adviser cannot be marked confidential. A reader who is not the current handler sees an anonymous reporter's name only if the student shared it with that reader's office. Guidance and OSAS read it once a case reaches them. An office the case has moved past (the adviser after escalating, Guidance after forwarding to OSAS) keeps a status view (`statusOnly: true`: status, office, dates and the timeline of public actions, never the statement, reporter, messages or notes), sees the case in its queue, and is notified of every later case action except its own; a person named in the concern never is. Analytics count every concern the chair or Dean oversees, confidential or not. The `allowChair` / `allowDean` answers of older reports are ignored.
 
 **About the adviser.** With `aboutAdvisor: true` the concern starts at the chair stage with the Program Chair of the student's program. The adviser is not told, cannot read it, and is not counted; the same holds when the existing conflict check sends a concern around the adviser (the adviser is named in the statement or in `involvedUserIds`, or `conflictedAdviser` is true), and then `aboutAdvisor` is stored as true. A student without an active adviser gets a 409 when filing unless `aboutAdvisor` is true. If no Program Chair other than the adviser can receive it, filing is a 409 and nothing is stored.
 
@@ -137,9 +137,13 @@ A student files a concern (a *report* until it reaches Guidance) and chooses how
 
 **Messages.** `sendReportMessage` is a 409 unless `talk.mode` is `chat`, for the student and for the office alike. The conversation is read by polling P20 and P22. Each message is audited as `Reporter message sent` or `Handler message sent` without its text. A message and a change of details notify the other side. The student's views show who answered (`office`, and each message's `author.roles`) and never the internal notes.
 
-**What the views return.** The student's views (P18, P20) and the office's (P21 rows, P22) carry `consent` (`{ readStatement, at, version, wording }`; the account behind it is never returned), `allowChair`, `allowDean`, `aboutAdvisor`, and `talk`. A P21 row also has `reporter` (the name, or the alias), `category`, `createdAt`, and `updatedAt`. There is no unread mark per report; an unread notice for the report on P40 (`recordId`, `read`) is the signal.
+**What the views return.** The student's views (P18, P20) and the office's (P21 rows, P22) carry `consent` (`{ readStatement, at, version, wording }`; the account behind it is never returned), `allowChair` and `allowDean` (always `true`: the chair and the Dean can read it), `confidential`, `aboutAdvisor`, and `talk`; the office's view also has `readOnly`. A P21 row also has `reporter` (the name, or the alias), `category`, `createdAt`, and `updatedAt`. There is no unread mark per report; an unread notice for the report on P40 (`recordId`, `read`) is the signal.
 
 **Stages.** A case moves in a fixed order: Adviser, Program Chair, Dean, Guidance, OSAS. The adviser and the chair escalate; the Dean forwards to Guidance; Guidance opens a Case File and then forwards to OSAS. OSAS is the last stage: it can respond, record actions, add milestones, resolve and close, but not forward. Any stage can resolve a case, and a resolved case can be closed. The President's Office stage and role were removed on 2026-11-10; a report stored with stage `executive` is read as being with OSAS, and a stored account's `president` role is dropped (an account left with no role cannot sign in).
+
+## Strikes and the clearance hold
+
+In a student-on-student complaint, **OSAS** records a strike against the reported student (`recordStrike` on P34: `{ studentId, reportId, kind: 'report' | 'no-show', note }`). The case must be one OSAS is handling, and the student who filed it can never receive a strike (409). At **three** unsettled strikes the student's clearance is on hold. OSAS records the settlement (`settleStrikes`: `{ studentId, kind: 'letter' | 'reprimand', reference, note }`), which lifts the hold; the strikes stay on the record, and strikes recorded later start a new count. Settling without a hold is a 409. P34 shows `strikes`, `strikeSettlements` and `clearance` (`{ onHold, unsettledStrikes, totalStrikes, limit }`) to the offices that may open the record; Guidance and OSAS may now also open the records of students named in their cases. Every strike, hold and settlement is audited.
 
 ## Password reset codes
 

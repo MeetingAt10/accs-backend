@@ -134,9 +134,12 @@ export const actionPayloads = {
   react: z.object({}).strict(),
   flag: z.object({ reason, itemType: z.enum(['post', 'comment', 'message']).default('post'), itemId: z.string().optional() }).strict(),
   // The agreement and the three choices have no defaults: a concern is never sent on a guess about what the student allowed.
-  createReport: z.object({ narrative: text, category: text.max(80), severity: z.enum(['low', 'medium', 'high']), identity: z.enum(['named', 'anonymous']), involvedUserIds: z.array(z.string()).default([]), conflictedAdviser: z.boolean().default(false), sourcePostId: z.string().optional(), location: z.string().max(200).optional(), occurredOn: date.optional(), consent: z.object({ readStatement: z.literal(true, { error: agree }) }, { error: agree }).strict(), allowChair: z.boolean({ error: yesOrNo }), allowDean: z.boolean({ error: yesOrNo }), aboutAdvisor: z.boolean({ error: yesOrNo }) }).strict(),
+  createReport: z.object({ narrative: text, category: text.max(80), severity: z.enum(['low', 'medium', 'high']), identity: z.enum(['named', 'anonymous']), involvedUserIds: z.array(z.string()).default([]), conflictedAdviser: z.boolean().default(false), sourcePostId: z.string().optional(), location: z.string().max(200).optional(), occurredOn: date.optional(), consent: z.object({ readStatement: z.literal(true, { error: agree }) }, { error: agree }).strict(), // The Program Chair and the Dean have access without the student's permission (baseline of 10 November 2026). The two
+  // answers are still accepted from clients that send them, and ignored.
+  allowChair: z.boolean().optional(), allowDean: z.boolean().optional(), aboutAdvisor: z.boolean({ error: yesOrNo }) }).strict(),
   saveDraft: z.object({ narrative: z.string().max(4000), category: z.string().max(80).optional(), severity: z.enum(['low', 'medium', 'high']).optional(), identity: z.enum(['named', 'anonymous']).optional() }).strict(),
   sendReportMessage: z.object({ body: text }).strict(),
+  setConfidential: z.object({ confidential: z.boolean() }).strict(),
   chooseTalkMode: z.object({
     reportId: z.string().min(1).max(100),
     mode: z.enum(talkModes),
@@ -180,6 +183,8 @@ export const actionPayloads = {
   reviewGoodMoral: z.object({ status: z.enum(['Pending QCU review', 'Prerequisites reviewed', 'Further review needed']), decisionSource: text.max(200), notes: z.string().max(2000).default('') }).strict(),
   applyRestriction: z.object({ studentId: z.string(), features: z.array(z.enum(['post.create', 'post.comment', 'report.anonymous'])).min(1), basis: text.max(500), until: date, decisionReference: text.max(100) }).strict(),
   liftRestriction: z.object({}).strict(),
+  recordStrike: z.object({ studentId: z.string().min(1), reportId: z.string().min(1), kind: z.enum(['report', 'no-show']), note: text.max(1000) }).strict(),
+  settleStrikes: z.object({ studentId: z.string().min(1), kind: z.enum(['letter', 'reprimand']), reference: text.max(100), note: z.string().max(1000).default('') }).strict(),
   referRestriction: z.object({ studentId: z.string(), change: z.enum(['Lift', 'Shorten', 'Extend', 'Review']), decisionReference: z.string().max(100).optional() }).strict(),
   saveProfile: z.object({ title: z.string().max(100), bio: z.string().max(1000), education: z.string().max(500), officeHours: z.string().max(200) }).strict(),
   saveSettings: z.object({ theme: z.enum(['system', 'light', 'dark']), density: z.enum(['comfortable', 'compact']) }).strict(),

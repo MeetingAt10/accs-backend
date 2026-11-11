@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
-import { allowedPages, canActCase, canAudience, canCountCase, canFacultyResult, canPage, canPublish, canReach, canSpace, canStudentRecord, canThread, canViewCase, hasPermission, hasRole, isOrganizationMember, pageTitles, permissionRoles, permissions, scopeLabel } from './access.js'
+import { allowedPages, canActCase, canAudience, canReadCase, isEarlierHandler, overseesCase, canCountCase, canFacultyResult, canPage, canPublish, canReach, canSpace, canStudentRecord, canThread, canViewCase, hasPermission, hasRole, isOrganizationMember, pageTitles, permissionRoles, permissions, scopeLabel } from './access.js'
 import { consentWording } from './consent.js'
 import type { Assignment, Consultation, Cycle, Database, Message, Post, Report, Repository, Slot, Stage, Thread, UnitOfWork } from './store.js'
 
@@ -58,9 +58,18 @@ function postView(db: Database, post: Post, user: User) {
 }
 function reportView(db:Database,report:Report,user:User,owner=false) {
   const current=canActCase(user,report)
-  if(!owner&&!current) return {id:report.id,caseFileId:report.caseFileId,category:report.category,severity:report.severity,status:statusFor(report),stage:report.stage,office:offices[report.stage],program:report.program,createdAt:report.createdAt,updatedAt:report.updatedAt,historyOnly:true,history:report.history.filter(h=>h.actorId===user.id).map(h=>({...h,actor:author(db,h.actorId)})),historyNotice:'You can see only your own entries on this report.'}
-  const showName=report.identity==='named'||!owner&&report.disclosedTo.includes(report.stage)
-  return {id:report.id,caseFileId:report.caseFileId,type:report.caseFileId?'Case File':'Report',category:report.category,severity:report.severity,status:statusFor(report),stage:report.stage,office:offices[report.stage],program:report.program,narrative:report.narrative,identity:report.identity,alias:report.alias,reporter:showName?author(db,report.ownerId):{name:report.alias,roles:['student'],anonymous:true},createdAt:report.createdAt,updatedAt:report.updatedAt,sourcePostId:report.sourcePostId,location:report.location,occurredOn:report.occurredOn,disclosedTo:owner?report.disclosedTo:undefined,bypassed:owner?undefined:report.bypassed,consent:report.consent&&{readStatement:true,at:report.consent.at,version:report.consent.version,wording:report.consent.wording},allowChair:report.allowChair===true,allowDean:report.allowDean===true,aboutAdvisor:report.aboutAdvisor===true,talk:report.talk,history:report.history.filter(h=>!owner||h.public).map(h=>owner?{id:h.id,at:h.at,action:h.action,update:h.update,stage:h.stage,office:offices[h.stage],state:h.stage===report.stage?'current':'done'}:{...h,actorId:h.actorId===report.ownerId&&!showName?undefined:h.actorId,actor:author(db,h.actorId,h.actorId===report.ownerId&&!showName,report.alias)}),messages:report.messages.map(m=>messageView(db,m,report)),notes:owner?undefined:report.notes.map(m=>messageView(db,m)),allowedActions:owner?[]:caseActions(user,report)}
+  // Status only, never the statement, reporter, messages or notes: for the Program Chair and the Dean on a confidential
+  // concern, and for an office the case has moved past (#30). Anyone else who appears in the history sees only their own entries.
+  if(!owner&&!current&&!canReadCase(user,report)){
+    const status={id:report.id,caseFileId:report.caseFileId,status:statusFor(report),stage:report.stage,office:offices[report.stage],program:report.program,createdAt:report.createdAt,updatedAt:report.updatedAt,statusOnly:true,timeline:report.history.filter(h=>h.public).map(h=>({at:h.at,action:h.action,office:offices[h.stage]}))}
+    if(overseesCase(user,report)) return {...status,confidential:true,statusNotice:'The adviser marked this concern confidential. You can see its status only.'}
+    if(isEarlierHandler(user,report)) return {...status,confidential:report.confidential===true,statusNotice:`This concern is now with ${offices[report.stage]}. You can follow its status here.`}
+    return {id:report.id,caseFileId:report.caseFileId,category:report.category,severity:report.severity,status:statusFor(report),stage:report.stage,office:offices[report.stage],program:report.program,createdAt:report.createdAt,updatedAt:report.updatedAt,historyOnly:true,history:report.history.filter(h=>h.actorId===user.id).map(h=>({...h,actor:author(db,h.actorId)})),historyNotice:'You can see only your own entries on this report.'}
+  }
+  // A reader who is not the current handler sees the name only if the student shared it with the reader's own office.
+  const viewerStage=current?report.stage:hasRole(user,'dean')?'dean':'chair'
+  const showName=report.identity==='named'||!owner&&report.disclosedTo.includes(viewerStage)
+  return {id:report.id,caseFileId:report.caseFileId,type:report.caseFileId?'Case File':'Report',category:report.category,severity:report.severity,status:statusFor(report),stage:report.stage,office:offices[report.stage],program:report.program,narrative:report.narrative,identity:report.identity,alias:report.alias,reporter:showName?author(db,report.ownerId):{name:report.alias,roles:['student'],anonymous:true},createdAt:report.createdAt,updatedAt:report.updatedAt,sourcePostId:report.sourcePostId,location:report.location,occurredOn:report.occurredOn,disclosedTo:owner?report.disclosedTo:undefined,bypassed:owner?undefined:report.bypassed,consent:report.consent&&{readStatement:true,at:report.consent.at,version:report.consent.version,wording:report.consent.wording},allowChair:true,allowDean:true,confidential:report.confidential===true,readOnly:!owner&&!current,aboutAdvisor:report.aboutAdvisor===true,talk:report.talk,history:report.history.filter(h=>!owner||h.public).map(h=>owner?{id:h.id,at:h.at,action:h.action,update:h.update,stage:h.stage,office:offices[h.stage],state:h.stage===report.stage?'current':'done'}:{...h,actorId:h.actorId===report.ownerId&&!showName?undefined:h.actorId,actor:author(db,h.actorId,h.actorId===report.ownerId&&!showName,report.alias)}),messages:report.messages.map(m=>messageView(db,m,report)),notes:owner?undefined:report.notes.map(m=>messageView(db,m)),allowedActions:owner?[]:caseActions(user,report)}
 }
 function caseActions(user:User,r:Report) { if(!canActCase(user,r))return[]; if(r.status==='Closed')return[]; if(r.status==='Resolved')return['close'];if(r.stage==='guidance'&&!r.caseFileId)return['convert'];return ['respond','recordAction',...(['guidance','osas'].includes(r.stage)?['milestone']:[]),'resolve',...(r.stage==='adviser'||r.stage==='chair'?['escalate']:r.stage==='dean'||r.stage==='guidance'?['transfer']:[])] }
 function consultationView(db:Database,c:Database['consultations'][number]) { return {...c,student:person(find(db.users,c.studentId)),faculty:person(find(db.users,c.facultyId)),slot:find(db.slots,c.slotId)} }
@@ -139,9 +148,25 @@ function unreadMessages(thread:Thread,userId:string) {
   return thread.messages.slice(readCount).filter(message => message.authorId !== userId).length
 }
 function handlerIds(db:Database,r:Report) { return db.users.filter(u=>u.active&&canActCase(u,r)).map(u=>u.id) }
+/** Offices the case has moved past; they are told about every later step (#30). */
+function earlierHandlerIds(db:Database,r:Report) { return db.users.filter(u=>u.active&&isEarlierHandler(u,r)).map(u=>u.id) }
 const faq=[{id:'FAQ-1',question:'How do I request a consultation?',answer:'Open Consultations, pick one of your professors, and request an open time. The professor confirms or declines.',href:'/consultations',roles:['student']},{id:'FAQ-2',question:'What does anonymous reporting mean?',answer:'Your report stays linked to your verified account. Handlers see an alias until you choose to share your name with their office.',href:'/reports/new',roles:['student']},{id:'FAQ-3',question:'How are reports routed?',answer:'A report goes to the student\'s adviser first. If the report involves that adviser, it goes to the program chair instead. The program chair and the Dean can read a report only if the student allowed it. Each office decides the next step.',href:'/cases',roles:['professor','chair','dean','guidance','osas']},{id:'FAQ-4',question:'What can the assistant do?',answer:'It explains ACCS pages, your schedule, and the milestones on your own reports. It cannot decide cases or restrictions. Staff do that.',href:'/assistant',roles:roles as readonly string[]},{id:'FAQ-5',question:'Where do I find official contact details?',answer:'The directory lists faculty and staff offices and their QCU email addresses.',href:'/directory',roles:roles as readonly string[]},{id:'FAQ-6',question:'What still works when features are paused?',answer:'You can still read announcements and class information, use the assistant, and message your professors.',href:'/standing',roles:['student']},{id:'FAQ-7',question:'What does a moderation flag mean?',answer:'A flag asks a moderator to read the post in context. It does not mean anyone did something wrong, and it does not restrict anyone.',href:'/admin/moderation',roles:['administrator']}]
 function notificationCategories(user:User){return ['announcement',...(hasPermission(user,'message.send')?['message']:[]),...(hasRole(user,'student','professor')?['consultation']:[]),...(hasRole(user,'student','professor','chair','dean','guidance','osas')?['report','case']:[]),...(hasPermission(user,'evaluation.fill')||hasPermission(user,'evaluation.configure')?['evaluation']:[]),...(hasRole(user,'administrator')||hasPermission(user,'moderation.referral')?['moderation']:[])]}
 function filteredFaq(user:User){return faq.filter(entry=>entry.roles.some(role=>user.roles.includes(role as User['roles'][number])))}
+// Three unsettled strikes hold a student's clearance until OSAS records the settlement (#34). Settled strikes stay on the
+// record and do not count again; strikes recorded after a settlement start a new count.
+export const strikeLimit = 3
+function clearanceOf(db:Database,studentId:string) {
+  const settled = new Set(db.strikeSettlements.filter(s=>s.studentId===studentId).flatMap(s=>s.strikeIds))
+  const strikes = db.strikes.filter(s=>s.studentId===studentId)
+  const unsettled = strikes.filter(s=>!settled.has(s.id))
+  return { onHold: unsettled.length >= strikeLimit, unsettledStrikes: unsettled.length, totalStrikes: strikes.length, limit: strikeLimit, unsettled }
+}
+const clearanceView = (db:Database,studentId:string) => { const { unsettled: _unsettled, ...view } = clearanceOf(db,studentId); return view }
+function strikeViews(db:Database,studentId:string) {
+  const settled = new Set(db.strikeSettlements.filter(s=>s.studentId===studentId).flatMap(s=>s.strikeIds))
+  return db.strikes.filter(s=>s.studentId===studentId).map(s=>{const r=db.reports.find(item=>item.id===s.reportId);return {id:s.id,kind:s.kind,note:s.note,at:s.at,caseReference:r?.caseFileId??s.reportId,settled:settled.has(s.id),recordedBy:author(db,s.actorId)}})
+}
 function restrictionViews(db:Database,user:User,studentId?:string) {
   const today = now().slice(0, 10)
   return db.restrictions
@@ -544,7 +569,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
     }
     case'P32':{const c=pick(db.cycles.filter(c=>db.assignments.some(a=>a.cycleId===c.id&&a.facultyId===user.id)),query.id);if(c){data.record={...c,reviews:c.reviews.filter(r=>r.userId===user.id)};data.canReview=c.status==='In review'&&!c.reviews.some(r=>r.userId===user.id)}break}
     case'P33':data.students=db.users.filter(u=>canStudentRecord(db,user,u)&&match(`${u.name} ${u.studentId}`)).map(u=>person(refreshRestrictions(db,u)));break
-    case'P34':{if(!query.purpose){data.purposeRequired=true;break}const students=db.users.filter(u=>canStudentRecord(db,user,u));const s=pick(students,query.id);if(s){const entry=audit(repo,user,'Record opened','records',s.studentId??s.id,query.purpose);data.record={...person(refreshRestrictions(db,s)),offenses:db.offenses.filter(o=>o.studentId===s.id),restrictions:restrictionViews(db,user,s.id),goodMoral:hasPermission(user,'goodmoral.review')?db.goodMoral.find(g=>g.studentId===s.id):undefined,openedAt:entry.at,accessHistory:hasRole(user,'dean')?safeAudit(db,db.audit.filter(a=>a.action==='Record opened'&&a.reference===(s.studentId??s.id))):undefined}}break}
+    case'P34':{if(!query.purpose){data.purposeRequired=true;break}const students=db.users.filter(u=>canStudentRecord(db,user,u));const s=pick(students,query.id);if(s){const entry=audit(repo,user,'Record opened','records',s.studentId??s.id,query.purpose);data.record={...person(refreshRestrictions(db,s)),offenses:db.offenses.filter(o=>o.studentId===s.id),restrictions:restrictionViews(db,user,s.id),goodMoral:hasPermission(user,'goodmoral.review')?db.goodMoral.find(g=>g.studentId===s.id):undefined,strikes:strikeViews(db,s.id),strikeSettlements:db.strikeSettlements.filter(x=>x.studentId===s.id).map(x=>({id:x.id,kind:x.kind,reference:x.reference,note:x.note,at:x.at,strikeCount:x.strikeIds.length,settledBy:author(db,x.actorId)})),clearance:clearanceView(db,s.id),canRecordStrikes:hasPermission(user,'strike.record'),openedAt:entry.at,accessHistory:hasRole(user,'dean')?safeAudit(db,db.audit.filter(a=>a.action==='Record opened'&&a.reference===(s.studentId??s.id))):undefined}}break}
     case'P35':{const students=db.users.filter(u=>hasRole(u,'student')&&(hasRole(user,'administrator')||canStudentRecord(db,user,u)));data.students=students.map(u=>person(refreshRestrictions(db,u)));data.restrictions=restrictionViews(db,user);data.referrals=db.referrals.filter(r=>hasRole(user,'administrator')||r.actorId===user.id).map(r=>({...r,student:person(find(db.users,r.studentId)),actor:author(db,r.actorId)}));data.canApply=hasRole(user,'administrator');break}
     case 'P36': {
       const activeRestrictions = restrictionViews(db, user, user.id).filter(restriction => restriction.active)
@@ -600,6 +625,7 @@ const actionPages: Record<string, string[]> = {
   sendReportMessage: ['P20', 'P22'],
   chooseTalkMode: ['P19', 'P20'],
   setTalkDetails: ['P22'],
+  setConfidential: ['P22'],
   discloseIdentity: ['P20'],
   caseAction: ['P22'],
   addNote: ['P22'],
@@ -627,6 +653,8 @@ const actionPages: Record<string, string[]> = {
   saveFollowUp: ['P29'],
   openRecord: ['P34'],
   reviewGoodMoral: ['P34'],
+  recordStrike: ['P34'],
+  settleStrikes: ['P34'],
   applyRestriction: ['P35'],
   liftRestriction: ['P35'],
   referRestriction: ['P34', 'P35'],
@@ -739,8 +767,6 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
         bypassed,
         // A concern that goes around the adviser is "about the adviser" for every rule that keeps the adviser out.
         aboutAdvisor: bypassed,
-        allowChair: p.allowChair,
-        allowDean: p.allowDean,
         consent: { readStatement: true, at, userId: user.id, version: consentWording.version, wording: consentWording.report },
         createdAt: at,
         updatedAt: at,
@@ -836,8 +862,27 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       message = 'Details saved.'
       break
     }
+    case 'setConfidential': {
+      const p = actionPayloads.setConfidential.parse(request.payload)
+      const reason = reasonOf(request)
+      const r = getCase()
+      // Only the adviser marks a concern confidential, while it is with them; a concern about the adviser goes to the chair and cannot be.
+      if (r.stage !== 'adviser' || r.adviserId !== user.id) throw conflict('Only the adviser can mark a concern confidential, while it is with them.')
+      if (r.aboutAdvisor) throw conflict('A concern about the adviser cannot be marked confidential.')
+      if (['Resolved', 'Closed'].includes(r.status)) throw conflict('This concern is closed.')
+      if ((r.confidential === true) === p.confidential) throw conflict(p.confidential ? 'This concern is already confidential.' : 'This concern is not marked confidential.')
+      r.confidential = p.confidential
+      r.updatedAt = now()
+      const action = p.confidential ? 'Marked confidential' : 'Confidential mark removed'
+      r.history.push({ id: repo.nextId('HISTORY'), at: r.updatedAt, actorId: user.id, actorRole: 'professor', action, reason, update: p.confidential ? 'Your adviser marked this concern confidential. The Program Chair and the Dean see only its status.' : 'Your adviser removed the confidential mark.', public: true, stage: r.stage })
+      audit(repo, user, action, 'cases', r.id)
+      notify(repo, r.ownerId, 'case', 'P20', r.id)
+      record = reportView(db, r, user)
+      message = `${action}.`
+      break
+    }
     case'discloseIdentity':{const p=actionPayloads.discloseIdentity.parse(request.payload);const r=getOwnReport();if(p.office&&p.office!==r.stage&&p.office!==offices[r.stage])throw deny();if(!r.disclosedTo.includes(r.stage)){r.disclosedTo.push(r.stage);audit(repo,user,'Identity disclosed','reports',r.id);for(const handlerId of handlerIds(db,r))notify(repo,handlerId,'report','P22',r.id)}record=reportView(db,r,user,true);message=`Your name is shared with ${offices[r.stage]}.`;break}
-    case'caseAction':{const p=actionPayloads.caseAction.parse(request.payload);const reason=reasonOf(request);const r=getCase();if(!caseActions(user,r).includes(p.type))throw conflict('That action is not available at this stage.');const previous=r.stage;let action=p.type as string;if(p.type==='convert'){requirePermission(user,'case.convert');r.caseFileId=repo.nextId('CF');r.status='Case File at Guidance';action='Case File opened'}else if(p.type==='resolve'){r.status='Resolved';action='Resolved'}else if(p.type==='close'){r.status='Closed';action='Closed'}else if(['escalate','transfer'].includes(p.type)){/* Fixed order, decided 2026-11-10: Dean to Guidance, Guidance to OSAS. OSAS is the last stage. */const next:Partial<Record<Stage,Stage>>={adviser:'chair',chair:'dean',dean:'guidance',guidance:'osas'};const nextStage=next[r.stage]!;if(p.nextStage&&p.nextStage!==nextStage)throw conflict('This office cannot make that transfer.');if(r.stage==='guidance'&&!r.caseFileId)throw conflict('Open a Case File before transferring.');if(nextStage==='chair'&&!r.allowChair||nextStage==='dean'&&!r.allowDean)throw conflict(`The student has not allowed the ${offices[nextStage]} to read this concern, so it cannot be sent there.`);r.stage=nextStage;r.status=`With ${offices[nextStage]}`;action='Transferred'}else if(p.type==='respond'){addMessage(r.messages,p.update);action='Response sent'}else if(p.type==='milestone')action='Milestone added';else action='Action recorded';r.updatedAt=now();r.history.push({id:repo.nextId('HISTORY'),at:r.updatedAt,actorId:user.id,actorRole:stageRoles[previous],action,reason,update:p.update,public:true,stage:r.stage});audit(repo,user,'Case transition','cases',r.caseFileId??r.id);notify(repo,r.ownerId,'case','P20',r.id);for(const handlerId of handlerIds(db,r))notify(repo,handlerId,'case','P22',r.id);record=reportView(db,r,user, false);message=`${action}.`;break}
+    case'caseAction':{const p=actionPayloads.caseAction.parse(request.payload);const reason=reasonOf(request);const r=getCase();if(!caseActions(user,r).includes(p.type))throw conflict('That action is not available at this stage.');const previous=r.stage;let action=p.type as string;if(p.type==='convert'){requirePermission(user,'case.convert');r.caseFileId=repo.nextId('CF');r.status='Case File at Guidance';action='Case File opened'}else if(p.type==='resolve'){r.status='Resolved';action='Resolved'}else if(p.type==='close'){r.status='Closed';action='Closed'}else if(['escalate','transfer'].includes(p.type)){/* Fixed order, decided 2026-11-10: Dean to Guidance, Guidance to OSAS. OSAS is the last stage. */const next:Partial<Record<Stage,Stage>>={adviser:'chair',chair:'dean',dean:'guidance',guidance:'osas'};const nextStage=next[r.stage]!;if(p.nextStage&&p.nextStage!==nextStage)throw conflict('This office cannot make that transfer.');if(r.stage==='guidance'&&!r.caseFileId)throw conflict('Open a Case File before transferring.');if(r.confidential)throw conflict('This concern is confidential. Remove the confidential mark before escalating it.');r.stage=nextStage;r.status=`With ${offices[nextStage]}`;action='Transferred'}else if(p.type==='respond'){addMessage(r.messages,p.update);action='Response sent'}else if(p.type==='milestone')action='Milestone added';else action='Action recorded';r.updatedAt=now();r.history.push({id:repo.nextId('HISTORY'),at:r.updatedAt,actorId:user.id,actorRole:stageRoles[previous],action,reason,update:p.update,public:true,stage:r.stage});audit(repo,user,'Case transition','cases',r.caseFileId??r.id);notify(repo,r.ownerId,'case','P20',r.id);for(const handlerId of handlerIds(db,r))notify(repo,handlerId,'case','P22',r.id);for(const earlierId of earlierHandlerIds(db,r))if(earlierId!==user.id)notify(repo,earlierId,'case','P22',r.id);record=reportView(db,r,user, false);message=`${action}.`;break}
     case'addNote':{const p=actionPayloads.addNote.parse(request.payload);const r=getCase();const m=addMessage(r.notes,p.body);audit(repo,user,'Internal note recorded','cases',r.caseFileId??r.id);record=messageView(db,m);message='Internal note saved.';break}
     case'reviewCluster':{requirePermission(user,'cluster.review');const p=actionPayloads.reviewCluster.parse(request.payload);const reason=reasonOf(request);const c=find(db.clusters,id);if(c.program!==user.program)throw unavailable();c.status=p.decision==='confirmed'?'Confirmed':'Dismissed';c.history.push({at:now(),actorId:user.id,decision:c.status,reason});audit(repo,user,'Similarity group reviewed','cases',c.id);record={...c,reportIds:undefined};message='Group review recorded.';break}
     case'createConsultation':{requirePermission(user,'consultation.request');const p=actionPayloads.createConsultation.parse(request.payload);const slot=find(db.slots,p.slotId);const faculty=find(db.users,slot.facultyId);if(!canReach(db,user,faculty))throw unavailable();const c=reserveSlot(repo,user.id,slot,p.purpose);record=consultationView(db,c);message='Request sent.';break}
@@ -929,6 +974,37 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
     case'saveFollowUp':{requireRole(user,'chair','dean');const p=actionPayloads.saveFollowUp.parse(request.payload);const faculty=find(db.users,id);if(!canFacultyResult(user,faculty))throw unavailable();db.followUps.push({id:repo.nextId('FOLLOWUP'),facultyId:faculty.id,actorId:user.id,note:p.note,at:now()});audit(repo,user,'Evaluation follow-up recorded','evaluations',faculty.id);message='Follow-up note saved.';break}
     case'openRecord':{const p=actionPayloads.openRecord.parse(request.payload);record=readPage(repo,user,'P34',{id,...p}).data.record;message='Record opened and logged.';break}
     case'reviewGoodMoral':{requirePermission(user,'goodmoral.review');const p=actionPayloads.reviewGoodMoral.parse(request.payload);const student=find(db.users,id);if(!canStudentRecord(db,user,student))throw unavailable();const review={studentId:student.id,...p,actorId:user.id,at:now()};db.goodMoral=db.goodMoral.filter(g=>g.studentId!==student.id);db.goodMoral.push(review);audit(repo,user,'Good Moral prerequisite reviewed','records',student.studentId??student.id);record=review;message='Review saved.';break}
+    case 'recordStrike': {
+      requirePermission(user, 'strike.record')
+      const p = actionPayloads.recordStrike.parse(request.payload)
+      const student = find(db.users, p.studentId)
+      if (!hasRole(student, 'student') || !canStudentRecord(db, user, student)) throw unavailable()
+      // The strike comes from a case OSAS is handling, and never falls on the student who reported it.
+      const r = find(db.reports, p.reportId)
+      if (!canActCase(user, r)) throw unavailable()
+      if (r.ownerId === student.id) throw conflict('A strike is recorded against the reported student, not the student who filed the concern.')
+      const wasOnHold = clearanceOf(db, student.id).onHold
+      db.strikes.push({ id: repo.nextId('STRIKE'), studentId: student.id, reportId: r.id, kind: p.kind, note: p.note, actorId: user.id, at: now() })
+      audit(repo, user, 'Strike recorded', 'records', student.studentId ?? student.id)
+      const clearance = clearanceView(db, student.id)
+      if (clearance.onHold && !wasOnHold) audit(repo, user, 'Clearance hold placed', 'records', student.studentId ?? student.id)
+      record = { strikes: strikeViews(db, student.id), clearance }
+      message = clearance.onHold && !wasOnHold ? 'Strike recorded. The student’s clearance is now on hold.' : 'Strike recorded.'
+      break
+    }
+    case 'settleStrikes': {
+      requirePermission(user, 'strike.record')
+      const p = actionPayloads.settleStrikes.parse(request.payload)
+      const student = find(db.users, p.studentId)
+      if (!hasRole(student, 'student') || !canStudentRecord(db, user, student)) throw unavailable()
+      const before = clearanceOf(db, student.id)
+      if (!before.onHold) throw conflict('This student has no clearance hold to settle.')
+      db.strikeSettlements.push({ id: repo.nextId('SETTLE'), studentId: student.id, kind: p.kind, reference: p.reference, note: p.note, strikeIds: before.unsettled.map(s => s.id), actorId: user.id, at: now() })
+      audit(repo, user, 'Clearance hold settled', 'records', student.studentId ?? student.id)
+      record = { strikes: strikeViews(db, student.id), clearance: clearanceView(db, student.id) }
+      message = 'Settlement recorded. The clearance hold is lifted; the strikes stay on the record.'
+      break
+    }
     case'applyRestriction':{requireRole(user,'administrator');const p=actionPayloads.applyRestriction.parse(request.payload);reasonOf(request);const student=find(db.users,p.studentId);if(!hasRole(student,'student'))throw unavailable();if(p.until<now().slice(0,10))throw new ApiError(400,'The end date must be today or later.','VALIDATION_ERROR');const r={id:repo.nextId('RST'),...p,starts:now(),actorId:user.id,active:true};db.restrictions.push(r);audit(repo,user,'Restriction applied','restrictions',r.id);notify(repo,student.id,'restriction','P36');record=r;message='Selected features paused.';break}
     case'liftRestriction':{requireRole(user,'administrator');actionPayloads.liftRestriction.parse(request.payload);reasonOf(request);const r=find(db.restrictions,id);if(!r.active||r.until<now().slice(0,10))throw conflict('This restriction has already ended.');r.active=false;audit(repo,user,'Restriction lifted','restrictions',r.id);notify(repo,r.studentId,'restriction','P36');record=r;message='Restriction lifted.';break}
     case'referRestriction':{requireRole(user,'guidance','osas');const p=actionPayloads.referRestriction.parse(request.payload);const reason=reasonOf(request);const student=find(db.users,p.studentId);if(!canStudentRecord(db,user,student))throw unavailable();const referral={id:repo.nextId('REF'),studentId:student.id,change:p.change,decisionReference:p.decisionReference??'',reason,actorId:user.id,at:now(),status:'Awaiting administrator review'};db.referrals.push(referral);audit(repo,user,'Restriction change requested','restrictions',referral.id);for(const admin of db.users.filter(u=>hasRole(u,'administrator')))notify(repo,admin.id,'restriction','P35');record=referral;message='Request sent. Existing restrictions are unchanged.';break}

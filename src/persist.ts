@@ -25,6 +25,8 @@ export const persisted: Record<Collection, DomainTable> = {
   followUps: 'ccs_evaluation',
   restrictions: 'ccs_discipline',
   referrals: 'ccs_discipline',
+  strikes: 'ccs_discipline',
+  strikeSettlements: 'ccs_discipline',
   goodMoral: 'ccs_discipline',
   // Report drafts hold concern narratives, so they stay out of the forum table.
   drafts: 'ccs_assistant',
