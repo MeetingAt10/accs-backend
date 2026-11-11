@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { categoryProblem, concernCategories } from './categories.js'
+import { mainCampus, sectionName } from './sections.js'
 import { appointmentCategories, appointmentProblem, concernFollowUp, purposeOf, type AppointmentChoice } from './appointments.js'
 import { actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
 import { allowedPages, canActCase, canAudience, canReadCase, isEarlierHandler, overseesCase, canCountCase, canFacultyResult, canPage, canPublish, canReach, canSpace, canStudentRecord, canThread, canViewCase, hasPermission, hasRole, isOrganizationMember, pageTitles, permissionRoles, permissions, scopeLabel } from './access.js'
@@ -56,7 +57,7 @@ function pick<T extends {id:string}>(items:T[], id?:string):T|undefined { return
 function reasonOf(request:ActionRequest) { return z.string().trim().min(1,'A reason is required.').max(2000).parse(request.reason) }
 export function refreshRestrictions(db: Database, user: User): User { const date = now().slice(0,10); return { ...user, restrictions:[...new Set(db.restrictions.filter(r=>r.studentId===user.id&&r.active&&r.until>=date).flatMap(r=>r.features))] } }
 export function sessionView(user:User) { return { user, permissions:permissions(user),allowedPages:allowedPages(user),roleLabels,sampleData:true as const } }
-function person(user:User) { return { id:user.id,name:user.name,email:user.email,roles:user.roles,program:user.program,section:user.section,office:user.office,title:user.title,bio:user.bio,education:user.education,officeHours:user.officeHours,studentId:user.studentId,year:user.year,standing:user.restrictions.length?'Some features paused':'Good standing' } }
+function person(user:User) { return { id:user.id,name:user.name,email:user.email,roles:user.roles,program:user.program,section:user.section,...(hasRole(user,'student')?{campus:user.campus??mainCampus,...(user.program&&user.year&&user.section?{sectionName:sectionName({campus:user.campus,program:user.program,year:user.year,section:user.section})}:{})}:{}),office:user.office,title:user.title,bio:user.bio,education:user.education,officeHours:user.officeHours,studentId:user.studentId,year:user.year,standing:user.restrictions.length?'Some features paused':'Good standing' } }
 function author(db:Database,id:string,anonymous=false,alias='Student A-12') { const u=db.users.find(item=>item.id===id); return anonymous ? {name:alias,roles:['student'],anonymous:true} : u?{id:u.id,name:u.name,roles:u.roles,email:u.email}:{name:'College office',roles:[]} }
 function messageView(db:Database,message:Message,report?:Report) { return {id:message.id,body:message.body,at:message.at,author:author(db,message.authorId,!!report&&message.authorId===report.ownerId&&report.identity==='anonymous'&&!report.disclosedTo.includes(report.stage),report?.alias)} }
 function postView(db: Database, post: Post, user: User) {
