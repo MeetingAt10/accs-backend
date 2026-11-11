@@ -158,7 +158,9 @@ export const actionPayloads = {
   caseAction: z.object({ type: z.enum(['respond', 'recordAction', 'escalate', 'transfer', 'resolve', 'close', 'convert', 'milestone']), update: text, nextStage: z.enum(['adviser', 'chair', 'dean', 'guidance', 'osas']).optional() }).strict(),
   addNote: z.object({ body: text }).strict(),
   reviewCluster: z.object({ decision: z.enum(['confirmed', 'dismissed']) }).strict(),
-  createConsultation: z.object({ slotId: z.string().min(1), purpose: z.string().trim().min(1).max(300) }).strict(),
+  // An appointment (called a consultation in the API). The current screen sends a free `purpose`; the new one sends
+  // `category` and `subcategory` (src/appointments.ts), with `details` required for "Other" and optional otherwise.
+  createConsultation: z.object({ slotId: z.string().min(1), purpose: z.string().trim().min(1).max(300).optional(), category: z.string().trim().min(1).max(80).optional(), subcategory: z.string().trim().min(1).max(80).optional(), details: z.string().trim().max(300).optional() }).strict(),
   decideConsultation: z.object({ decision: z.enum(['Approved', 'Booked', 'Completed', 'Declined', 'Cancelled']), note: z.string().max(2000).optional() }).strict(),
   saveAvailability: z.object({ date, start: time, end: time, state: z.enum(['open', 'unavailable']).default('open') }).strict(),
   deleteAvailability: z.object({}).strict(),
