@@ -2,10 +2,11 @@ import { z } from 'zod'
 
 import { passwordProblem } from './auth.js'
 
-export const roles = ['student', 'organization', 'professor', 'staff', 'chair', 'dean', 'administrator', 'guidance', 'osas', 'secretary'] as const
+// The CCS Staff role was removed on 11 November 2026 (#45); stored accounts with only that role are deactivated.
+export const roles = ['student', 'organization', 'professor', 'chair', 'dean', 'administrator', 'guidance', 'osas', 'secretary'] as const
 export const roleSchema = z.enum(roles)
 export type Role = z.infer<typeof roleSchema>
-export const roleLabels: Record<Role, string> = { student: 'Student', organization: 'CCS Student Organization', professor: 'Professor', staff: 'CCS Staff', chair: 'Program Chair', dean: 'Dean', administrator: 'Administrator / Moderator', guidance: 'Guidance', osas: 'OSAS', secretary: 'CCS Secretary' }
+export const roleLabels: Record<Role, string> = { student: 'Student', organization: 'CCS Student Organization', professor: 'Professor', chair: 'Program Chair', dean: 'Dean', administrator: 'Administrator / Moderator', guidance: 'Guidance', osas: 'OSAS', secretary: 'CCS Secretary' }
 export const programs = ['BSIT', 'BSCS', 'BSIS'] as const
 /** The ways a student can choose to talk about a concern. */
 export const talkModes = ['chat', 'video', 'voice', 'face_to_face'] as const

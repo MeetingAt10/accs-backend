@@ -22,7 +22,7 @@ const cookieOf = (response: { headers: Record<string, unknown> }) => String((res
 
 describe('ALL-01 sign-in', () => {
   it('ALL-01-A / ALL-01-H signs each role in to its own view: the session lists exactly the pages that role may open', async () => {
-    for (const id of ['QCU-STU-IT-A', 'QCU-PROF-IT', 'QCU-CHAIR-IT', 'CCS-DEAN', 'QCU-GUIDANCE', 'QCU-OSAS', 'QCU-STAFF', 'QCU-ORG', 'QCU-ADMIN']) {
+    for (const id of ['QCU-STU-IT-A', 'QCU-PROF-IT', 'QCU-CHAIR-IT', 'CCS-DEAN', 'QCU-GUIDANCE', 'QCU-OSAS', 'QCU-ORG', 'QCU-ADMIN']) {
       const response = await signIn(id)
       expect(response.status, id).toBe(200)
       const { user, allowedPages } = response.body
@@ -67,18 +67,6 @@ describe('ALL-01 sign-in', () => {
     expect((await agent.get('/api/session')).status).toBe(200)
     expect((await agent.post('/api/auth/sign-out').send({})).status).toBe(200)
     expect((await agent.get('/api/session')).status).toBe(401)
-  })
-})
-
-describe('STF-01 staff workspace', () => {
-  it('STF-01-V / STF-01-B signs staff in to their pages and keeps rosters and reports restricted', async () => {
-    const staff = await login('QCU-STAFF')
-    const { allowedPages } = (await staff.get('/api/session')).body
-    for (const pageId of ['P07', 'P08', 'P20', 'P21', 'P22']) {
-      expect(allowedPages).not.toContain(pageId)
-      expect((await staff.get(`/api/pages/${pageId}`)).status, pageId).toBe(403)
-    }
-    expect((await staff.get('/api/pages/P03')).status).toBe(200)
   })
 })
 

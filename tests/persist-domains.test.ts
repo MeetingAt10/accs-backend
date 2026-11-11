@@ -47,19 +47,19 @@ describe('collections that are not plain rows', () => {
     const { store, cold } = stack()
     await cold().transact((unit) => {
       const db = unit.read()
-      db.permissionOverrides['staff:post.create'] = false
-      db.permissionOverrides['staff:post.comment'] = true
+      db.permissionOverrides['organization:post.create'] = false
+      db.permissionOverrides['organization:post.comment'] = true
       db.drafts['QCU-STU-CS'] = { narrative: 'Unfinished' }
       db.settings['QCU-STU-CS'] = { theme: 'dark', density: 'compact', priorities: {} }
     })
     expect(store.all().map((item) => [item.table, item.collection, item.id]).sort()).toEqual([
       ['ccs_assistant', 'drafts', 'QCU-STU-CS'],
-      ['ccs_identity', 'permissionOverrides', 'staff:post.comment'],
-      ['ccs_identity', 'permissionOverrides', 'staff:post.create'],
+      ['ccs_identity', 'permissionOverrides', 'organization:post.comment'],
+      ['ccs_identity', 'permissionOverrides', 'organization:post.create'],
       ['ccs_notification', 'settings', 'QCU-STU-CS'],
     ])
     const db = await cold().view((unit) => unit.read())
-    expect(db.permissionOverrides).toEqual({ 'staff:post.create': false, 'staff:post.comment': true })
+    expect(db.permissionOverrides).toEqual({ 'organization:post.create': false, 'organization:post.comment': true })
     expect(db.drafts['QCU-STU-CS']).toEqual({ narrative: 'Unfinished' })
     expect(db.settings['QCU-STU-CS']?.theme).toBe('dark')
   })
@@ -116,7 +116,7 @@ const writes: { collection: string; table: string; step: Step }[] = [
   { collection: 'settings', table: 'ccs_notification', step: { as: 'QCU-STU-IT-A', page: 'P43', action: 'saveSettings', payload: { theme: 'dark', density: 'compact' } } },
   { collection: 'drafts', table: 'ccs_assistant', step: { as: 'QCU-STU-IT-A', page: 'P19', action: 'saveDraft', payload: { narrative: 'Unfinished concern' } } },
   { collection: 'telemetry', table: 'ccs_assistant', step: { as: 'QCU-STU-IT-A', page: 'P41', action: 'assistantAsk', payload: { question: 'Show my schedule' } } },
-  { collection: 'permissionOverrides', table: 'ccs_identity', step: { as: 'QCU-ADMIN', page: 'P48', action: 'updatePermission', reason: 'Proposal', payload: { role: 'staff', permission: 'post.create', allowed: false } } },
+  { collection: 'permissionOverrides', table: 'ccs_identity', step: { as: 'QCU-ADMIN', page: 'P48', action: 'updatePermission', reason: 'Proposal', payload: { role: 'organization', permission: 'post.create', allowed: false } } },
 ]
 
 describe('a route writes through one instance', () => {
@@ -209,10 +209,10 @@ describe('accounts across a restart', () => {
   it('keeps P46/P47 role grants after a restart', async () => {
     const { instance } = stack()
     const { agent: admin } = await signIn(instance(), 'QCU-ADMIN')
-    const granted = await admin.post('/api/pages/P47/actions').send({ action: 'updateRoles', recordId: 'QCU-STAFF', reason: 'New duties', payload: { roles: ['staff', 'guidance'] } })
+    const granted = await admin.post('/api/pages/P47/actions').send({ action: 'updateRoles', recordId: 'QCU-ORG', reason: 'New duties', payload: { roles: ['organization', 'guidance'] } })
     expect(granted.status, JSON.stringify(granted.body)).toBe(200)
-    const { agent: restarted } = await signIn(instance(), 'QCU-STAFF')
-    expect((await restarted.get('/api/session')).body.user.roles).toEqual(['staff', 'guidance'])
+    const { agent: restarted } = await signIn(instance(), 'QCU-ORG')
+    expect((await restarted.get('/api/session')).body.user.roles).toEqual(['organization', 'guidance'])
   })
 })
 
@@ -220,7 +220,7 @@ describe('the record repository behaves like memory', () => {
   beforeAll(() => { vi.spyOn(console, 'log').mockImplementation(() => {}) })
   afterAll(() => vi.restoreAllMocks())
 
-  const accounts = ['QCU-STU-IT-A', 'QCU-ORG', 'QCU-PROF-IT', 'QCU-STAFF', 'QCU-CHAIR-IT', 'CCS-DEAN', 'QCU-ADMIN', 'QCU-GUIDANCE', 'QCU-OSAS']
+  const accounts = ['QCU-STU-IT-A', 'QCU-ORG', 'QCU-PROF-IT', 'QCU-CHAIR-IT', 'CCS-DEAN', 'QCU-ADMIN', 'QCU-GUIDANCE', 'QCU-OSAS']
   const pageIds = Array.from({ length: 50 }, (_, n) => `P${String(n + 3).padStart(2, '0')}`)
 
   it.each(accounts)('%s gets the same status on every page', async (id) => {
