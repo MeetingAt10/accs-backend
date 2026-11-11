@@ -414,6 +414,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       expect((await secretary.get('/api/accounts').query({ role: 'student' })).body.total).toBe(4 + 2)
     })
 
+    // Hashing 25 passwords takes about 3 seconds alone, more when the whole suite runs in parallel.
     it('accepts at most 25 students a request', async () => {
       const { app } = setup()
       const secretary = await secretarySession(app)
@@ -422,7 +423,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       expect((await secretary.post('/api/accounts/students').send({ students: rows.slice(0, 25) })).body.record).toMatchObject({ created: 25, failed: 0 })
       expect((await secretary.post('/api/accounts/students').send({ students: [] })).status).toBe(400)
       expect((await secretary.post('/api/accounts/students').send({})).status).toBe(400)
-    })
+    }), 20_000
 
     it('lists accounts for the secretary by role and search', async () => {
       const { app } = setup()

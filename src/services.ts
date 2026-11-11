@@ -504,7 +504,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
       }))
       break
     }
-    case'P26':Object.assign(data,{assignments:db.assignments.filter(a=>a.evaluatorId===user.id&&(isStudentForm(a)||a.submittedAt)&&['Published','Closed'].includes(find(db.cycles,a.cycleId).status)).map(a=>assignmentView(db,a)),reviewCycles:hasRole(user,'professor')?db.cycles.filter(c=>c.status==='In review'&&db.assignments.some(a=>a.cycleId===c.id&&a.facultyId===user.id)):[],canConfigure:hasRole(user,'dean'),canViewResults:hasPermission(user,'evaluation.results')});break
+    case'P26':Object.assign(data,{completion:hasRole(user,'student')?evaluationCycles(db).map(c=>evaluationCompletion(db,user.id,c)):undefined,assignments:db.assignments.filter(a=>a.evaluatorId===user.id&&(isStudentForm(a)||a.submittedAt)&&['Published','Closed'].includes(find(db.cycles,a.cycleId).status)).map(a=>assignmentView(db,a)),reviewCycles:hasRole(user,'professor')?db.cycles.filter(c=>c.status==='In review'&&db.assignments.some(a=>a.cycleId===c.id&&a.facultyId===user.id)):[],canConfigure:hasRole(user,'dean'),canViewResults:hasPermission(user,'evaluation.results')});break
     case'P27':{const a=pick(db.assignments.filter(a=>a.evaluatorId===user.id),query.id);if(a)data.record=assignmentView(db,a,true);break}
     case 'P28':
     case 'P29': {
@@ -614,6 +614,19 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
       break
     }
     case'P32':{const c=pick(db.cycles.filter(c=>db.assignments.some(a=>a.cycleId===c.id&&a.facultyId===user.id)),query.id);if(c){data.record={...c,reviews:c.reviews.filter(r=>r.userId===user.id)};data.canReview=c.status==='In review'&&!c.reviews.some(r=>r.userId===user.id)}break}
+    case'P53':{
+      const cycles=evaluationCycles(db)
+      const cycle=query.cycle?cycles.find(c=>c.id===query.cycle):cycles[0]
+      if(query.cycle&&!cycle)throw unavailable()
+      const students=clearanceStudents(db,user).filter(u=>(!query.program||u.program===query.program)&&(!query.year||String(u.year??'')===query.year)&&(!query.section||u.section===query.section)&&match(`${u.name} ${u.studentId??''}`))
+      const rows=students.map(u=>({student:person(u),program:u.program,year:u.year,section:u.section,evaluation:cycle?evaluationCompletion(db,u.id,cycle):undefined}))
+      const statuses=query.status?.split(',').map(s=>s.trim()).filter(Boolean)??[]
+      Object.assign(data,{cycles:cycles.map(c=>({id:c.id,title:c.title,status:c.status,opens:c.opens,closes:c.closes})),cycle:cycle&&{id:cycle.id,title:cycle.title,status:cycle.status,closes:cycle.closes},
+        students:rows.filter(r=>!statuses.length||r.evaluation&&statuses.includes(r.evaluation.status)),
+        summary:cycle?Object.fromEntries((['submitted','pending','missing','none'] as const).map(s=>[s,rows.filter(r=>r.evaluation?.status===s).length])):undefined,
+        filters:{programs:[...new Set(clearanceStudents(db,user).map(u=>u.program).filter(Boolean))].sort(),scope:hasRole(user,'secretary','dean','osas')?'College of Computer Studies':`${user.program} program`}})
+      break
+    }
     case'P33':data.students=db.users.filter(u=>canStudentRecord(db,user,u)&&match(`${u.name} ${u.studentId}`)).map(u=>person(refreshRestrictions(db,u)));break
     case'P34':{if(!query.purpose){data.purposeRequired=true;break}const students=db.users.filter(u=>canStudentRecord(db,user,u));const s=pick(students,query.id);if(s){const entry=audit(repo,user,'Record opened','records',s.studentId??s.id,query.purpose);data.record={...person(refreshRestrictions(db,s)),offenses:db.offenses.filter(o=>o.studentId===s.id),restrictions:restrictionViews(db,user,s.id),goodMoral:hasPermission(user,'goodmoral.review')?db.goodMoral.find(g=>g.studentId===s.id):undefined,strikes:strikeViews(db,s.id),strikeSettlements:db.strikeSettlements.filter(x=>x.studentId===s.id).map(x=>({id:x.id,kind:x.kind,reference:x.reference,note:x.note,at:x.at,strikeCount:x.strikeIds.length,settledBy:author(db,x.actorId)})),clearance:clearanceView(db,s.id),canRecordStrikes:hasPermission(user,'strike.record'),canRecommendStrikes:hasPermission(user,'strike.recommend'),openedAt:entry.at,accessHistory:hasRole(user,'dean')?safeAudit(db,db.audit.filter(a=>a.action==='Record opened'&&a.reference===(s.studentId??s.id))):undefined}}break}
     case'P35':{const students=db.users.filter(u=>hasRole(u,'student')&&(hasRole(user,'administrator')||canStudentRecord(db,user,u)));data.students=students.map(u=>person(refreshRestrictions(db,u)));data.restrictions=restrictionViews(db,user);data.referrals=db.referrals.filter(r=>hasRole(user,'administrator')||r.actorId===user.id).map(r=>({...r,student:person(find(db.users,r.studentId)),actor:author(db,r.actorId)}));data.canApply=hasRole(user,'administrator');break}
@@ -659,6 +672,20 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
 export const studentForm = 'student'
 export const studentRelation = 'Student to faculty'
 const isStudentForm = (a:Assignment) => a.relation === studentRelation
+// Evaluation completion (#33, baseline chapter 9.2). Per student and cycle: finished when every student-form evaluation is
+// submitted, not finished while the cycle is open, missing once the cycle is closed. A student with nothing to evaluate
+// in a cycle has status "none". Only published and closed cycles count; the current cycle is the latest of them.
+export type CompletionStatus = 'submitted' | 'pending' | 'missing' | 'none'
+const completionLabels: Record<CompletionStatus,string> = { submitted: 'Finished', pending: 'Not finished', missing: 'Missing', none: 'Nothing to evaluate' }
+function evaluationCycles(db:Database) { return db.cycles.filter(c=>['Published','Closed'].includes(c.status)).sort((a,b)=>b.opens.localeCompare(a.opens)||b.id.localeCompare(a.id)) }
+function evaluationCompletion(db:Database,studentId:string,cycle:Cycle) {
+  const mine=db.assignments.filter(a=>a.cycleId===cycle.id&&a.evaluatorId===studentId&&isStudentForm(a))
+  const submitted=mine.filter(a=>a.submittedAt).length
+  const status:CompletionStatus=!mine.length?'none':submitted===mine.length?'submitted':cycle.status==='Closed'?'missing':'pending'
+  return {cycleId:cycle.id,cycleTitle:cycle.title,cycleStatus:cycle.status,closes:cycle.closes,status,label:completionLabels[status],submitted,total:mine.length}
+}
+/** The students whose clearance this person may see: the whole college, or the Program Chair's own program. */
+function clearanceStudents(db:Database,user:User) { return db.users.filter(u=>hasRole(u,'student')&&u.active&&(hasRole(user,'secretary','dean','osas')||hasRole(user,'chair')&&u.program===user.program)) }
 function ensureCycleAssignments(repo:UnitOfWork,cycle:Cycle){
   const db=repo.read()
   const add=(evaluatorId:string,facultyId:string,relation:string,subject:string)=>{if(!db.assignments.some(a=>a.cycleId===cycle.id&&a.evaluatorId===evaluatorId&&a.facultyId===facultyId&&a.relation===relation))db.assignments.push({id:repo.nextId('EVAL'),evaluatorId,facultyId,cycleId:cycle.id,relation,subject})}
