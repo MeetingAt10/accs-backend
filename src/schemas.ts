@@ -185,7 +185,9 @@ export const actionPayloads = {
   reviewGoodMoral: z.object({ status: z.enum(['Pending QCU review', 'Prerequisites reviewed', 'Further review needed']), decisionSource: text.max(200), notes: z.string().max(2000).default('') }).strict(),
   applyRestriction: z.object({ studentId: z.string(), features: z.array(z.enum(['post.create', 'post.comment', 'report.anonymous'])).min(1), basis: text.max(500), until: date, decisionReference: text.max(100) }).strict(),
   liftRestriction: z.object({}).strict(),
-  recordStrike: z.object({ studentId: z.string().min(1), reportId: z.string().min(1), kind: z.enum(['report', 'no-show']), note: text.max(1000) }).strict(),
+  // The Dean recommends a strike on a case with the Dean; OSAS confirms or rejects it on the case at OSAS.
+  recommendStrike: z.object({ studentId: z.string().min(1), reportId: z.string().min(1), note: text.max(1000) }).strict(),
+  decideStrike: z.object({ strikeId: z.string().min(1), decision: z.enum(['confirm', 'reject']), note: z.string().trim().max(1000).default('') }).strict(),
   settleStrikes: z.object({ studentId: z.string().min(1), kind: z.enum(['letter', 'reprimand']), reference: text.max(100), note: z.string().max(1000).default('') }).strict(),
   referRestriction: z.object({ studentId: z.string(), change: z.enum(['Lift', 'Shorten', 'Extend', 'Review']), decisionReference: z.string().max(100).optional() }).strict(),
   saveProfile: z.object({ title: z.string().max(100), bio: z.string().max(1000), education: z.string().max(500), officeHours: z.string().max(200) }).strict(),
