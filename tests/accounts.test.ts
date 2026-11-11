@@ -423,7 +423,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       expect((await secretary.post('/api/accounts/students').send({ students: rows.slice(0, 25) })).body.record).toMatchObject({ created: 25, failed: 0 })
       expect((await secretary.post('/api/accounts/students').send({ students: [] })).status).toBe(400)
       expect((await secretary.post('/api/accounts/students').send({})).status).toBe(400)
-    }), 20_000
+    }, 20_000)
 
     it('lists accounts for the secretary by role and search', async () => {
       const { app } = setup()

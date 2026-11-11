@@ -153,6 +153,9 @@ When a student files a concern, each office receiving it (the adviser, or the Pr
 
 The deployed stacks do not set `MAIL_FROM` yet. Sending needs a verified SES identity, the `MAIL_FROM` variable on the Lambda, and `ses:SendEmail` on that identity in `accs-architecture`.
 
+## Flagged content
+Flagged content is hidden until it is reviewed (#43). While a post, comment or message has a moderation item that is `Pending` (a user's flag or a word-filter match) or referred to the CCS Secretary, it is left out of feeds, post pages, comment lists and counts, conversations and their last message, and the calendar (for an announcement's event). Its author and the reviewers still see it, marked `underReview: true`: moderators always, the Secretary once it is referred. Commenting on or reacting to a held post is a 404 for anyone else. `keep` shows it again; `remove` and `warn` work as before. An announcement caught by the word filter notifies its members only once it is kept.
+
 ## Notification rules
 - **Required categories:** Report, Case and Evaluation updates cannot be muted (`requiredNotificationCategories`; case and evaluation added for #42). Saving `muted` for one is a 400 ("Case updates cannot be muted."), and a mute saved earlier is ignored. P44 lists the account's required categories in `requiredCategories`. Restriction and role notifications are not categories a user can set, so they are always delivered.
 - **Urgent announcements** reach members who muted announcements, as high priority.
