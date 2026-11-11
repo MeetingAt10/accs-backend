@@ -56,7 +56,8 @@ export type Event = {
   place?: string
   contact?: string
 }
-export type Space = { id: string; title: string; program: string; section: string; subject: string; professorIds: string[]; studentIds: string[] }
+/** A section space carries its campus and year (#46); its title is the section name, like SBIT3A. Subject spaces may too. */
+export type Space = { id: string; title: string; program: string; section: string; campus?: string; year?: number; subject: string; professorIds: string[]; studentIds: string[] }
 export type Organization = { id: string; name: string; description: string; representativeId: string; memberIds: string[] }
 export type Thread = {
   id: string
@@ -136,10 +137,10 @@ export const newUser = user
 const at = '2026-10-20T02:00:00.000Z'
 export function seed(): Database {
   const users: User[] = [
-    user('QCU-STU-IT-A', 'Mira Solis', ['student'], { program: 'BSIT', section: 'A', year: 3, studentId: 'QCU-2024-0101', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], organizationIds: ['ORG-COMPUTING'] }),
-    user('QCU-STU-IT-B', 'Luca Reed', ['student'], { program: 'BSIT', section: 'B', year: 3, studentId: 'QCU-2024-0102', adviserId: 'QCU-PROF-OTHER', spaceIds: ['SPACE-IT-B'] }),
-    user('QCU-STU-CS', 'Noa Vale', ['student'], { program: 'BSCS', section: 'A', year: 2, studentId: 'QCU-2025-0201', adviserId: 'QCU-PROF-CS', spaceIds: ['SPACE-CS-A'] }),
-    user('QCU-STU-RESTRICTED', 'Tess Finch', ['student'], { program: 'BSIT', section: 'A', year: 3, studentId: 'QCU-2024-0103', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], restrictions: ['post.create', 'post.comment', 'report.anonymous'] }),
+    user('QCU-STU-IT-A', 'Mira Solis', ['student'], { campus: 'SB', program: 'BSIT', section: 'A', year: 3, studentId: 'QCU-2024-0101', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], organizationIds: ['ORG-COMPUTING'] }),
+    user('QCU-STU-IT-B', 'Luca Reed', ['student'], { campus: 'SB', program: 'BSIT', section: 'B', year: 3, studentId: 'QCU-2024-0102', adviserId: 'QCU-PROF-OTHER', spaceIds: ['SPACE-IT-B'] }),
+    user('QCU-STU-CS', 'Noa Vale', ['student'], { campus: 'SB', program: 'BSCS', section: 'A', year: 2, studentId: 'QCU-2025-0201', adviserId: 'QCU-PROF-CS', spaceIds: ['SPACE-CS-A'] }),
+    user('QCU-STU-RESTRICTED', 'Tess Finch', ['student'], { campus: 'SB', program: 'BSIT', section: 'A', year: 3, studentId: 'QCU-2024-0103', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], restrictions: ['post.create', 'post.comment', 'report.anonymous'] }),
     user('QCU-ORG', 'Computing Society Representative', ['organization'], { organizationId: 'ORG-COMPUTING', organizationIds: ['ORG-COMPUTING'], office: 'CCS Organizations', title: 'Organization representative' }),
     user('QCU-PROF-IT', 'Prof. Robin Elm', ['professor'], { program: 'BSIT', office: 'CCS Faculty Room', title: 'Faculty, BSIT adviser', bio: 'Teaches Data Structures and advises BSIT 3A.', officeHours: 'Thursdays, 10:00 AM to 12:00 PM, CCS Faculty Room', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'] }),
     user('QCU-PROF-OTHER', 'Prof. Rowan Quill', ['professor'], { program: 'BSIT', office: 'CCS Faculty Room', title: 'Faculty, BSIT', bio: 'Advises BSIT 3B.', officeHours: 'Thursdays, 9:00 AM to 11:00 AM, CCS Faculty Room', spaceIds: ['SPACE-IT-B'] }),
@@ -154,10 +155,10 @@ export function seed(): Database {
     user('QCU-SECRETARY', 'CCS Secretary', ['secretary'], { active: false, email: 'secretary@example.invalid', office: 'CCS Office', title: 'CCS secretary', officeHours: 'Monday to Friday, 8:00 AM to 5:00 PM' }),
   ]
   const spaces: Space[] = [
-    { id: 'SPACE-IT-A', title: 'BSIT 3A', program: 'BSIT', section: 'A', subject: 'Section group', professorIds: ['QCU-PROF-IT'], studentIds: ['QCU-STU-IT-A', 'QCU-STU-RESTRICTED'] },
-    { id: 'SUBJECT-IT-DS', title: 'Data Structures, BSIT 3A', program: 'BSIT', section: 'A', subject: 'CC 104 Data Structures', professorIds: ['QCU-PROF-IT', 'QCU-CHAIR-IT'], studentIds: ['QCU-STU-IT-A', 'QCU-STU-RESTRICTED'] },
-    { id: 'SPACE-IT-B', title: 'BSIT 3B', program: 'BSIT', section: 'B', subject: 'Section group', professorIds: ['QCU-PROF-OTHER'], studentIds: ['QCU-STU-IT-B'] },
-    { id: 'SPACE-CS-A', title: 'BSCS 2A', program: 'BSCS', section: 'A', subject: 'Section group', professorIds: ['QCU-PROF-CS'], studentIds: ['QCU-STU-CS'] },
+    { id: 'SPACE-IT-A', title: 'SBIT3A', program: 'BSIT', section: 'A', campus: 'SB', year: 3, subject: 'Section group', professorIds: ['QCU-PROF-IT'], studentIds: ['QCU-STU-IT-A', 'QCU-STU-RESTRICTED'] },
+    { id: 'SUBJECT-IT-DS', title: 'Data Structures, SBIT3A', program: 'BSIT', section: 'A', campus: 'SB', year: 3, subject: 'CC 104 Data Structures', professorIds: ['QCU-PROF-IT', 'QCU-CHAIR-IT'], studentIds: ['QCU-STU-IT-A', 'QCU-STU-RESTRICTED'] },
+    { id: 'SPACE-IT-B', title: 'SBIT3B', program: 'BSIT', section: 'B', campus: 'SB', year: 3, subject: 'Section group', professorIds: ['QCU-PROF-OTHER'], studentIds: ['QCU-STU-IT-B'] },
+    { id: 'SPACE-CS-A', title: 'SBCS2A', program: 'BSCS', section: 'A', campus: 'SB', year: 2, subject: 'Section group', professorIds: ['QCU-PROF-CS'], studentIds: ['QCU-STU-CS'] },
   ]
   const post = (id: string, authorId: string, title: string, body: string, audience = 'college', anonymous = false, kind: Post['kind'] = 'discussion'): Post => ({ id, authorId, title, body, audience, anonymous, kind, label: kind === 'announcement' ? 'Announcement' : 'Discussion', priority: 'general', private: audience.startsWith('organization:'), at, reactions: [], comments: [], removed: false })
   const posts = [post('POST-0101', 'CCS-DEAN', 'Appointment week starts October 29', 'Faculty appointment times open October 29 at the CCS Faculty Room. Request a time under Appointments and wait for your professor to confirm.', 'college', false, 'announcement'), post('POST-0102', 'QCU-STU-IT-A', 'Is IC 301 open for our group activity?', 'The lab timetable changed on Monday. Which IC 301 slots are free next week? Our group needs two hours for the Data Structures activity.', 'program:BSIT', true), post('POST-0103', 'QCU-PROF-IT', 'Data Structures practice set', 'The practice set on linked lists and stacks is posted. Bring your questions to our next meeting in IC 301.', 'space:SUBJECT-IT-DS', false, 'announcement'), post('POST-0104', 'QCU-ORG', 'Workshop agenda draft', 'Members, please read the draft agenda for the Intro to Git workshop and send corrections before Friday.', 'organization:ORG-COMPUTING'), post('POST-0105', 'QCU-ORG', 'Intro to Git workshop', 'Open to all CCS students. November 5, 1:00 PM to 3:00 PM at IC 305. Bring your laptop.')]

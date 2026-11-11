@@ -15,6 +15,7 @@ import {
 } from './schemas.js'
 import { ApiError, deny, unavailable, type AccountChange, type ProfileChange } from './services.js'
 import type { SessionStore } from './sessions.js'
+import { mainCampus } from './sections.js'
 import { demoUserIds, newUser, type Database, type Repository } from './store.js'
 
 // Account provisioning. The Dean activates the secretary; the secretary creates faculty and students, assigns advisers
@@ -195,7 +196,7 @@ export async function recordAudit(repository: Repository, by: User, entries: { a
 export type AccountDeps = { repository: Repository; authStore: AuthStore; sessions: SessionStore; mailer: InviteMailer }
 
 const summary = (account: User) => ({
-  id: account.id, name: account.name, email: account.email, roles: account.roles, program: account.program, section: account.section, year: account.year,
+  id: account.id, name: account.name, email: account.email, roles: account.roles, program: account.program, section: account.section, campus: account.campus, year: account.year,
   studentId: account.studentId, adviserId: account.adviserId, active: account.active, mustChangeCredentials: account.mustChangeCredentials,
 })
 const byName = (a: User, b: User) => a.name.localeCompare(b.name)
@@ -297,11 +298,11 @@ export function accountRouter({ repository, authStore, sessions, mailer }: Accou
 
   /** Creates one account per valid row and answers with a result per row, in the order sent. */
   async function create(req: Request, res: Response, kind: 'faculty' | 'student', rows: unknown[]) {
-    type Row = { name: string; email: string; program: string; studentId?: string; section?: string; year?: number }
+    type Row = { name: string; email: string; program: string; studentId?: string; section?: string; year?: number; campus?: string }
     type Failure = { index: number; status: 'error'; code: string; error: string; fields?: { path: string; message: string }[] }
     const student = kind === 'student'
     const schema: ZodType<Row> = student ? studentRowSchema : facultyRowSchema
-    const { all, spaces } = await repository.view((unit) => ({ all: unit.read().users, spaces: unit.read().spaces.map(({ id, program, section }) => ({ id, program, section })) }), [])
+    const { all, spaces } = await repository.view((unit) => ({ all: unit.read().users, spaces: unit.read().spaces.map(({ id, program, section, campus, year }) => ({ id, program, section, campus, year })) }), [])
     // Marks the row's email and student ID as used, or says which one already is.
     const claim = (row: Row, taken: Set<string>) => {
       const code = taken.has(row.email) ? 'DUPLICATE_EMAIL' : row.studentId && taken.has(row.studentId.toLowerCase()) ? 'DUPLICATE_ID' : undefined
@@ -346,7 +347,9 @@ export function accountRouter({ repository, authStore, sessions, mailer }: Accou
           taken.add(username)
           const account = newUser(`USR-${ulid()}`, row.name, [student ? 'student' : 'professor'], {
             email: row.email, program: row.program, active: true, username, mustChangeCredentials: true,
-            ...(student ? { section: row.section, year: row.year, studentId: row.studentId, spaceIds: spaces.filter((space) => space.program === row.program && space.section === row.section).map((space) => space.id) } : {}),
+            // A student joins the spaces of their section: same campus, program, year and letter (#46). A space stored without
+            // a campus or year is at San Bartolome and open to any year, as before.
+            ...(student ? { section: row.section, year: row.year, campus: row.campus, studentId: row.studentId, spaceIds: spaces.filter((space) => space.program === row.program && space.section === row.section && (space.campus ?? mainCampus) === row.campus && (space.year === undefined || space.year === row.year)).map((space) => space.id) } : {}),
           })
           const adviserId = student ? resolveAdviser(account, data.advisorAssignments, accounts) : undefined
           if (adviserId) account.adviserId = adviserId

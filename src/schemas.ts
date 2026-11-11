@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { campusCodes, campusYearProblem, mainCampus } from './sections.js'
+
 import { passwordProblem } from './auth.js'
 
 // The CCS Staff role was removed on 11 November 2026 (#45); stored accounts with only that role are deactivated.
@@ -11,7 +13,7 @@ export const programs = ['BSIT', 'BSCS', 'BSIS'] as const
 /** The ways a student can choose to talk about a concern. */
 export const talkModes = ['chat', 'video', 'voice', 'face_to_face'] as const
 export type TalkMode = (typeof talkModes)[number]
-export const userSchema = z.object({ id: z.string(), name: z.string(), email: z.email(), roles: z.array(roleSchema), program: z.string().optional(), section: z.string().optional(), office: z.string().optional(), organizationId: z.string().optional(), restrictions: z.array(z.string()), title: z.string(), bio: z.string(), education: z.string(), officeHours: z.string(), year: z.number().optional(), studentId: z.string().optional(), spaceIds: z.array(z.string()), organizationIds: z.array(z.string()), adviserId: z.string().optional(), active: z.boolean(), username: z.string().optional(), mustChangeCredentials: z.boolean().optional() })
+export const userSchema = z.object({ id: z.string(), name: z.string(), email: z.email(), roles: z.array(roleSchema), program: z.string().optional(), section: z.string().optional(), campus: z.string().optional(), office: z.string().optional(), organizationId: z.string().optional(), restrictions: z.array(z.string()), title: z.string(), bio: z.string(), education: z.string(), officeHours: z.string(), year: z.number().optional(), studentId: z.string().optional(), spaceIds: z.array(z.string()), organizationIds: z.array(z.string()), adviserId: z.string().optional(), active: z.boolean(), username: z.string().optional(), mustChangeCredentials: z.boolean().optional() })
 export type User = z.infer<typeof userSchema>
 export const pageIdSchema = z.string().regex(/^P(0[1-9]|[1-4][0-9]|5[0-3])$/)
 export const pageQuerySchema = z.object({ id: z.string().max(100).optional(), q: z.string().max(200).optional(), tab: z.string().max(50).optional(), status: z.string().max(50).optional(), program: z.string().max(20).optional(), year: z.string().max(4).optional(), section: z.string().max(20).optional(), clearance: z.enum(['clear','on_hold']).optional(), category: z.string().max(80).optional(), stage: z.string().max(40).optional(), period: z.string().max(40).optional(), from: z.string().max(40).optional(), to: z.string().max(40).optional(), severity: z.enum(['low','medium','high']).optional(), cycle: z.string().max(100).optional(), label: z.string().max(80).optional(), scope: z.string().max(100).optional(), space: z.string().max(100).optional(), priority: z.string().max(30).optional(), type: z.string().max(40).optional(), source: z.string().max(30).optional(), role: roleSchema.optional(), office: z.string().max(100).optional(), view: z.enum(['month','week','list']).optional(), date: z.string().max(40).optional(), layers: z.string().max(200).optional(), sort: z.string().max(40).optional(), received: z.string().max(40).optional(), unread: z.enum(['true','false']).optional(), standing: z.string().max(60).optional(), recipient: z.string().max(100).optional(), hasRestriction: z.enum(['true','false']).optional(), purpose: z.enum(['Case handling', 'Good Moral review', 'Restriction review', 'Program oversight']).optional(), page: z.coerce.number().int().min(1).max(10000).optional() }).strict()
@@ -53,6 +55,13 @@ export const studentRowSchema = z.object({
   program: accountProgram,
   year: z.coerce.number({ error: 'Choose a year level from 1 to 4.' }).int('Choose a year level from 1 to 4.').min(1, 'Choose a year level from 1 to 4.').max(4, 'Choose a year level from 1 to 4.'),
   section: z.string({ error: 'Enter the section.' }).trim().toUpperCase().regex(/^[A-Z0-9]{1,10}$/, 'Use the section letter, like A.'),
+  // SB, BAT or SF (src/sections.ts). Left out, the student is at San Bartolome, so the current import screen keeps working.
+  campus: z.string().trim().toUpperCase().pipe(z.enum(campusCodes, { error: 'Choose SB (San Bartolome), BAT (Batasan) or SF (San Francisco).' })).default(mainCampus),
+}).superRefine((row, ctx) => {
+  // Only once the year itself is valid; an invalid year already has its own message.
+  if (!Number.isInteger(row.year) || row.year < 1 || row.year > 4) return
+  const problem = campusYearProblem(row.campus, row.year)
+  if (problem) ctx.addIssue({ code: 'custom', path: ['campus'], message: problem })
 })
 export const createFacultySchema = z.object({ faculty: z.array(z.unknown()).min(1).max(batchLimit).optional() }).catchall(z.unknown())
 export const importStudentsSchema = z.object({ students: z.array(z.unknown()).min(1).max(batchLimit) }).strict()
@@ -65,7 +74,7 @@ export const programParamsSchema = z.object({ program: z.enum(programs) }).stric
 export const setChairSchema = z.object({ facultyId: z.string().trim().min(1).max(64) }).strict()
 export const accountsQuerySchema = z.object({ role: roleSchema.optional(), q: z.string().max(200).optional() }).strict()
 export const facultyQuerySchema = z.object({ q: z.string().max(200).optional(), program: z.enum(programs).optional() }).strict()
-const accountSummarySchema = z.object({ id: z.string(), name: z.string(), email: z.string(), roles: z.array(roleSchema), program: z.string().optional(), section: z.string().optional(), year: z.number().optional(), studentId: z.string().optional(), adviserId: z.string().optional(), active: z.boolean(), mustChangeCredentials: z.boolean().optional() })
+const accountSummarySchema = z.object({ id: z.string(), name: z.string(), email: z.string(), roles: z.array(roleSchema), program: z.string().optional(), section: z.string().optional(), campus: z.string().optional(), year: z.number().optional(), studentId: z.string().optional(), adviserId: z.string().optional(), active: z.boolean(), mustChangeCredentials: z.boolean().optional() })
 export const accountTypesResponseSchema = z.object({
   types: z.array(z.object({ type: z.enum(['secretary', 'faculty', 'advisor', 'chair', 'student']), label: z.string(), active: z.number(), inactive: z.number(), canManage: z.boolean() })),
   secretary: accountSummarySchema.optional(),
