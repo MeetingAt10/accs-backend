@@ -74,8 +74,14 @@ export type Cycle = { id: string; title: string; term: string; opens: string; cl
 export type Assignment = { id: string; evaluatorId: string; facultyId: string; cycleId: string; relation: string; subject: string; answers?: Record<string, string | number>; comment?: string; submittedAt?: string }
 export type Restriction = { id: string; studentId: string; features: string[]; basis: string; decisionReference: string; starts: string; until: string; actorId: string; active: boolean }
 export type Referral = { id: string; studentId: string; change: string; decisionReference: string; reason: string; actorId: string; at: string; status: string }
-/** A strike recorded by OSAS against a reported student in a student-on-student complaint: a report or a no-show (#34). */
-export type Strike = { id: string; studentId: string; reportId: string; kind: 'report' | 'no-show'; note: string; actorId: string; at: string }
+/**
+ * A strike against a reported student (#34, decided 11 November 2026). The Dean recommends it while the case is with the
+ * Dean (`actorId`, `at`, `note`); OSAS confirms or rejects it once the case reaches OSAS. Only a confirmed strike counts.
+ * Records stored before this rule have no `status` and were recorded by OSAS, so they count as confirmed. `kind` stays for
+ * those records; no-show strikes are no longer recorded.
+ */
+export type StrikeStatus = 'recommended' | 'confirmed' | 'rejected'
+export type Strike = { id: string; studentId: string; reportId: string; kind: 'report' | 'no-show'; note: string; actorId: string; at: string; status?: StrikeStatus; decidedBy?: string; decidedAt?: string; decisionNote?: string }
 /** OSAS settles a clearance hold with a letter or reprimand. The strikes it covers stay on the record; only the hold lifts. */
 export type StrikeSettlement = { id: string; studentId: string; kind: 'letter' | 'reprimand'; reference: string; note: string; strikeIds: string[]; actorId: string; at: string }
 export type Notification = { id: string; recipientId: string; kind: string; title: string; body: string; priority: string; pageId: string; recordId?: string; at: string; read: boolean }
