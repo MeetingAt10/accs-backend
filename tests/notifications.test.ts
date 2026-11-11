@@ -76,7 +76,7 @@ describe('report updates are required', () => {
   it('lists report as required on the settings page and refuses to mute it, keeping the old preferences', async () => {
     const student = await login(member)
     const page = await student.get('/api/pages/P44')
-    expect(page.body.data.requiredCategories).toEqual(['report'])
+    expect(page.body.data.requiredCategories).toEqual(['report', 'case', 'evaluation'])
     expect(page.body.data.categories).toContain('report')
 
     expect((await student.post('/api/pages/P44/actions').send({ action: 'saveNotificationPreferences', payload: { priorities: { announcement: 'muted' } } })).status).toBe(200)
@@ -105,5 +105,43 @@ describe('report updates are required', () => {
     const page = await organization.get('/api/pages/P44')
     expect(page.body.data.categories).not.toContain('report')
     expect(page.body.data.requiredCategories).toEqual([])
+  })
+})
+
+// Issue #42: Case and Evaluation updates cannot be muted either (baseline chapter 8).
+describe('case and evaluation updates are required', () => {
+  it('lists them as required and refuses to mute each one, saving nothing', async () => {
+    const student = await login(member)
+    expect((await student.get('/api/pages/P44')).body.data.requiredCategories).toEqual(['report', 'case', 'evaluation'])
+    for (const [category, label] of [['case', 'Case updates'], ['evaluation', 'Evaluation updates']]) {
+      const refused = await student.post('/api/pages/P44/actions').send({ action: 'saveNotificationPreferences', payload: { priorities: { [category]: 'muted', announcement: 'high' } } })
+      expect([category, refused.status, refused.body.error]).toEqual([category, 400, `${label} cannot be muted.`])
+    }
+    expect(repo.read().settings[member]?.priorities ?? {}).toEqual({})
+    // Other priorities for them are still allowed.
+    expect((await student.post('/api/pages/P44/actions').send({ action: 'saveNotificationPreferences', payload: { priorities: { case: 'normal', evaluation: 'high' } } })).status).toBe(200)
+  })
+
+  it('lists only the required categories an account has', async () => {
+    expect((await (await login('CCS-DEAN')).get('/api/pages/P44')).body.data.requiredCategories).toEqual(['report', 'case', 'evaluation'])
+    expect((await (await login('QCU-GUIDANCE')).get('/api/pages/P44')).body.data.requiredCategories).toEqual(['report', 'case'])
+  })
+
+  it('delivers a case update even when a mute was saved earlier', async () => {
+    repo.read().settings[member] = { theme: 'system', density: 'comfortable', priorities: { case: 'muted' } }
+    const before = noticesFor(member, 'case').length
+    const professor = await login('QCU-PROF-IT')
+    const acted = await professor.post('/api/pages/P22/actions').send({ action: 'caseAction', recordId: 'RPT-0241', reason: 'Reviewed with the student', payload: { type: 'recordAction', update: 'The adviser reviewed your concern.' } })
+    expect(acted.status, JSON.stringify(acted.body)).toBe(200)
+    expect(noticesFor(member, 'case')).toHaveLength(before + 1)
+  })
+
+  it('delivers an evaluation update even when a mute was saved earlier', async () => {
+    repo.read().settings[member] = { theme: 'system', density: 'comfortable', priorities: { evaluation: 'muted' } }
+    const dean = await login('CCS-DEAN')
+    const before = noticesFor(member, 'evaluation').length
+    const published = await dean.post('/api/pages/P31/actions').send({ action: 'cycleAction', recordId: 'CYCLE-2026-2', payload: { status: 'Published' } })
+    expect(published.status, JSON.stringify(published.body)).toBe(200)
+    expect(noticesFor(member, 'evaluation')).toHaveLength(before + 1)
   })
 })
