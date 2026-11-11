@@ -100,14 +100,14 @@ describe('forgot-password with an email channel', () => {
     const { mailer, sent } = fakeEmail()
     const { app } = await appWith(mailer)
     const expected = (await forgot(app, 'nobody@example.com')).body
-    for (const id of [seeded, 'QCU-ADMIN']) {
+    for (const id of [seeded, 'ACCS-ADMIN']) {
       const response = await forgot(app, id)
       expect(response.status).toBe(200)
       expect(response.body).toEqual(expected)
     }
     expect(sent).toHaveLength(0)
     // No code was issued, so a guess fails.
-    expect((await request(app).post('/api/auth/reset-password').send({ emailOrId: 'QCU-ADMIN', code: '123456', password: next })).status).toBe(400)
+    expect((await request(app).post('/api/auth/reset-password').send({ emailOrId: 'ACCS-ADMIN', code: '123456', password: next })).status).toBe(400)
   })
 
   it('gives the same answer when delivery fails, and logs neither the code nor the address', async () => {

@@ -39,7 +39,7 @@ describe('the CCS Staff role is gone (issue #45)', () => {
 
   it('refuses to give anyone the staff role', async () => {
     const admin = request.agent(app)
-    expect((await admin.post('/api/auth/sign-in').send({ emailOrId: 'QCU-ADMIN', password: seedPassword })).status).toBe(200)
+    expect((await admin.post('/api/auth/sign-in').send({ emailOrId: 'ACCS-ADMIN', password: seedPassword })).status).toBe(200)
     const refused = await admin.post('/api/pages/P47/actions').send({ action: 'updateRoles', recordId: 'QCU-STU-IT-B', reason: 'Office work', payload: { roles: ['staff'] } })
     expect(refused.status).toBe(400)
   })

@@ -1,6 +1,7 @@
 // Account IDs that were renamed. Records stored under an old ID are read under the new one, and the old ID still signs in.
-// QCU-DEAN became CCS-DEAN on 11 November 2026 (team baseline: college office accounts use the CCS prefix).
-export const renamedAccountIds: Readonly<Record<string, string>> = { 'QCU-DEAN': 'CCS-DEAN' }
+// QCU-DEAN became CCS-DEAN on 11 November 2026 (team baseline: college office accounts use the CCS prefix). QCU-ADMIN became
+// ACCS-ADMIN the same day (#40): the System Administrator is a system account, not a QCU one.
+export const renamedAccountIds: Readonly<Record<string, string>> = { 'QCU-DEAN': 'CCS-DEAN', 'QCU-ADMIN': 'ACCS-ADMIN' }
 
 /** The current ID for an ID that may be an old one. */
 export const currentAccountId = (id: string) => renamedAccountIds[id] ?? id

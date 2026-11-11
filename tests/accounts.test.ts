@@ -213,7 +213,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
 
     it('denies students, faculty, and every other role that is not the secretary or the Dean', async () => {
       const { app } = setup()
-      for (const id of ['QCU-STU-IT-A', 'QCU-PROF-IT', 'QCU-CHAIR-IT', 'QCU-ADMIN']) {
+      for (const id of ['QCU-STU-IT-A', 'QCU-PROF-IT', 'QCU-CHAIR-IT', 'ACCS-ADMIN']) {
         const { agent } = await signIn(app, id)
         for (const [method, path, body] of routes) {
           const response = await agent[method](path).send(body)
@@ -261,7 +261,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
     it('keeps the secretary to students, faculty, and chairs, and the secretary account to the Dean', async () => {
       const { app } = setup()
       const secretary = await secretarySession(app)
-      for (const id of ['CCS-DEAN', 'QCU-ADMIN', 'QCU-GUIDANCE', 'QCU-OSAS', 'QCU-ORG']) {
+      for (const id of ['CCS-DEAN', 'ACCS-ADMIN', 'QCU-GUIDANCE', 'QCU-OSAS', 'QCU-ORG']) {
         expect((await secretary.post(`/api/accounts/${id}/active`).send({ active: false })).status, id).toBe(403)
       }
       expect((await signIn(app, 'CCS-DEAN')).response.status).toBe(200)
@@ -286,7 +286,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
 
     it('does not let an administrator switch the secretary on with the shared seed password', async () => {
       const { app } = setup()
-      const { agent: admin } = await signIn(app, 'QCU-ADMIN')
+      const { agent: admin } = await signIn(app, 'ACCS-ADMIN')
       const on = await admin.post('/api/pages/P47/actions').send({ action: 'updateRoles', recordId: 'QCU-SECRETARY', reason: 'Switch on', payload: { roles: ['secretary'], active: true } })
       expect(on.status).toBe(200)
       expect((await signIn(app, 'QCU-SECRETARY', seedPassword)).response.status).toBe(401)
@@ -590,7 +590,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
 
     it('persists a role change made on the administrator pages', async () => {
       const context = setup()
-      const { agent: admin } = await signIn(context.app, 'QCU-ADMIN')
+      const { agent: admin } = await signIn(context.app, 'ACCS-ADMIN')
       const change = await admin.post('/api/pages/P47/actions').send({ action: 'updateRoles', recordId: 'QCU-STU-IT-B', reason: 'Moved to the office', payload: { roles: ['guidance'] } })
       expect(change.status).toBe(200)
       const cold = context.another()

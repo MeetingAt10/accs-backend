@@ -70,7 +70,7 @@ describe('DynamoDB session store', () => {
     const { client, items } = fakeClient()
     const store = createDynamoSessionStore('accs-dev-ccs_identity', client)
     for (const id of ['a', 'b', 'c']) await store.create(session(id))
-    await store.create(session('z', 'QCU-ADMIN'))
+    await store.create(session('z', 'ACCS-ADMIN'))
     // A role-holder entry under the same user key on GSI2 must not be touched.
     items.set('ROLE#x|META', { PK: { S: 'ROLE#x' }, SK: { S: 'META' }, GSI2PK: { S: 'USER#QCU-STU-IT-A' }, GSI2SK: { S: 'ROLE#x' } })
     await store.revoke('a')

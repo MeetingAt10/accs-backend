@@ -122,6 +122,6 @@ describe('the clearance list (P53)', () => {
   })
 
   it('is closed to students, faculty, Guidance and the administrator', async () => {
-    for (const id of ['QCU-STU-IT-A', 'QCU-PROF-IT', 'QCU-GUIDANCE', 'QCU-ADMIN']) expect([id, (await (await login(id)).get('/api/pages/P53')).status]).toEqual([id, 403])
+    for (const id of ['QCU-STU-IT-A', 'QCU-PROF-IT', 'QCU-GUIDANCE', 'ACCS-ADMIN']) expect([id, (await (await login(id)).get('/api/pages/P53')).status]).toEqual([id, 403])
   })
 })

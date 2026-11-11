@@ -18,8 +18,8 @@ describe('reset issuing rule', () => {
       previous = next
     }
     expect(nextReset(previous, { userId: 'u', codeHash: 'h', now: T0 + 30 * minute })).toBe('limit')
-    const admin = nextReset(previous, { userId: 'u', codeHash: 'h', now: T0 + 30 * minute, issuedBy: 'QCU-ADMIN' })
-    expect(admin).toMatchObject({ attempts: 0, issuedBy: 'QCU-ADMIN' })
+    const admin = nextReset(previous, { userId: 'u', codeHash: 'h', now: T0 + 30 * minute, issuedBy: 'ACCS-ADMIN' })
+    expect(admin).toMatchObject({ attempts: 0, issuedBy: 'ACCS-ADMIN' })
     // A new window starts the count again.
     expect(nextReset(previous, { userId: 'u', codeHash: 'h', now: T0 + 61 * minute })).toMatchObject({ issuedCount: 1, windowStart: T0 + 61 * minute })
   })
@@ -99,7 +99,7 @@ describe.each(stores)('%s reset store', (_name, make) => {
     expect(await store.issue({ userId: 'u', codeHash: 'h', now: T0 + 1000 })).toBe('cooldown')
     for (let n = 2; n <= resetPolicy.maxPerWindow; n++) expect(await store.issue({ userId: 'u', codeHash: 'h', now: T0 + n * 2 * minute })).toBe('issued')
     expect(await store.issue({ userId: 'u', codeHash: 'h', now: T0 + 30 * minute })).toBe('limit')
-    expect(await store.issue({ userId: 'u', codeHash: 'h', now: T0 + 30 * minute, issuedBy: 'QCU-ADMIN' })).toBe('issued')
+    expect(await store.issue({ userId: 'u', codeHash: 'h', now: T0 + 30 * minute, issuedBy: 'ACCS-ADMIN' })).toBe('issued')
   })
 })
 

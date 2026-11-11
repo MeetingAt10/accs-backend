@@ -9,7 +9,7 @@ import { createMemoryRepository } from '../src/store.js'
 type Module = { id: string; role: string; name: string; pages: string[] }
 const { modules } = JSON.parse(readFileSync(new URL('./fixtures/doc003-modules.json', import.meta.url), 'utf8')) as { modules: Module[] }
 
-const accounts: Record<string, string> = { student: 'QCU-STU-IT-A', organization: 'QCU-ORG', professor: 'QCU-PROF-IT', chair: 'QCU-CHAIR-IT', dean: 'CCS-DEAN', administrator: 'QCU-ADMIN', guidance: 'QCU-GUIDANCE', osas: 'QCU-OSAS' }
+const accounts: Record<string, string> = { student: 'QCU-STU-IT-A', organization: 'QCU-ORG', professor: 'QCU-PROF-IT', chair: 'QCU-CHAIR-IT', dean: 'CCS-DEAN', administrator: 'ACCS-ADMIN', guidance: 'QCU-GUIDANCE', osas: 'QCU-OSAS' }
 
 describe('DOC003 module inventory', () => {
   it('has the 55 modules per role group in the inventory (the 58 of DOC003 without the President’s Office and CCS Staff)', () => {
