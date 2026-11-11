@@ -48,7 +48,7 @@ describe('status timeline for offices the case moved past (issue #30)', () => {
   })
 
   it('tells the adviser about each later step, but not about its own escalation', async () => {
-    const [student, adviser, chair, dean] = await Promise.all(['QCU-STU-CS', 'QCU-PROF-CS', 'QCU-CHAIR-CS', 'QCU-DEAN'].map(login))
+    const [student, adviser, chair, dean] = await Promise.all(['QCU-STU-CS', 'QCU-PROF-CS', 'QCU-CHAIR-CS', 'CCS-DEAN'].map(login))
     const id = await file(student!)
     const before = caseNotices('QCU-PROF-CS', id)
     expect((await act(adviser!, id, 'escalate')).status).toBe(200)
@@ -62,7 +62,7 @@ describe('status timeline for offices the case moved past (issue #30)', () => {
   })
 
   it('keeps Guidance following a case after forwarding it to OSAS, and tells it about OSAS steps', async () => {
-    const [dean, guidance, osas] = await Promise.all(['QCU-DEAN', 'QCU-GUIDANCE', 'QCU-OSAS'].map(login))
+    const [dean, guidance, osas] = await Promise.all(['CCS-DEAN', 'QCU-GUIDANCE', 'QCU-OSAS'].map(login))
     expect((await act(dean!, 'RPT-0243', 'transfer')).status).toBe(200)
     expect((await act(guidance!, 'RPT-0243', 'convert')).status).toBe(200)
     expect((await act(guidance!, 'RPT-0243', 'transfer')).status).toBe(200)
@@ -76,7 +76,7 @@ describe('status timeline for offices the case moved past (issue #30)', () => {
   })
 
   it('never includes an adviser the concern is about, at any stage', async () => {
-    const [student, chair, dean] = await Promise.all(['QCU-STU-CS', 'QCU-CHAIR-CS', 'QCU-DEAN'].map(login))
+    const [student, chair, dean] = await Promise.all(['QCU-STU-CS', 'QCU-CHAIR-CS', 'CCS-DEAN'].map(login))
     const id = await file(student!, { aboutAdvisor: true })
     expect((await act(chair!, id, 'escalate')).status).toBe(200)
     expect((await act(dean!, id, 'recordAction')).status).toBe(200)
@@ -108,7 +108,7 @@ describe('status timeline for offices the case moved past (issue #30)', () => {
   })
 
   it('leaves the Program Chair and the Dean with the full read-only view after the case moves on', async () => {
-    const [student, adviser, chair, dean] = await Promise.all(['QCU-STU-CS', 'QCU-PROF-CS', 'QCU-CHAIR-CS', 'QCU-DEAN'].map(login))
+    const [student, adviser, chair, dean] = await Promise.all(['QCU-STU-CS', 'QCU-PROF-CS', 'QCU-CHAIR-CS', 'CCS-DEAN'].map(login))
     const id = await file(student!)
     await act(adviser!, id, 'escalate')
     await act(chair!, id, 'escalate')

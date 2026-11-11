@@ -99,7 +99,7 @@ describe('filing with a category and sub-category', () => {
   it('groups analytics by category', async () => {
     const student = await login('QCU-STU-CS')
     for (const sub of ['Name-calling or insults', 'Spreading rumours']) await file(student, { category: 'Bullying', subcategory: sub })
-    const dean = await login('QCU-DEAN')
+    const dean = await login('CCS-DEAN')
     const rows = (await dean.get('/api/pages/P25')).body.data.byCategory as { label: string; suppressed: boolean }[]
     expect(rows.find((r) => r.label === 'Bullying')).toMatchObject({ suppressed: true })
   })
