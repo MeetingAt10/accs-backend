@@ -177,7 +177,7 @@ export const actionPayloads = {
   assistantAsk: z.object({ question: text.max(2000) }).strict(),
   submitEvaluation: z.object({ answers: z.record(z.string(), z.union([z.number().int().min(1).max(5), z.string().max(1000)])), comment: z.string().max(1000).default('') }).strict(),
   createCycle: z.object({ title: text.max(160), term: text.max(100), opens: date, closes: date }).strict(),
-  saveCycle: z.object({ title: text.max(160), instructions: text, opens: date, closes: date, questions: z.array(questionSchema).min(1), forms: z.array(z.enum(['student', 'peer', 'upward-chair', 'upward-dean'])).min(1) }).strict(),
+  saveCycle: z.object({ title: text.max(160), instructions: text, opens: date, closes: date, questions: z.array(questionSchema).min(1), forms: z.array(z.literal('student', { error: 'Evaluation cycles use the student form only.' })).min(1).optional() }).strict(),
   cycleAction: z.object({ status: z.enum(['In review', 'Published', 'Closed']), publishResults: z.boolean().default(false) }).strict(),
   reviewQuestions: z.object({ decision: z.enum(['reviewed', 'changes']), note: z.string().max(2000).default('') }).strict(),
   saveFollowUp: z.object({ note: text }).strict(),
