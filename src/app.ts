@@ -18,6 +18,7 @@ import { createResetStore, resetPolicy, type ResetStore } from './resets.js'
 import { createThrottleStore, type ThrottleStore } from './throttle.js'
 import { createSessionStore, isWellFormedToken, newSessionToken, sessionIdOf, sessionPolicy, sessionState, type SessionStore } from './sessions.js'
 import { demoUserIds, type Repository } from './store.js'
+import { currentAccountId, formerAccountIds } from './renames.js'
 
 export function createApp(repository:Repository=createRepository({nodeEnv:env.NODE_ENV,tableName}),options:{authStore?:AuthStore;sessionStore?:SessionStore;resetStore?:ResetStore;throttleStore?:ThrottleStore;mailer?:InviteMailer;resetMailer?:ResetCodeMailer;stack?:Stack}={}){
   const app=express()
@@ -38,7 +39,7 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     const token=cookieValue(req);if(!isWellFormedToken(token))return undefined
     const sessionId=sessionIdOf(token);const session=await sessions.get(sessionId);const now=Date.now()
     if(!session||sessionState(session,now)!=='live')return undefined
-    const user=await repository.view(unit=>{const db=unit.read();const account=db.users.find(u=>u.id===session.userId&&u.active);return account&&refreshRestrictions(db,account)},['restrictions']);if(!user)return undefined
+    const user=await repository.view(unit=>{const db=unit.read();const account=db.users.find(u=>u.id===currentAccountId(session.userId)&&u.active);return account&&refreshRestrictions(db,account)},['restrictions']);if(!user)return undefined
     if(now-Date.parse(session.lastSeenAt)>=sessionPolicy.touchIntervalMs)await sessions.touch(sessionId,new Date(now).toISOString())
     res.locals.sessionId=sessionId;return user
   }
@@ -55,12 +56,13 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     const data=await authStore.load();if(data===synced)return
     await repository.transact(unit=>applyAccounts(unit.read(),data.users),[]);synced=data
   }
-  const findUser=(ident:string)=>{const key=ident.trim().toLowerCase();return repository.view(unit=>unit.read().users.find(u=>u.active&&(u.email.toLowerCase()===key||u.id.toLowerCase()===key||u.studentId?.toLowerCase()===key||u.username?.toLowerCase()===key)),[])}
+  // An old account ID (QCU-DEAN) signs in as the renamed account (CCS-DEAN).
+  const findUser=(ident:string)=>{const key=currentAccountId(ident.trim().toUpperCase()).toLowerCase();return repository.view(unit=>unit.read().users.find(u=>u.active&&(u.email.toLowerCase()===key||u.id.toLowerCase()===key||u.studentId?.toLowerCase()===key||u.username?.toLowerCase()===key)),[])}
   // A role change made on the administrator's pages is saved to the auth store too, so it holds on every instance.
   const saveAccount=async(change:AccountChange)=>saveAccountChange(authStore,await repository.view(unit=>unit.read().users,[]),change)
   const saveProfile=async(id:string,change:ProfileChange)=>saveProfileChange(authStore,await repository.view(unit=>unit.read().users,[]),id,change)
   // Only the seeded demo accounts fall back to the shared seed password, until they set their own. Every other account has a stored credential.
-  const credentialFor=(user:User,data:AuthData)=>data.credentials[user.id]??(demoUserIds.has(user.id)?defaultHash():undefined)
+  const credentialFor=(user:User,data:AuthData)=>data.credentials[user.id]??formerAccountIds(user.id).map(id=>data.credentials[id]).find(Boolean)??(demoUserIds.has(user.id)?defaultHash():undefined)
   const tooMany=()=>new ApiError(429,'Too many attempts. Try again in 15 minutes.','TOO_MANY_ATTEMPTS')
   // Attempt limits live in ccs_identity (src/throttle.ts), so they hold across Lambda instances. An attempt is counted
   // before the password or code is checked, so parallel guesses cannot exceed the limit; a success clears the count.

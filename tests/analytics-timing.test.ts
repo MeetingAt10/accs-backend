@@ -21,13 +21,13 @@ afterEach(() => vi.useRealTimers())
 
 async function analytics(query = '') {
   const agent = request.agent(app)
-  expect((await agent.post('/api/auth/sign-in').send({ emailOrId: 'QCU-DEAN', password: seedPassword })).status).toBe(200)
+  expect((await agent.post('/api/auth/sign-in').send({ emailOrId: 'CCS-DEAN', password: seedPassword })).status).toBe(200)
   const response = await agent.get(`/api/pages/P25${query}`)
   expect(response.status).toBe(200)
   return response.body.data
 }
 const report = (id: string) => repo.read().reports.find((r) => r.id === id)!
-const entry = (r: Report, at: string, action: string, stage = r.stage): History => ({ id: `H-${at}`, at, actorId: 'QCU-DEAN', actorRole: 'dean', action, reason: '', update: '', public: true, stage })
+const entry = (r: Report, at: string, action: string, stage = r.stage): History => ({ id: `H-${at}`, at, actorId: 'CCS-DEAN', actorRole: 'dean', action, reason: '', update: '', public: true, stage })
 /** Every seeded report opened at one time, with a single "Submitted" entry, so the test sets each timeline itself. */
 function resetTimelines(openedAt: string) {
   for (const r of repo.read().reports) { r.createdAt = openedAt; r.history = [entry(r, openedAt, 'Submitted')] }

@@ -141,7 +141,7 @@ export function seed(): Database {
     user('QCU-STAFF', 'Avery Moss', ['staff'], { office: 'CCS Office', title: 'CCS office staff', officeHours: 'Monday to Friday, 8:00 AM to 5:00 PM' }),
     user('QCU-CHAIR-IT', 'Dr. Morgan Ash', ['chair', 'professor'], { program: 'BSIT', office: 'BSIT Program Office', title: 'BSIT Program Chair and faculty', officeHours: 'Fridays, 10:00 AM to 12:00 PM, BSIT Program Office', spaceIds: ['SUBJECT-IT-DS'] }),
     user('QCU-CHAIR-CS', 'Dr. Ellis Wren', ['chair'], { program: 'BSCS', office: 'BSCS Program Office', title: 'BSCS Program Chair' }),
-    user('QCU-DEAN', 'Dr. Sage Linden', ['dean'], { office: 'CCS Dean\'s Office', title: 'Dean, College of Computer Studies', officeHours: 'Weekdays, 9:00 AM to 4:00 PM, Dean\'s Office' }),
+    user('CCS-DEAN', 'Dr. Sage Linden', ['dean'], { email: 'dean@qcu.edu.ph', office: 'CCS Dean\'s Office', title: 'Dean, College of Computer Studies', officeHours: 'Weekdays, 9:00 AM to 4:00 PM, Dean\'s Office' }),
     user('QCU-ADMIN', 'Casey Hart', ['administrator'], { office: 'ACCS administration', title: 'ACCS administrator and moderator' }),
     user('QCU-GUIDANCE', 'Alex Fern', ['guidance'], { office: 'Guidance Office', title: 'Guidance officer', officeHours: 'Weekdays, 9:00 AM to 4:00 PM' }),
     user('QCU-OSAS', 'Jamie Alder', ['osas'], { office: 'Office of Student Affairs and Services', title: 'OSAS officer', officeHours: 'Weekdays, 9:00 AM to 4:00 PM' }),
@@ -155,13 +155,13 @@ export function seed(): Database {
     { id: 'SPACE-CS-A', title: 'BSCS 2A', program: 'BSCS', section: 'A', subject: 'Section group', professorIds: ['QCU-PROF-CS'], studentIds: ['QCU-STU-CS'] },
   ]
   const post = (id: string, authorId: string, title: string, body: string, audience = 'college', anonymous = false, kind: Post['kind'] = 'discussion'): Post => ({ id, authorId, title, body, audience, anonymous, kind, label: kind === 'announcement' ? 'Announcement' : 'Discussion', priority: 'general', private: audience.startsWith('organization:'), at, reactions: [], comments: [], removed: false })
-  const posts = [post('POST-0101', 'QCU-DEAN', 'Consultation week starts October 29', 'Faculty consultation slots open October 29 at the CCS Faculty Room. Request a time under Consultations and wait for your professor to confirm.', 'college', false, 'announcement'), post('POST-0102', 'QCU-STU-IT-A', 'Is IC 301 open for our group activity?', 'The lab timetable changed on Monday. Which IC 301 slots are free next week? Our group needs two hours for the Data Structures activity.', 'program:BSIT', true), post('POST-0103', 'QCU-PROF-IT', 'Data Structures practice set', 'The practice set on linked lists and stacks is posted. Bring your questions to our next meeting in IC 301.', 'space:SUBJECT-IT-DS', false, 'announcement'), post('POST-0104', 'QCU-ORG', 'Workshop agenda draft', 'Members, please read the draft agenda for the Intro to Git workshop and send corrections before Friday.', 'organization:ORG-COMPUTING'), post('POST-0105', 'QCU-ORG', 'Intro to Git workshop', 'Open to all CCS students. November 5, 1:00 PM to 3:00 PM at IC 305. Bring your laptop.')]
+  const posts = [post('POST-0101', 'CCS-DEAN', 'Consultation week starts October 29', 'Faculty consultation slots open October 29 at the CCS Faculty Room. Request a time under Consultations and wait for your professor to confirm.', 'college', false, 'announcement'), post('POST-0102', 'QCU-STU-IT-A', 'Is IC 301 open for our group activity?', 'The lab timetable changed on Monday. Which IC 301 slots are free next week? Our group needs two hours for the Data Structures activity.', 'program:BSIT', true), post('POST-0103', 'QCU-PROF-IT', 'Data Structures practice set', 'The practice set on linked lists and stacks is posted. Bring your questions to our next meeting in IC 301.', 'space:SUBJECT-IT-DS', false, 'announcement'), post('POST-0104', 'QCU-ORG', 'Workshop agenda draft', 'Members, please read the draft agenda for the Intro to Git workshop and send corrections before Friday.', 'organization:ORG-COMPUTING'), post('POST-0105', 'QCU-ORG', 'Intro to Git workshop', 'Open to all CCS students. November 5, 1:00 PM to 3:00 PM at IC 305. Bring your laptop.')]
   posts[4]!.audience = 'organization:ORG-COMPUTING'
   posts[4]!.private = false
   posts.push(post('POST-0106', 'QCU-PROF-IT', 'Faculty meeting items', 'Add items for the semester coordination meeting before Monday.', 'faculty'))
   posts[1]!.comments.push({ id: 'COMMENT-0101', authorId: 'QCU-STU-IT-B', body: 'Same problem in BSIT 3B. A posted lab schedule would help us plan.', anonymous: false, at })
   const stageRoles: Record<Stage, string> = { adviser: 'professor', chair: 'chair', dean: 'dean', guidance: 'guidance', osas: 'osas' }
-  const actorIds: Record<Stage, string> = { adviser: 'QCU-PROF-IT', chair: 'QCU-CHAIR-IT', dean: 'QCU-DEAN', guidance: 'QCU-GUIDANCE', osas: 'QCU-OSAS' }
+  const actorIds: Record<Stage, string> = { adviser: 'QCU-PROF-IT', chair: 'QCU-CHAIR-IT', dean: 'CCS-DEAN', guidance: 'QCU-GUIDANCE', osas: 'QCU-OSAS' }
   const stages: Stage[] = ['adviser', 'chair', 'dean', 'guidance', 'osas']
   function report(id: string, ownerId: string, stage: Stage, bypassed = false, converted = false): Report {
     const owner = users.find(u => u.id === ownerId)!
@@ -179,7 +179,7 @@ export function seed(): Database {
     { id: 'EVAL-STU-CS-1', evaluatorId: 'QCU-STU-CS', facultyId: 'QCU-PROF-CS', cycleId: 'CYCLE-2026-1', relation: 'Student to faculty', subject: 'BSCS 2A class' },
     { id: 'EVAL-PEER-1', evaluatorId: 'QCU-PROF-IT', facultyId: 'QCU-PROF-OTHER', cycleId: 'CYCLE-2026-1', relation: 'Peer', subject: 'Faculty peer review' },
     { id: 'EVAL-UPWARD-1', evaluatorId: 'QCU-PROF-IT', facultyId: 'QCU-CHAIR-IT', cycleId: 'CYCLE-2026-1', relation: 'Upward: Program Chair', subject: 'Program leadership' },
-    { id: 'EVAL-UPWARD-2', evaluatorId: 'QCU-PROF-IT', facultyId: 'QCU-DEAN', cycleId: 'CYCLE-2026-1', relation: 'Upward: Dean', subject: 'College leadership' },
+    { id: 'EVAL-UPWARD-2', evaluatorId: 'QCU-PROF-IT', facultyId: 'CCS-DEAN', cycleId: 'CYCLE-2026-1', relation: 'Upward: Dean', subject: 'College leadership' },
     { id: 'EVAL-CHAIR-1', evaluatorId: 'QCU-CHAIR-IT', facultyId: 'QCU-PROF-IT', cycleId: 'CYCLE-2026-1', relation: 'Peer', subject: 'Faculty peer review' },
   ]
   assignments.push({ id: 'EVAL-REVIEW-IT', evaluatorId: 'QCU-STU-IT-A', facultyId: 'QCU-PROF-IT', cycleId: 'CYCLE-2026-2', relation: 'Student to faculty', subject: 'Draft form for 2nd Semester' }, { id: 'EVAL-REVIEW-OTHER', evaluatorId: 'QCU-STU-IT-B', facultyId: 'QCU-PROF-OTHER', cycleId: 'CYCLE-2026-2', relation: 'Student to faculty', subject: 'Draft form for 2nd Semester' })

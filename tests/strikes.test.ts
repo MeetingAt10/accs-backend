@@ -79,7 +79,7 @@ describe('strikes and the clearance hold (issue #34)', () => {
 
   it('is recorded only by OSAS, from a case OSAS is handling, and never against the student who filed it', async () => {
     const osas = await login('QCU-OSAS')
-    for (const id of ['QCU-GUIDANCE', 'QCU-DEAN', 'QCU-CHAIR-IT']) expect([id, (await strike(await login(id))).status]).toEqual([id, 403])
+    for (const id of ['QCU-GUIDANCE', 'CCS-DEAN', 'QCU-CHAIR-IT']) expect([id, (await strike(await login(id))).status]).toEqual([id, 403])
     // RPT-0243 is with the Dean, not OSAS.
     expect((await strike(osas, { reportId: 'RPT-0243' })).status).toBe(404)
     const reporter = await strike(osas, { studentId: 'QCU-STU-IT-A' })
@@ -93,7 +93,7 @@ describe('strikes and the clearance hold (issue #34)', () => {
   it('shows strikes and the hold on the student record to the offices that may open it, and lets only OSAS act', async () => {
     const osas = await login('QCU-OSAS')
     for (let i = 0; i < 3; i++) await strike(osas)
-    for (const id of ['QCU-DEAN', 'QCU-CHAIR-CS', 'QCU-OSAS']) {
+    for (const id of ['CCS-DEAN', 'QCU-CHAIR-CS', 'QCU-OSAS']) {
       const seen = await record(await login(id))
       expect([id, seen.clearance.onHold, seen.strikes.length, seen.canRecordStrikes]).toEqual([id, true, 3, id === 'QCU-OSAS'])
       expect(seen.strikes[0]).toMatchObject({ kind: 'report', caseReference: expect.stringMatching(/^CF-|^RPT-/), settled: false })

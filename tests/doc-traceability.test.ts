@@ -22,7 +22,7 @@ const cookieOf = (response: { headers: Record<string, unknown> }) => String((res
 
 describe('ALL-01 sign-in', () => {
   it('ALL-01-A / ALL-01-H signs each role in to its own view: the session lists exactly the pages that role may open', async () => {
-    for (const id of ['QCU-STU-IT-A', 'QCU-PROF-IT', 'QCU-CHAIR-IT', 'QCU-DEAN', 'QCU-GUIDANCE', 'QCU-OSAS', 'QCU-STAFF', 'QCU-ORG', 'QCU-ADMIN']) {
+    for (const id of ['QCU-STU-IT-A', 'QCU-PROF-IT', 'QCU-CHAIR-IT', 'CCS-DEAN', 'QCU-GUIDANCE', 'QCU-OSAS', 'QCU-STAFF', 'QCU-ORG', 'QCU-ADMIN']) {
       const response = await signIn(id)
       expect(response.status, id).toBe(200)
       const { user, allowedPages } = response.body
@@ -119,7 +119,7 @@ describe('CHR-01 / DEAN-01 dashboards', () => {
   })
 
   it('DEAN-01-I shows zeros for a period with no reports, never another period\'s data', async () => {
-    const dean = await login('QCU-DEAN')
+    const dean = await login('CCS-DEAN')
     const empty = (await dean.get('/api/pages/P25?from=2030-01-01&to=2030-01-31')).body.data
     expect(empty.stats.slice(0, 3).map((s: { value: number }) => s.value)).toEqual([0, 0, 0])
     expect(empty.cases).toEqual([])
@@ -128,7 +128,7 @@ describe('CHR-01 / DEAN-01 dashboards', () => {
 
 describe('DEAN-04 college evaluation results', () => {
   it('DEAN-04-V / DEAN-04-I / DEAN-04-B shows the Dean published results only, without individual answers or evaluators', async () => {
-    const dean = await login('QCU-DEAN')
+    const dean = await login('CCS-DEAN')
     const published = (await dean.get('/api/pages/P28?cycle=CYCLE-2026-1')).body.data
     expect(published.results.some((r: { average: number }) => r.average > 0)).toBe(true)
     expect(JSON.stringify(published)).not.toMatch(/evaluatorId|SAMPLE-EVALUATOR|"answers"/)
@@ -163,7 +163,7 @@ describe('GUD-03 offense and Good Moral support', () => {
 
 describe('DEAN-06 / GUD-05 / OSAS-04 communication', () => {
   it('DEAN-06-I / GUD-05-I refuses a post to a space outside the author\'s membership and creates nothing', async () => {
-    for (const id of ['QCU-DEAN', 'QCU-GUIDANCE']) {
+    for (const id of ['CCS-DEAN', 'QCU-GUIDANCE']) {
       const agent = await login(id)
       const before = repo.read().posts.length
       const response = await agent.post('/api/pages/P05/actions').send({ action: 'createPost', payload: { title: 'Outside', body: 'Should not post.', audience: 'space:SPACE-CS-A', kind: 'discussion', label: 'Question' } })

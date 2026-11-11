@@ -21,7 +21,7 @@ export async function signIn(app: App, emailOrId: string, password = seedPasswor
 
 /** The Dean activates the secretary. Returns the one-time credentials from the response. */
 export async function activateSecretary(app: App, body: object = {}) {
-  const { agent: dean, response } = await signIn(app, 'QCU-DEAN')
+  const { agent: dean, response } = await signIn(app, 'CCS-DEAN')
   expect(response.status).toBe(200)
   const activated = await dean.post('/api/accounts/secretary/activate').send(body)
   expect(activated.status).toBe(200)

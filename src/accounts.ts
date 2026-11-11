@@ -7,6 +7,7 @@ import { hashPassword, passwordProblem, type AuthData, type AuthStore } from './
 import { env } from './env.js'
 import { send } from './http.js'
 import { ulid } from './ids.js'
+import { renameAccountIds, renamedAccountIds } from './renames.js'
 import {
   accountIdParamsSchema, accountListResponseSchema, accountsQuerySchema, accountTypesResponseSchema, actionResponseSchema, activateSecretarySchema,
   advisorsResponseSchema, createFacultySchema, facultyListResponseSchema, facultyQuerySchema, facultyRowSchema, importStudentsSchema, programParamsSchema,
@@ -78,7 +79,8 @@ export function temporaryUsername(name: string, taken: ReadonlySet<string>) {
 
 /** What a person can sign in with. Each must belong to one account, or a sign-in could reach the wrong one. */
 const identifiersOf = (account: User) => [account.id, account.email, account.studentId, account.username].filter((value): value is string => !!value).map((value) => value.toLowerCase())
-export const takenBy = (accounts: Iterable<User>, exceptId?: string) => new Set([...accounts].filter((account) => account.id !== exceptId).flatMap(identifiersOf))
+// Old account IDs (QCU-DEAN) still sign in as the renamed account, so nobody else may take them as a username.
+export const takenBy = (accounts: Iterable<User>, exceptId?: string) => new Set([...[...accounts].filter((account) => account.id !== exceptId).flatMap(identifiersOf), ...Object.keys(renamedAccountIds).map((id) => id.toLowerCase())])
 /** The repository's accounts with the auth store's records on top. */
 export const merged = (users: User[], data: AuthData) => new Map([...users, ...data.users].map((account) => [account.id, account] as const))
 
@@ -101,7 +103,8 @@ function edit(data: AuthData, accounts: Map<string, User>, id: string) {
 export function applyAccounts(db: Database, accounts: User[]) {
   const index = new Map(db.users.map((user, position) => [user.id, position]))
   const members = new Map(db.spaces.map((space) => [space.id, new Set(space.studentIds)]))
-  for (const stored of accounts) {
+  for (const original of accounts) {
+    const stored = renameAccountIds(original)
     // A role that no longer exists (the President's Office, removed on 2026-11-10) is dropped; an account left with no
     // role cannot sign in.
     const knownRoles = stored.roles.filter((role) => (roles as readonly string[]).includes(role))

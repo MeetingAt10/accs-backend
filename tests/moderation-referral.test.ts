@@ -95,7 +95,7 @@ describe('moderation referrals go to the CCS Secretary (D-04)', () => {
   })
 
   it('keeps other roles out of moderation', async () => {
-    const dean = await login('QCU-DEAN')
+    const dean = await login('CCS-DEAN')
     expect((await dean.get('/api/pages/P49')).status).toBe(403)
     expect((await moderate(dean, 'MOD-0101', 'remove')).status).toBe(403)
   })
