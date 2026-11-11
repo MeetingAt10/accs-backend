@@ -153,6 +153,10 @@ When a student files a concern, each office receiving it (the adviser, or the Pr
 
 The deployed stacks do not set `MAIL_FROM` yet. Sending needs a verified SES identity, the `MAIL_FROM` variable on the Lambda, and `ses:SendEmail` on that identity in `accs-architecture`.
 
+## Notification rules
+- **Required categories:** Report, Case and Evaluation updates cannot be muted (`requiredNotificationCategories`; case and evaluation added for #42). Saving `muted` for one is a 400 ("Case updates cannot be muted."), and a mute saved earlier is ignored. P44 lists the account's required categories in `requiredCategories`. Restriction and role notifications are not categories a user can set, so they are always delivered.
+- **Urgent announcements** reach members who muted announcements, as high priority.
+
 ## Appointments
 
 "Consultations" are called **appointments** in everything users see (decided 11 November 2026); the API keeps its names (`createConsultation`, `decideConsultation`, the `consultations` collection, the `consultation` notification kind) so clients keep working. A booking says what it is for with a `category` and `subcategory` from `src/appointments.ts` (Academic advising, Class or subject, Thesis or capstone, Career or internship, Documents and signatures, Personal concern, and "Other (please specify)", which needs `details`); `details` is an optional note otherwise. A missing or unknown choice is a 400 `VALIDATION_ERROR` naming the field. P14 and P15 return the list as `appointmentCategories`. A time booked from a concern is filed under "Concern follow-up / Talk about a concern", which cannot be picked by hand. The current screen's free `purpose` is still accepted until it switches to the dropdowns; `purpose` is always set (the sub-category, or the description for Other) so lists keep showing it.
