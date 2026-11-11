@@ -73,7 +73,7 @@ describe('API over the repository boundary', () => {
 
   it('keeps nothing from an action that fails partway', async () => {
     const app = createApp(repo, { authStore: createMemoryAuthStore() })
-    const admin = await signIn(app, 'QCU-ADMIN')
+    const admin = await signIn(app, 'ACCS-ADMIN')
     // The flagged comment's post is gone, so the action fails after it has already changed the moderation item.
     repo.read().posts = repo.read().posts.filter(post => post.id !== 'POST-0102')
     const response = await admin.post('/api/pages/P50/actions').send({ action: 'moderate', recordId: 'MOD-0101', reason: 'Off topic', payload: { decision: 'remove', notifyAuthor: false } })

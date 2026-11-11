@@ -144,7 +144,7 @@ describe('on the development stack', () => {
     expect(JSON.stringify(entries)).not.toContain(oldCookie.split('=')[1]!)
     expect(JSON.stringify(entries)).not.toContain(newCookie.split('=')[1]!)
     // The administrator reads it in the audit trail.
-    const { agent: admin } = await signIn(app, 'QCU-ADMIN')
+    const { agent: admin } = await signIn(app, 'ACCS-ADMIN')
     expect((await admin.get('/api/pages/P51')).body.data.audit.some((entry: Body) => entry.action === 'Account switched' && entry.reference === 'QCU-STU-IT-A' && entry.actor.name === 'Dr. Sage Linden')).toBe(true)
   })
 
@@ -172,12 +172,12 @@ describe('on the development stack', () => {
   it('switches again and again, and back, each time recorded', async () => {
     const { app, repository } = setup(dev)
     const { agent } = await signIn(app, 'QCU-STU-IT-A')
-    for (const id of ['QCU-PROF-IT', 'QCU-CHAIR-IT', 'QCU-ADMIN', 'QCU-STU-IT-A', 'QCU-STU-IT-A']) {
+    for (const id of ['QCU-PROF-IT', 'QCU-CHAIR-IT', 'ACCS-ADMIN', 'QCU-STU-IT-A', 'QCU-STU-IT-A']) {
       expect((await agent.post('/api/dev/switch-user').send({ userId: id })).status).toBe(200)
       expect((await agent.get('/api/session')).body.user.id).toBe(id)
     }
     expect(repository.read().audit.filter((entry) => entry.action === 'Account switched').map((entry) => [entry.actorId, entry.reference])).toEqual([
-      ['QCU-STU-IT-A', 'QCU-PROF-IT'], ['QCU-PROF-IT', 'QCU-CHAIR-IT'], ['QCU-CHAIR-IT', 'QCU-ADMIN'], ['QCU-ADMIN', 'QCU-STU-IT-A'], ['QCU-STU-IT-A', 'QCU-STU-IT-A'],
+      ['QCU-STU-IT-A', 'QCU-PROF-IT'], ['QCU-PROF-IT', 'QCU-CHAIR-IT'], ['QCU-CHAIR-IT', 'ACCS-ADMIN'], ['ACCS-ADMIN', 'QCU-STU-IT-A'], ['QCU-STU-IT-A', 'QCU-STU-IT-A'],
     ])
   })
 
@@ -238,7 +238,7 @@ describe('on the development stack', () => {
     // Another instance sees the new session and the entry.
     const other = createApp(createRecordRepository(store), { authStore, sessionStore, stack: dev })
     expect((await agent.get('/api/session')).body.user.id).toBe('QCU-PROF-IT')
-    const { agent: admin } = await signIn(other, 'QCU-ADMIN')
+    const { agent: admin } = await signIn(other, 'ACCS-ADMIN')
     expect((await admin.get('/api/pages/P51')).body.data.audit.some((entry: Body) => entry.action === 'Account switched')).toBe(true)
   })
 })

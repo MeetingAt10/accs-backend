@@ -30,7 +30,7 @@ describe('restriction expiry and role defaults', () => {
     expect(standing.body.data.record.standing).toBe('Good standing')
     expect(standing.body.data.record.restrictions).toEqual([])
 
-    const admin = await signIn('QCU-ADMIN')
+    const admin = await signIn('ACCS-ADMIN')
     const restrictionList = await admin.get('/api/pages/P35')
     expect(restrictionList.body.data.restrictions[0].active).toBe(false)
     const lateLift = await admin
@@ -45,7 +45,7 @@ describe('restriction expiry and role defaults', () => {
   })
 
   it('returns the compact shell default to administration roles and comfortable to students', async () => {
-    const admin = await signIn('QCU-ADMIN')
+    const admin = await signIn('ACCS-ADMIN')
     const student = await signIn('QCU-STU-IT-A')
 
     expect((await admin.get('/api/pages/P43')).body.data.settings.density).toBe('compact')

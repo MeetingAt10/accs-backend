@@ -109,14 +109,14 @@ const writes: { collection: string; table: string; step: Step }[] = [
   { collection: 'todos', table: 'ccs_scheduling', step: { as: 'QCU-STU-IT-A', page: 'P13', action: 'createTodo', payload: { title: 'Stored', date: '2026-11-05' } } },
   { collection: 'cycles', table: 'ccs_evaluation', step: { as: 'CCS-DEAN', page: 'P30', action: 'createCycle', payload: { title: 'Stored cycle', term: 'Term', opens: '2027-01-01', closes: '2027-03-01' } } },
   { collection: 'followUps', table: 'ccs_evaluation', step: { as: 'QCU-CHAIR-IT', page: 'P29', action: 'saveFollowUp', recordId: 'QCU-PROF-IT', payload: { note: 'Discussed' } } },
-  { collection: 'restrictions', table: 'ccs_discipline', step: { as: 'QCU-ADMIN', page: 'P35', action: 'applyRestriction', reason: 'Approved', payload: { studentId: 'QCU-STU-IT-A', features: ['post.create'], basis: 'Approved review', decisionReference: 'QCU-DEC-002', until: '2099-01-01' } } },
+  { collection: 'restrictions', table: 'ccs_discipline', step: { as: 'ACCS-ADMIN', page: 'P35', action: 'applyRestriction', reason: 'Approved', payload: { studentId: 'QCU-STU-IT-A', features: ['post.create'], basis: 'Approved review', decisionReference: 'QCU-DEC-002', until: '2099-01-01' } } },
   { collection: 'referrals', table: 'ccs_discipline', step: { as: 'QCU-GUIDANCE', page: 'P35', action: 'referRestriction', reason: 'Review the status', payload: { studentId: 'QCU-STU-IT-A', change: 'Review' } } },
   { collection: 'goodMoral', table: 'ccs_discipline', step: { as: 'QCU-GUIDANCE', page: 'P34', action: 'reviewGoodMoral', recordId: 'QCU-STU-RESTRICTED', payload: { status: 'Prerequisites reviewed', decisionSource: 'Office' } } },
   { collection: 'clusters', table: 'ccs_grievance', step: { as: 'QCU-CHAIR-IT', page: 'P24', action: 'reviewCluster', recordId: 'CLUSTER-0101', reason: 'Reviewed', payload: { decision: 'confirmed' } } },
   { collection: 'settings', table: 'ccs_notification', step: { as: 'QCU-STU-IT-A', page: 'P43', action: 'saveSettings', payload: { theme: 'dark', density: 'compact' } } },
   { collection: 'drafts', table: 'ccs_assistant', step: { as: 'QCU-STU-IT-A', page: 'P19', action: 'saveDraft', payload: { narrative: 'Unfinished concern' } } },
   { collection: 'telemetry', table: 'ccs_assistant', step: { as: 'QCU-STU-IT-A', page: 'P41', action: 'assistantAsk', payload: { question: 'Show my schedule' } } },
-  { collection: 'permissionOverrides', table: 'ccs_identity', step: { as: 'QCU-ADMIN', page: 'P48', action: 'updatePermission', reason: 'Proposal', payload: { role: 'organization', permission: 'post.create', allowed: false } } },
+  { collection: 'permissionOverrides', table: 'ccs_identity', step: { as: 'ACCS-ADMIN', page: 'P48', action: 'updatePermission', reason: 'Proposal', payload: { role: 'organization', permission: 'post.create', allowed: false } } },
 ]
 
 describe('a route writes through one instance', () => {
@@ -177,7 +177,7 @@ describe('a route writes through one instance', () => {
     const [first, second] = [instance(), instance()]
     const { agent: student } = await signIn(second, 'QCU-STU-IT-A')
     expect((await student.get('/api/pages/P05')).status).toBe(200)
-    const { agent: admin } = await signIn(first, 'QCU-ADMIN')
+    const { agent: admin } = await signIn(first, 'ACCS-ADMIN')
     const applied = await admin.post('/api/pages/P35/actions').send({ action: 'applyRestriction', reason: 'Approved', payload: { studentId: 'QCU-STU-IT-A', features: ['post.create'], basis: 'Approved review', decisionReference: 'QCU-DEC-002', until: '2099-01-01' } })
     expect(applied.status).toBe(200)
     expect((await student.get('/api/pages/P05')).status).toBe(403)
@@ -208,7 +208,7 @@ describe('accounts across a restart', () => {
 
   it('keeps P46/P47 role grants after a restart', async () => {
     const { instance } = stack()
-    const { agent: admin } = await signIn(instance(), 'QCU-ADMIN')
+    const { agent: admin } = await signIn(instance(), 'ACCS-ADMIN')
     const granted = await admin.post('/api/pages/P47/actions').send({ action: 'updateRoles', recordId: 'QCU-ORG', reason: 'New duties', payload: { roles: ['organization', 'guidance'] } })
     expect(granted.status, JSON.stringify(granted.body)).toBe(200)
     const { agent: restarted } = await signIn(instance(), 'QCU-ORG')
@@ -220,7 +220,7 @@ describe('the record repository behaves like memory', () => {
   beforeAll(() => { vi.spyOn(console, 'log').mockImplementation(() => {}) })
   afterAll(() => vi.restoreAllMocks())
 
-  const accounts = ['QCU-STU-IT-A', 'QCU-ORG', 'QCU-PROF-IT', 'QCU-CHAIR-IT', 'CCS-DEAN', 'QCU-ADMIN', 'QCU-GUIDANCE', 'QCU-OSAS']
+  const accounts = ['QCU-STU-IT-A', 'QCU-ORG', 'QCU-PROF-IT', 'QCU-CHAIR-IT', 'CCS-DEAN', 'ACCS-ADMIN', 'QCU-GUIDANCE', 'QCU-OSAS']
   const pageIds = Array.from({ length: 50 }, (_, n) => `P${String(n + 3).padStart(2, '0')}`)
 
   it.each(accounts)('%s gets the same status on every page', async (id) => {
@@ -245,7 +245,7 @@ describe('the record repository behaves like memory', () => {
     expect(created.status, JSON.stringify(created.body)).toBe(200)
     expect(created.body.record.created).toBe(1)
     expect((await secretary.post('/api/auth/change-password').send({ currentPassword: secretaryPassword, password: 'Sec#Passw0rd-2027' })).status).toBe(200)
-    const { agent: admin } = await signIn(app, 'QCU-ADMIN')
+    const { agent: admin } = await signIn(app, 'ACCS-ADMIN')
     expect((await admin.post('/api/admin/accounts/QCU-STU-CS/reset-code').send({})).status).toBe(200)
     expect((await admin.post('/api/auth/sign-out').send({})).status).toBe(200)
     expect((await admin.get('/api/session')).status).toBe(401)

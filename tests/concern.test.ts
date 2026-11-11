@@ -82,7 +82,7 @@ describe('the concern flow', () => {
       await choose(student, id, 'chat')
       await write(student, 'P20', id, 'A first message')
       await write(await login('QCU-PROF-CS'), 'P22', id, 'A reply')
-      const trail = (await (await login('QCU-ADMIN')).get('/api/pages/P51')).body.data.audit as Body[]
+      const trail = (await (await login('ACCS-ADMIN')).get('/api/pages/P51')).body.data.audit as Body[]
       const mine = trail.filter((entry) => entry.reference === id)
       expect(mine.map((entry) => entry.action)).toEqual(['Report submitted', 'Report consent recorded', 'Talk consent recorded', 'Reporter message sent', 'Handler message sent'])
       // The reporter stays unnamed; the office that answered is named.
@@ -622,7 +622,7 @@ describe('over a record store that instances share', () => {
     // Signing in, and reading the session, touch accounts and the account's restrictions only.
     const restrictions = 'ccs_discipline/restrictions'
     const besides = () => lists.filter((list) => list !== restrictions)
-    const { agent: admin } = await signIn(app, 'QCU-ADMIN')
+    const { agent: admin } = await signIn(app, 'ACCS-ADMIN')
     expect(lists).toEqual([restrictions])
     expect((await admin.post('/api/admin/accounts/QCU-STU-IT-A/reset-code').send({})).status).toBe(200)
     expect(besides()).toEqual(['ccs_audit/audit'])

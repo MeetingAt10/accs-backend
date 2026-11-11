@@ -31,7 +31,7 @@ const item = (id: string) => repo.read().moderation.find((m) => m.id === id)!
 
 describe('moderation referrals go to the CCS Secretary (D-04)', () => {
   it('refuses a referral while no CCS Secretary account is active, and leaves the item pending', async () => {
-    const admin = await login('QCU-ADMIN')
+    const admin = await login('ACCS-ADMIN')
     const response = await moderate(admin, 'MOD-0101', 'refer')
     expect(response.status).toBe(409)
     expect(response.body.error).toMatch(/CCS Secretary account is not active/)
@@ -41,7 +41,7 @@ describe('moderation referrals go to the CCS Secretary (D-04)', () => {
 
   it('refers to the secretary, notifies them, and only the secretary can then decide', async () => {
     const secretary = await secretarySession(app)
-    const admin = await login('QCU-ADMIN')
+    const admin = await login('ACCS-ADMIN')
     const before = repo.read().notifications.length
 
     const referred = await moderate(admin, 'MOD-0101', 'refer')
@@ -57,7 +57,7 @@ describe('moderation referrals go to the CCS Secretary (D-04)', () => {
     const decided = await moderate(secretary, 'MOD-0101', 'remove')
     expect(decided.status).toBe(200)
     expect(decided.body.record.status).toBe('Removed')
-    expect(decided.body.record.history.map((h: { actorId: string; decision: string }) => [h.actorId, h.decision])).toEqual([['QCU-ADMIN', 'refer'], ['QCU-SECRETARY', 'remove']])
+    expect(decided.body.record.history.map((h: { actorId: string; decision: string }) => [h.actorId, h.decision])).toEqual([['ACCS-ADMIN', 'refer'], ['QCU-SECRETARY', 'remove']])
     const post = repo.read().posts.find((p) => p.id === item('MOD-0101').parentId)!
     expect(post.comments.find((c) => c.id === item('MOD-0101').itemId)!.body).toBe('This content was removed after review.')
     expect((await moderate(secretary, 'MOD-0101', 'keep')).status).toBe(409)
@@ -65,7 +65,7 @@ describe('moderation referrals go to the CCS Secretary (D-04)', () => {
 
   it('shows the secretary only referred items, before and after deciding them', async () => {
     const secretary = await secretarySession(app)
-    const admin = await login('QCU-ADMIN')
+    const admin = await login('ACCS-ADMIN')
     expect((await secretary.get('/api/pages/P49')).body.data.moderation).toEqual([])
     expect((await moderate(admin, 'MOD-0101', 'refer')).status).toBe(200)
 
@@ -89,7 +89,7 @@ describe('moderation referrals go to the CCS Secretary (D-04)', () => {
 
   it('keeps automatic filter flags out of referrals', async () => {
     await secretarySession(app)
-    const admin = await login('QCU-ADMIN')
+    const admin = await login('ACCS-ADMIN')
     expect((await moderate(admin, 'MOD-0103', 'refer')).status).toBe(403)
     expect(item('MOD-0103').status).toBe('Pending')
   })
