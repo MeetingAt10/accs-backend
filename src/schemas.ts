@@ -172,7 +172,11 @@ export const actionPayloads = {
   // `category` and `subcategory` (src/appointments.ts), with `details` required for "Other" and optional otherwise.
   createConsultation: z.object({ slotId: z.string().min(1), purpose: z.string().trim().min(1).max(300).optional(), category: z.string().trim().min(1).max(80).optional(), subcategory: z.string().trim().min(1).max(80).optional(), details: z.string().trim().max(300).optional() }).strict(),
   decideConsultation: z.object({ decision: z.enum(['Approved', 'Booked', 'Completed', 'Declined', 'Cancelled']), note: z.string().max(2000).optional() }).strict(),
-  saveAvailability: z.object({ date, start: time, end: time, state: z.enum(['open', 'unavailable']).default('open') }).strict(),
+  // A time marked not available needs a reason (#32); an open time takes none.
+  saveAvailability: z.object({ date, start: time, end: time, state: z.enum(['open', 'unavailable']).default('open'), reason: z.string().trim().max(300, 'Use at most 300 characters.').optional() }).strict().superRefine((p, ctx) => {
+    if (p.state === 'unavailable' && !p.reason) ctx.addIssue({ code: 'custom', path: ['reason'], message: 'Give a reason for marking this time not available.' })
+    if (p.state === 'open' && p.reason) ctx.addIssue({ code: 'custom', path: ['reason'], message: 'Only a time marked not available takes a reason.' })
+  }),
   deleteAvailability: z.object({}).strict(),
   createTodo: z.object({ title: text.max(200), date }).strict(),
   toggleTodo: z.object({ done: z.boolean() }).strict(),
