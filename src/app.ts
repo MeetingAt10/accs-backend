@@ -13,14 +13,15 @@ import { hasPermission } from './access.js'
 import { devRouter, devToolboxEnabled, isDevToolboxCall, type Stack } from './dev.js'
 import { send } from './http.js'
 import { createRepository } from './persist.js'
-import { ApiError, getPage, performAction, refreshRestrictions, sessionView, unavailable, type AccountChange, type OutgoingMail, type ProfileChange } from './services.js'
+import { ApiError, completeMaterialUpload, getPage, materialDownloadUrl, performAction, refreshRestrictions, sessionView, startMaterialUpload, unavailable, type AccountChange, type AfterCommit, type ProfileChange } from './services.js'
+import { createS3MaterialStorage, type MaterialStorage } from './material-storage.js'
 import { createResetStore, resetPolicy, type ResetStore } from './resets.js'
 import { createThrottleStore, type ThrottleStore } from './throttle.js'
 import { createSessionStore, isWellFormedToken, newSessionToken, sessionIdOf, sessionPolicy, sessionState, type SessionStore } from './sessions.js'
 import { demoUserIds, type Repository } from './store.js'
 import { currentAccountId, formerAccountIds } from './renames.js'
 
-export function createApp(repository:Repository=createRepository({nodeEnv:env.NODE_ENV,tableName}),options:{authStore?:AuthStore;sessionStore?:SessionStore;resetStore?:ResetStore;throttleStore?:ThrottleStore;mailer?:InviteMailer;resetMailer?:ResetCodeMailer;concernMailer?:NewConcernMailer;stack?:Stack}={}){
+export function createApp(repository:Repository=createRepository({nodeEnv:env.NODE_ENV,tableName}),options:{authStore?:AuthStore;sessionStore?:SessionStore;resetStore?:ResetStore;throttleStore?:ThrottleStore;mailer?:InviteMailer;resetMailer?:ResetCodeMailer;concernMailer?:NewConcernMailer;materialStorage?:MaterialStorage;stack?:Stack}={}){
   const app=express()
   // The account switcher for testers exists only on the development stack and on local runs (src/dev.ts).
   const devToolbox=devToolboxEnabled(options.stack??{tablePrefix:env.TABLE_PREFIX,nodeEnv:env.NODE_ENV})
@@ -95,8 +96,13 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   // are never emailed. A failed email is logged without the address and never undoes or blocks the filing.
   const concernMailer=options.concernMailer??createNewConcernMailer({nodeEnv:env.NODE_ENV,mailFrom:env.MAIL_FROM})
   const appUrl=(env.APP_URL??env.CORS_ORIGIN[0]??'').replace(/\/+$/,'')
-  const sendMail=async(mail:OutgoingMail[])=>{
-    if(concernMailer.channel==='none')return
+  // Class material files live in a private bucket when MATERIALS_BUCKET is set (#44); otherwise materials are links only.
+  const materialStorage=options.materialStorage??(env.MATERIALS_BUCKET?createS3MaterialStorage(env.MATERIALS_BUCKET):undefined)
+  const sendMail=async(work:AfterCommit[])=>{
+    // A removed material's file is deleted once the removal is saved; a failure leaves an orphan file, never a broken page.
+    await Promise.all(work.flatMap(w=>w.kind==='deleteFile'&&materialStorage?[materialStorage.remove(w.key).catch(error=>console.error(JSON.stringify({level:'error',message:'Material file not deleted',key:w.key,error:error instanceof Error?error.name:'Unknown'})))]:[]))
+    const mail=work.filter((w):w is Extract<AfterCommit,{kind:'newConcern'}>=>w.kind==='newConcern')
+    if(concernMailer.channel==='none'||!mail.length)return
     await Promise.all(mail.filter(m=>concernMailer.channel!=='email'||!demoUserIds.has(m.userId)).map(async m=>{
       try{await concernMailer.send({userId:m.userId,to:m.to,name:m.name,link:`${appUrl}/cases/${encodeURIComponent(m.reportId)}`})}
       catch(error){console.error(JSON.stringify({level:'error',message:'New concern email not sent',userId:m.userId,reportId:m.reportId,error:error instanceof Error?error.name:'Unknown'}))}
@@ -174,6 +180,11 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   })
   app.get('/api/session',(_req,res)=>send(res,sessionResponseSchema,sessionView(res.locals.user as User)))
   app.get('/api/pages/:pageId',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const query=pageQuerySchema.parse(req.query);send(res,pageResponseSchema,await getPage(repository,res.locals.user as User,pageId,query))})
+  // Class material files (#44): a signed upload straight to S3, a confirmation, and a download that checks access first.
+  const materialId=z.string().trim().min(1).max(64)
+  app.post('/api/materials/uploads',async(req,res)=>{send(res,actionResponseSchema,{ok:true,message:'Upload the file to the address given, then confirm it.',record:await startMaterialUpload(repository,res.locals.user as User,req.body,materialStorage)})})
+  app.post('/api/materials/:id/complete',async(req,res)=>{emptyBodySchema.parse(req.body??{});send(res,actionResponseSchema,{ok:true,message:'Material added.',record:await completeMaterialUpload(repository,res.locals.user as User,materialId.parse(req.params.id),materialStorage)})})
+  app.get('/api/materials/:id/file',async(req,res)=>{res.redirect(302,await materialDownloadUrl(repository,res.locals.user as User,materialId.parse(req.params.id),materialStorage))})
   app.post('/api/pages/:pageId/actions',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const body=actionRequestSchema.parse(req.body);send(res,actionResponseSchema,await performAction(repository,res.locals.user as User,pageId,body,saveAccount,saveProfile,sendMail))})
   // Invites go out by email when MAIL_FROM is set (#36); otherwise the screen shows them once.
   app.use('/api/accounts',accountRouter({repository,authStore,sessions,mailer:options.mailer??(env.MAIL_FROM?createSesInviteMailer(env.MAIL_FROM):unsentMailer)}))

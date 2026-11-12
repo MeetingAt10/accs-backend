@@ -19,6 +19,8 @@ const schema = z.object({
   MAIL_FROM: z.email().optional(),
   // Address of the ACCS portal, for links in emails. Defaults to the first CORS_ORIGIN.
   APP_URL: z.url().optional(),
+  // Private S3 bucket for class material files (#44). Without it, materials can only be links.
+  MATERIALS_BUCKET: z.string().min(1).optional(),
   // Comma-separated list: every ACCS site (portal, forums, ...) calls the same API with credentials.
   CORS_ORIGIN: z
     .string()

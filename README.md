@@ -19,6 +19,7 @@ Node 22 or later. Environment variables are parsed in `src/env.ts`:
 - `TABLE_PREFIX`: DynamoDB table prefix. Set on the Lambda; see Storage boundary and Sessions.
 - `AUTH_STORE_BUCKET`, `AUTH_STORE_KEY`, `AUTH_STORE_FILE`: where accounts live; see Accounts and sign-in.
 - `MAIL_FROM`: verified Amazon SES sender of password reset codes, new-concern emails and account invites; see Password reset codes, New-concern emails and Account provisioning.
+- `MATERIALS_BUCKET`: private S3 bucket for class material files; see Subjects and class materials.
 - `APP_URL`: address of the portal, for links in emails (default: the first `CORS_ORIGIN`).
 - `SEED_PASSWORD` (at least 10 characters): the shared sign-in password of the seeded demo accounts. Deployed stacks set it. Without it, production disables seeded sign-in, and local runs and tests use a built-in default. On Lambda with any other `NODE_ENV` (including an unset one, which defaults to `development`), the API fails at startup rather than accept the built-in password. It is not in `.env.example`.
 
@@ -176,7 +177,15 @@ The CCS Secretary uploads each faculty member's class load for a term on **P54 F
 An **open** consultation time that falls on a class's weekday between the term's dates and overlaps its hours is refused with 409 ("This time overlaps your class ..."); marking it not available is allowed. P54 lists each faculty member's `classes`, `slots` (with not-available reasons) and `conflicts` (times opened before the load that now overlap a class), for the latest term or the one named by `period`. P17 gives a faculty member their own `load`.
 
 ## Subjects and class materials
-A section space (P08, `subject: 'Section group'`) lists `subjects`: the subject spaces of the same campus, program, year and section letter, each with its `professors` (#44, baseline 6.3). A subject's professors share class materials with its students: `addMaterial` `{ spaceId, title, url, note? }`, `updateMaterial` and `removeMaterial` (by `recordId`) on P08. Materials are links for now (`http` or `https` only); file uploads (up to 25 MB; PDF, Office documents, plain text, PNG and JPG) come in a second step with an S3 bucket in accs-architecture. Only the subject's professors and its students see `materials`; other offices that can open the space, such as the Dean, do not. Adding to a section space is a 404, and anyone but the subject's professors gets a 403. Every change is audited.
+A section space (P08, `subject: 'Section group'`) lists `subjects`: the subject spaces of the same campus, program, year and section letter, each with its `professors` (#44, baseline 6.3). A subject's professors share class materials with its students: `addMaterial` `{ spaceId, title, url, note? }`, `updateMaterial` and `removeMaterial` (by `recordId`) on P08. Links must be `http` or `https`. Changing a link needs the link again; a file keeps its file and changes only its title and note. Only the subject's professors and its students see `materials`; other offices that can open the space, such as the Dean, do not. Adding to a section space is a 404, and anyone but the subject's professors gets a 403. Every change is audited.
+
+**Files** (#44 part 2, `src/material-storage.ts`): up to 25 MB; PDF, Word, PowerPoint, Excel, plain text, PNG and JPG, with a matching extension. Files never pass through the API (the Lambda takes about 6 MB a request):
+1. `POST /api/materials/uploads` with `{ spaceId, title, note?, fileName, contentType, size }` checks the file and the professor, records a `pending` material, and answers `record: { material, upload: { url, method: 'PUT', headers, expiresInSeconds: 600 } }`. The signed PUT only accepts that exact `Content-Type` and `Content-Length`.
+2. The browser uploads the file to `upload.url` with those headers.
+3. `POST /api/materials/:id/complete` checks the stored file's size and type; on a mismatch it deletes the file and answers 409, otherwise the material is `ready` and students see it.
+4. `GET /api/materials/:id/file` checks that the user is one of the subject's professors or students, then redirects (302) to a signed download valid for 5 minutes, under the original file name.
+
+Students never see pending files, and the storage key is never sent. Removing a file material deletes its file once the removal is saved. The files live in the private bucket `MATERIALS_BUCKET` (accs-architecture); without it, an upload answers 409 "File uploads are not set up yet. Share a link instead." and links still work.
 
 ## Campuses and section names
 CCS runs on three campuses (#46, `src/sections.ts`): **SB** San Bartolome (1st to 4th year), **BAT** Batasan and **SF** San Francisco (1st and 2nd year only; their students move to San Bartolome for 3rd year). A section is named campus + program code + year + letter: `SBIT1A`, `BATIT1A`, `SFIT1A`, `SBCS3B`, `SFIS2A`. Section spaces carry `campus` and `year`, and their title is the section name.
