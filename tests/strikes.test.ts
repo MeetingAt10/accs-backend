@@ -51,6 +51,16 @@ async function strike(n: number, dean: Agent, osas: Agent) {
 }
 
 describe('the Dean recommends a strike and OSAS confirms it', () => {
+  it('lists the students the concern names for the Dean to pick from, never the student who filed it', async () => {
+    // The reporter named in their own concern is still left out.
+    await repo.transact((unit) => { const r = unit.read().reports.find((x) => x.id === 'RPT-0243')!; r.involvedUserIds = [...r.involvedUserIds, r.ownerId, 'QCU-PROF-IT'] })
+    const [dean, osas] = [await login('CCS-DEAN'), await login('QCU-OSAS')]
+    const seen = (await dean.get('/api/pages/P22?id=RPT-0243')).body.data.record
+    expect(seen.strikeCandidates.map((p: { id: string }) => p.id)).toEqual(['QCU-STU-CS'])
+    await moveTo('RPT-0243', 'osas')
+    expect((await osas.get('/api/pages/P22?id=RPT-0243')).body.data.record.strikeCandidates).toEqual([])
+  })
+
   it("counts a strike only once OSAS confirms the Dean's recommendation", async () => {
     const [dean, osas] = [await login('CCS-DEAN'), await login('QCU-OSAS')]
     const recommended = await recommend(dean)
