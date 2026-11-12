@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { categoryProblem, concernCategories } from './categories.js'
 import { mainCampus, sectionName } from './sections.js'
 import { appointmentCategories, appointmentProblem, concernFollowUp, purposeOf, type AppointmentChoice } from './appointments.js'
-import { actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
+import { loadRowSchema, actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
 import { allowedPages, canActCase, canAudience, canReadCase, isEarlierHandler, overseesCase, canCountCase, canFacultyResult, canPage, canPublish, canReach, canSpace, canStudentRecord, canThread, canViewCase, hasPermission, hasRole, isOrganizationMember, pageTitles, permissionRoles, permissions, scopeLabel } from './access.js'
 import { consentWording } from './consent.js'
 import type { Material, Space, Assignment, Consultation, Cycle, Database, Message, Moderation, Post, Report, Repository, Slot, Stage, Strike, Thread, UnitOfWork } from './store.js'
@@ -63,6 +63,8 @@ function canSeeItem(db: Database, user: User, itemType: Moderation['itemType'], 
 function requireRole(user: User, ...roleNames: User['roles']) { if (!hasRole(user,...roleNames)) throw deny() }
 function find<T extends {id:string}>(items:T[], id:string|undefined):T { const item = items.find(entry=>entry.id===id); if (!item) throw unavailable(); return item }
 function pick<T extends {id:string}>(items:T[], id?:string):T|undefined { return id ? find(items,id) : items[0] }
+/** A report named by its report ID or, once Guidance opened one, its Case File number (CF-...). */
+const reportIdOf = (db:Database, id?:string) => id && db.reports.find(r => r.caseFileId === id && !db.reports.some(other => other.id === id))?.id || id
 function reasonOf(request:ActionRequest) { return z.string().trim().min(1,'A reason is required.').max(2000).parse(request.reason) }
 export function refreshRestrictions(db: Database, user: User): User { const date = now().slice(0,10); return { ...user, restrictions:[...new Set(db.restrictions.filter(r=>r.studentId===user.id&&r.active&&r.until>=date).flatMap(r=>r.features))] } }
 export function sessionView(user:User) { return { user, permissions:permissions(user),allowedPages:allowedPages(user),roleLabels,sampleData:true as const } }
@@ -318,6 +320,15 @@ function queuePostReview(repo: UnitOfWork, post: Post) {
   })
 }
 function visibleConsultations(db:Database,user:User){return db.consultations.filter(c=>c.studentId===user.id&&hasRole(user,'student')||c.facultyId===user.id&&hasRole(user,'professor'))}
+// Why a time is not available is for the faculty member and the CCS Secretary only (#32). Students do not see unavailable
+// times at all, only the times they can book or already asked for; others see the time without the reason.
+function slotView(user:User,slot:Slot){if(slot.facultyId===user.id||hasRole(user,'secretary'))return slot;const {reason:_reason,...rest}=slot;return rest}
+const slotsFor=(user:User,slots:Slot[])=>slots.filter(s=>!hasRole(user,'student')||s.state!=='unavailable').map(s=>slotView(user,s))
+// Faculty load (#39). A class blocks open consultation times on its weekday between the term's dates.
+const weekdays = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'] as const
+const weekdayOf = (date:string) => weekdays[new Date(`${date}T00:00:00Z`).getUTCDay()]!
+function classAt(db:Database,facultyId:string,date:string,start:string,end:string) { const day=weekdayOf(date); return db.loadSchedules.find(c=>c.facultyId===facultyId&&c.day===day&&c.startsOn<=date&&date<=c.endsOn&&c.start<end&&start<c.end) }
+const isFaculty = (u:User) => u.active && hasRole(u,'professor','chair','dean')
 // Subjects and class materials (#44, baseline 6.3). A section space lists the subject spaces of the same section, each
 // with its professors. A subject's materials are for its professors and its students only, not for other offices.
 const isSectionSpace = (space:Space) => space.subject === 'Section group'
@@ -325,7 +336,7 @@ function subjectsOf(db:Database,section:Space) { return db.spaces.filter(s=>!isS
 const teachesSubject = (user:User,space:Space) => hasRole(user,'professor','chair','dean') && space.professorIds.includes(user.id)
 const opensMaterials = (user:User,space:Space) => teachesSubject(user,space) || hasRole(user,'student') && space.studentIds.includes(user.id)
 function materialsFor(db:Database,user:User,space:Space) { return opensMaterials(user,space) ? db.materials.filter(m=>m.spaceId===space.id).map(m=>({...m,author:author(db,m.authorId)})) : undefined }
-function visibleSlots(db:Database,user:User){return db.slots.filter(s=>s.facultyId===user.id||hasRole(user,'dean','chair')||canReach(db,user,find(db.users,s.facultyId)))}
+function visibleSlots(db:Database,user:User){return slotsFor(user,db.slots.filter(s=>s.facultyId===user.id||hasRole(user,'dean','chair')||canReach(db,user,find(db.users,s.facultyId))))}
 /** One request per time: the rule for a student's appointment request and for a time booked to talk about a concern. */
 function reserveSlot(repo:UnitOfWork,studentId:string,slot:Slot,choice:AppointmentChoice,reportId?:string):Consultation {
   const db=repo.read()
@@ -472,14 +483,29 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
     }
     case'P13':Object.assign(data,{events:visibleEvents(db,user).filter(e=>!hasRole(user,'organization')||!e.organizationId||e.organizationId===user.organizationId),slots:hasRole(user,'organization')?[]:visibleSlots(db,user),todos:db.todos.filter(t=>t.ownerId===user.id),consultations:visibleConsultations(db,user).map(c=>consultationView(db,c))});break
     case'P14':Object.assign(data,{appointmentCategories:appointmentCategories.filter(c=>!c.system),consultations:visibleConsultations(db,user).map(c=>consultationView(db,c)),faculty:faculty.filter(u=>match(u.name)).map(u=>({...person(u),nextSlot:db.slots.find(s=>s.facultyId===u.id&&s.state==='open')}))});break
-    case'P15':{data.appointmentCategories=appointmentCategories.filter(c=>!c.system);const f=pick(faculty,query.id);if(f){data.record=person(f);data.slots=db.slots.filter(s=>s.facultyId===f.id)}break}
+    case'P15':{data.appointmentCategories=appointmentCategories.filter(c=>!c.system);const f=pick(faculty,query.id);if(f){data.record=person(f);data.slots=slotsFor(user,db.slots.filter(s=>s.facultyId===f.id))}break}
     case'P16':{const c=pick(visibleConsultations(db,user),query.id);if(c)data.record=consultationView(db,c);break}
-    case'P17':data.slots=db.slots.filter(s=>s.facultyId===user.id);break
+    case'P17':data.slots=db.slots.filter(s=>s.facultyId===user.id);data.load=db.loadSchedules.filter(c=>c.facultyId===user.id);break
+    case'P54':{
+      const terms=[...new Map(db.loadSchedules.map(c=>[c.term,{term:c.term,startsOn:c.startsOn,endsOn:c.endsOn}])).values()].sort((a,b)=>b.startsOn.localeCompare(a.startsOn))
+      const term=query.period?terms.find(t=>t.term===query.period):terms[0]
+      if(query.period&&!term)throw unavailable()
+      const classes=term?db.loadSchedules.filter(c=>c.term===term.term):[]
+      data.terms=terms
+      data.term=term
+      data.faculty=db.users.filter(u=>isFaculty(u)&&match(`${u.name} ${u.email}`)).map(u=>{
+        const own=classes.filter(c=>c.facultyId===u.id)
+        const slots=db.slots.filter(s=>s.facultyId===u.id)
+        const conflicts=slots.filter(s=>s.state!=='unavailable').flatMap(s=>{const c=own.find(c=>c.day===weekdayOf(s.date)&&c.startsOn<=s.date&&s.date<=c.endsOn&&c.start<s.end&&s.start<c.end);return c?[{slotId:s.id,date:s.date,start:s.start,end:s.end,state:s.state,classId:c.id,subject:c.subject,day:c.day,classStart:c.start,classEnd:c.end}]:[]})
+        return {...person(u),classes:own,slots:slots.map(s=>slotView(user,s)),conflicts}
+      })
+      break
+    }
     case'P18':data.reports=ownReports.map(r=>reportView(db,r,user,true));break
     case'P19':Object.assign(data,{categories:['General concern','Academic process','Facilities','Communication'],categoryOptions:concernCategories,adviser:user.adviserId?person(find(db.users,user.adviserId)):null,anonymityAllowed:!user.restrictions.includes('report.anonymous'),consentWording,draft:db.drafts[user.id]??null,sourcePost:query.from?(()=>{const p=posts.find(p=>p.id===query.from&&p.authorId===user.id);if(!p)throw unavailable();return postView(db,p,user)})():null});break
-    case'P20':{const r=pick(ownReports,query.id);if(r)data.record=reportView(db,r,user,true);data.consentWording=consentWording;break}
+    case'P20':{const r=pick(ownReports,reportIdOf(db,query.id));if(r)data.record=reportView(db,r,user,true);data.consentWording=consentWording;break}
     case'P21':data.cases=cases.filter(r=>(!query.q||r.id.toLowerCase().includes(query.q.toLowerCase()))&&(!query.status||r.status===query.status)&&(!query.category||r.category===query.category)&&(!query.severity||r.severity===query.severity)).map(r=>reportView(db,r,user));break
-    case'P22':{const r=pick(cases,query.id);if(r)data.record=reportView(db,r,user);break}
+    case'P22':{const r=pick(cases,reportIdOf(db,query.id));if(r)data.record=reportView(db,r,user);break}
     case'P23':case'P24':{const clusters=db.clusters.filter(c=>c.program===user.program);data.clusters=clusters.map(c=>({...c,reportIds:undefined,reportCount:db.reports.filter(r=>c.reportIds.includes(r.id)&&canViewCase(user,r)).length}));data.threshold=80;if(pageId==='P24'){const c=pick(clusters,query.id);if(c){data.record={...c,reportIds:undefined};data.reports=db.reports.filter(r=>c.reportIds.includes(r.id)&&canViewCase(user,r)).map(r=>reportView(db,r,user))}}break}
     case 'P25': {
       if (query.program && hasRole(user, 'chair') && query.program !== user.program) {
@@ -755,6 +781,7 @@ const actionPages: Record<string, string[]> = {
   addMaterial: ['P08'],
   updateMaterial: ['P08'],
   removeMaterial: ['P08'],
+  uploadLoadSchedule: ['P54'],
   deleteAvailability: ['P17'],
   createTodo: ['P13'],
   toggleTodo: ['P13'],
@@ -807,8 +834,8 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
   if(!canPage(user,pageId)||!actionPages[request.action]?.includes(pageId))throw deny()
   const db=repo.read();const id=request.recordId;let record:unknown;let message='Changes saved.';const outbox:OutgoingMail[]=[]
   // The report is named by the record ID, or by `reportId` in the payload for the talk actions.
-  const getOwnReport=(reportId=id)=>{const r=find(db.reports,reportId);if(r.ownerId!==user.id||!hasRole(user,'student'))throw unavailable();return r}
-  const getCase=(reportId=id)=>{const r=find(db.reports,reportId);if(!canActCase(user,r))throw unavailable();return r}
+  const getOwnReport=(reportId=id)=>{const r=find(db.reports,reportIdOf(db,reportId));if(r.ownerId!==user.id||!hasRole(user,'student'))throw unavailable();return r}
+  const getCase=(reportId=id)=>{const r=find(db.reports,reportIdOf(db,reportId));if(!canActCase(user,r))throw unavailable();return r}
   const addMessage=(list:Message[],body:string)=>{const m={id:repo.nextId('MESSAGE'),authorId:user.id,body,at:now()};list.push(m);return m}
   switch(request.action){
     case 'createPost': {
@@ -1021,8 +1048,36 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
     case'reviewCluster':{requirePermission(user,'cluster.review');const p=actionPayloads.reviewCluster.parse(request.payload);const reason=reasonOf(request);const c=find(db.clusters,id);if(c.program!==user.program)throw unavailable();c.status=p.decision==='confirmed'?'Confirmed':'Dismissed';c.history.push({at:now(),actorId:user.id,decision:c.status,reason});audit(repo,user,'Similarity group reviewed','cases',c.id);record={...c,reportIds:undefined};message='Group review recorded.';break}
     case'createConsultation':{requirePermission(user,'consultation.request');const p=actionPayloads.createConsultation.parse(request.payload);const appointmentIssue=appointmentProblem(p);if(appointmentIssue)throw new z.ZodError([{code:'custom',path:[appointmentIssue.path],message:appointmentIssue.message,input:undefined}]);const slot=find(db.slots,p.slotId);const faculty=find(db.users,slot.facultyId);if(!canReach(db,user,faculty))throw unavailable();const c=reserveSlot(repo,user.id,slot,p);record=consultationView(db,c);message='Request sent.';break}
     case'decideConsultation':{const p=actionPayloads.decideConsultation.parse(request.payload);const c=find(visibleConsultations(db,user),id);const student=c.studentId===user.id;const valid:Record<string,string[]>={Requested:['Approved','Declined','Cancelled'],Approved:['Booked','Cancelled'],Booked:['Completed','Cancelled'],Completed:[],Declined:[],Cancelled:[]};if(!valid[c.status]?.includes(p.decision)||student&&p.decision!=='Cancelled')throw conflict('That change is not available for this appointment.');if(!student)requirePermission(user,'consultation.decide');if(['Declined','Cancelled'].includes(p.decision)&&!(p.note?.trim()||request.reason?.trim()))throw new ApiError(400,'A reason is required.','VALIDATION_ERROR');const slot=find(db.slots,c.slotId);if(['Approved','Booked'].includes(p.decision)&&db.consultations.some(other=>other.id!==c.id&&other.slotId===slot.id&&['Approved','Booked'].includes(other.status)))throw conflict('This time is already booked.');c.status=p.decision;c.updatedAt=now();c.history.push({at:c.updatedAt,status:c.status,note:p.note??request.reason??'Status updated',actorId:user.id});slot.state=['Declined','Cancelled','Completed'].includes(c.status)?'open':c.status==='Booked'?'booked':'requested';notify(repo,student?c.facultyId:c.studentId,'consultation','P16',c.id);record=consultationView(db,c);message='Appointment updated.';break}
-    case'saveAvailability':{requirePermission(user,'consultation.decide');const p=actionPayloads.saveAvailability.parse(request.payload);if(p.end<=p.start)throw new ApiError(400,'The end time must be later than the start time.','VALIDATION_ERROR');if(db.slots.some(s=>s.id!==id&&s.facultyId===user.id&&s.date===p.date&&s.start<p.end&&s.end>p.start))throw conflict('This time overlaps an existing slot.');if(id){const s=find(db.slots,id);if(s.facultyId!==user.id)throw unavailable();if(['booked','requested'].includes(s.state))throw conflict('This time has a request. Cancel the appointment first.');Object.assign(s,p);record=s}else{record={id:repo.nextId('SLOT'),facultyId:user.id,...p};db.slots.push(record as Database['slots'][number])}message='Availability saved.';break}
+    case'saveAvailability':{requirePermission(user,'consultation.decide');const p=actionPayloads.saveAvailability.parse(request.payload);if(p.end<=p.start)throw new ApiError(400,'The end time must be later than the start time.','VALIDATION_ERROR');if(db.slots.some(s=>s.id!==id&&s.facultyId===user.id&&s.date===p.date&&s.start<p.end&&s.end>p.start))throw conflict('This time overlaps an existing slot.');const lesson=p.state==='open'?classAt(db,user.id,p.date,p.start,p.end):undefined;if(lesson)throw conflict(`This time overlaps your class ${lesson.subject} (${lesson.day} ${lesson.start} to ${lesson.end}). Choose a time outside your load.`);if(id){const s=find(db.slots,id);if(s.facultyId!==user.id)throw unavailable();if(['booked','requested'].includes(s.state))throw conflict('This time has a request. Cancel the appointment first.');delete s.reason;Object.assign(s,p);record=s}else{record={id:repo.nextId('SLOT'),facultyId:user.id,...p};db.slots.push(record as Database['slots'][number])}message='Availability saved.';break}
     case'deleteAvailability':{actionPayloads.deleteAvailability.parse(request.payload);requirePermission(user,'consultation.decide');const s=find(db.slots,id);if(s.facultyId!==user.id)throw unavailable();if(['booked','requested'].includes(s.state))throw conflict('Cancel the appointment before removing this time.');db.slots=db.slots.filter(slot=>slot.id!==s.id);message='Availability removed.';break}
+    case'uploadLoadSchedule':{
+      requirePermission(user,'load.manage')
+      const p=actionPayloads.uploadLoadSchedule.parse(request.payload)
+      if(p.endsOn<p.startsOn)throw new ApiError(400,'The term must end on or after the day it starts.','VALIDATION_ERROR')
+      // All or nothing: a load with any bad row is not saved, and every problem is listed by row.
+      const issues:z.core.$ZodIssue[]=[]
+      const accepted:{facultyId:string;row:z.infer<typeof loadRowSchema>}[]=[]
+      for(const [index,raw] of p.rows.entries()){
+        const parsed=loadRowSchema.safeParse(raw)
+        if(!parsed.success){for(const issue of parsed.error.issues)issues.push({...issue,path:['rows',index,...issue.path]});continue}
+        const faculty=db.users.find(u=>isFaculty(u)&&u.email.toLowerCase()===parsed.data.facultyEmail)
+        if(!faculty){issues.push({code:'custom',path:['rows',index,'facultyEmail'],message:'No active faculty account has this email.',input:undefined});continue}
+        const clash=accepted.find(a=>a.facultyId===faculty.id&&a.row.day===parsed.data.day&&a.row.start<parsed.data.end&&parsed.data.start<a.row.end)
+        if(clash){issues.push({code:'custom',path:['rows',index,'start'],message:`This class overlaps ${clash.row.subject} (${clash.row.day} ${clash.row.start} to ${clash.row.end}) for the same faculty member.`,input:undefined});continue}
+        accepted.push({facultyId:faculty.id,row:parsed.data})
+      }
+      if(issues.length)throw new z.ZodError(issues)
+      // Uploading again replaces each listed faculty member's classes for the term.
+      const replaced=new Set(accepted.map(a=>a.facultyId))
+      db.loadSchedules=db.loadSchedules.filter(c=>!(c.term===p.term&&replaced.has(c.facultyId)))
+      const at=now()
+      for(const {facultyId,row} of accepted)db.loadSchedules.push({id:repo.nextId('LOAD'),facultyId,term:p.term,startsOn:p.startsOn,endsOn:p.endsOn,day:row.day,start:row.start,end:row.end,subject:row.subject,...(row.section?{section:row.section}:{}),...(row.room?{room:row.room}:{}),uploadedBy:user.id,at})
+      audit(repo,user,'Faculty load uploaded','scheduling',p.term)
+      const conflicts=db.slots.filter(s=>replaced.has(s.facultyId)&&s.state!=='unavailable'&&classAt(db,s.facultyId,s.date,s.start,s.end)).length
+      record={term:p.term,faculty:replaced.size,classes:accepted.length,conflicts}
+      message=conflicts?`Load saved. ${conflicts} consultation time${conflicts===1?'':'s'} overlap a class; see the list.`:'Load saved.'
+      break
+    }
     case'addMaterial':{
       const p=actionPayloads.addMaterial.parse(request.payload)
       const space=find(db.spaces,p.spaceId)

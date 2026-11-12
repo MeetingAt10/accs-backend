@@ -15,7 +15,7 @@ export const talkModes = ['chat', 'video', 'voice', 'face_to_face'] as const
 export type TalkMode = (typeof talkModes)[number]
 export const userSchema = z.object({ id: z.string(), name: z.string(), email: z.email(), roles: z.array(roleSchema), program: z.string().optional(), section: z.string().optional(), campus: z.string().optional(), office: z.string().optional(), organizationId: z.string().optional(), restrictions: z.array(z.string()), title: z.string(), bio: z.string(), education: z.string(), officeHours: z.string(), year: z.number().optional(), studentId: z.string().optional(), spaceIds: z.array(z.string()), organizationIds: z.array(z.string()), adviserId: z.string().optional(), active: z.boolean(), username: z.string().optional(), mustChangeCredentials: z.boolean().optional() })
 export type User = z.infer<typeof userSchema>
-export const pageIdSchema = z.string().regex(/^P(0[1-9]|[1-4][0-9]|5[0-3])$/)
+export const pageIdSchema = z.string().regex(/^P(0[1-9]|[1-4][0-9]|5[0-4])$/)
 export const pageQuerySchema = z.object({ id: z.string().max(100).optional(), q: z.string().max(200).optional(), tab: z.string().max(50).optional(), status: z.string().max(50).optional(), program: z.string().max(20).optional(), year: z.string().max(4).optional(), section: z.string().max(20).optional(), clearance: z.enum(['clear','on_hold']).optional(), category: z.string().max(80).optional(), stage: z.string().max(40).optional(), period: z.string().max(40).optional(), from: z.string().max(40).optional(), to: z.string().max(40).optional(), severity: z.enum(['low','medium','high']).optional(), cycle: z.string().max(100).optional(), label: z.string().max(80).optional(), scope: z.string().max(100).optional(), space: z.string().max(100).optional(), priority: z.string().max(30).optional(), type: z.string().max(40).optional(), source: z.string().max(30).optional(), role: roleSchema.optional(), office: z.string().max(100).optional(), view: z.enum(['month','week','list']).optional(), date: z.string().max(40).optional(), layers: z.string().max(200).optional(), sort: z.string().max(40).optional(), received: z.string().max(40).optional(), unread: z.enum(['true','false']).optional(), standing: z.string().max(60).optional(), recipient: z.string().max(100).optional(), hasRestriction: z.enum(['true','false']).optional(), purpose: z.enum(['Case handling', 'Good Moral review', 'Restriction review', 'Program oversight']).optional(), page: z.coerce.number().int().min(1).max(10000).optional() }).strict()
 export type PageQuery = z.infer<typeof pageQuerySchema>
 export const jsonObjectSchema = z.record(z.string(), z.json())
@@ -136,11 +136,23 @@ const createPostSchema = z.object({
   }
 })
 export const questionSchema = z.object({ id: z.string(), criterion: text, text, type: z.enum(['rating', 'text']), required: z.boolean() })
+const weekdayNames: Record<string, string> = { mon: 'Mon', monday: 'Mon', tue: 'Tue', tues: 'Tue', tuesday: 'Tue', wed: 'Wed', wednesday: 'Wed', thu: 'Thu', thur: 'Thu', thurs: 'Thu', thursday: 'Thu', fri: 'Fri', friday: 'Fri', sat: 'Sat', saturday: 'Sat' }
+/** One row of a faculty load file (#39). The columns are assumed until a sample file is provided. */
+export const loadRowSchema = z.object({
+  facultyEmail: z.string({ error: 'Enter the faculty email.' }).trim().toLowerCase().pipe(z.email('Enter a valid email address.')),
+  day: z.string({ error: 'Enter the day, like Mon.' }).trim().toLowerCase().transform((day) => weekdayNames[day] ?? day).pipe(z.enum(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], { error: 'Use a day from Mon to Sat.' })),
+  start: z.string({ error: 'Enter the start time, like 07:30.' }).trim().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use 24-hour time, like 07:30.'),
+  end: z.string({ error: 'Enter the end time, like 09:00.' }).trim().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use 24-hour time, like 09:00.'),
+  subject: z.string({ error: 'Enter the subject.' }).trim().min(1, 'Enter the subject.').max(120, 'Use at most 120 characters.'),
+  section: z.string().trim().max(20, 'Use at most 20 characters.').optional(),
+  room: z.string().trim().max(40, 'Use at most 40 characters.').optional(),
+}).refine((row) => row.end > row.start, { path: ['end'], message: 'The end time must be later than the start time.' })
 const materialUrl = z.string().trim().max(2000).pipe(z.url({ protocol: /^https?$/, error: 'Use a link that starts with http:// or https://.' }))
 export const actionPayloads = {
   addMaterial: z.object({ spaceId: z.string().min(1), title: z.string().trim().min(1, 'Enter a title.').max(160, 'Use at most 160 characters.'), url: materialUrl, note: z.string().trim().max(1000, 'Use at most 1000 characters.').optional() }).strict(),
   updateMaterial: z.object({ title: z.string().trim().min(1, 'Enter a title.').max(160, 'Use at most 160 characters.'), url: materialUrl, note: z.string().trim().max(1000, 'Use at most 1000 characters.').optional() }).strict(),
   removeMaterial: z.object({}).strict(),
+  uploadLoadSchedule: z.object({ term: z.string().trim().min(1).max(60), startsOn: date, endsOn: date, rows: z.array(z.unknown()).min(1).max(500) }).strict(),
   createPost: createPostSchema,
   updatePost: z.object(postContent).strict(),
   deletePost: z.object({}).strict(),
@@ -176,7 +188,11 @@ export const actionPayloads = {
   // `category` and `subcategory` (src/appointments.ts), with `details` required for "Other" and optional otherwise.
   createConsultation: z.object({ slotId: z.string().min(1), purpose: z.string().trim().min(1).max(300).optional(), category: z.string().trim().min(1).max(80).optional(), subcategory: z.string().trim().min(1).max(80).optional(), details: z.string().trim().max(300).optional() }).strict(),
   decideConsultation: z.object({ decision: z.enum(['Approved', 'Booked', 'Completed', 'Declined', 'Cancelled']), note: z.string().max(2000).optional() }).strict(),
-  saveAvailability: z.object({ date, start: time, end: time, state: z.enum(['open', 'unavailable']).default('open') }).strict(),
+  // A time marked not available needs a reason (#32); an open time takes none.
+  saveAvailability: z.object({ date, start: time, end: time, state: z.enum(['open', 'unavailable']).default('open'), reason: z.string().trim().max(300, 'Use at most 300 characters.').optional() }).strict().superRefine((p, ctx) => {
+    if (p.state === 'unavailable' && !p.reason) ctx.addIssue({ code: 'custom', path: ['reason'], message: 'Give a reason for marking this time not available.' })
+    if (p.state === 'open' && p.reason) ctx.addIssue({ code: 'custom', path: ['reason'], message: 'Only a time marked not available takes a reason.' })
+  }),
   deleteAvailability: z.object({}).strict(),
   createTodo: z.object({ title: text.max(200), date }).strict(),
   toggleTodo: z.object({ done: z.boolean() }).strict(),
