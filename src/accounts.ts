@@ -16,7 +16,7 @@ import {
 import { ApiError, deny, unavailable, type AccountChange, type ProfileChange } from './services.js'
 import type { SessionStore } from './sessions.js'
 import { mainCampus } from './sections.js'
-import { demoUserIds, newUser, type Database, type Repository } from './store.js'
+import { demoUserIds, newUser, seed, type Database, type Repository } from './store.js'
 
 // Account provisioning. The Dean activates the secretary; the secretary creates faculty and students, assigns advisers
 // and program chairs, and switches accounts on and off. All account state lives in the auth store (S3), which every
@@ -30,7 +30,7 @@ const secretaryScope: Role[] = ['student', 'professor', 'chair']
 // --- invites ---------------------------------------------------------------------------------------------------------
 
 export type Invite = { accountId: string; to: string; name: string; signInUrl: string; username: string; temporaryPassword: string }
-/** Delivers an invite. SES will implement this; until then nothing is sent and the UI shows a copyable invite. */
+/** Delivers an invite: by email through SES when MAIL_FROM is set (src/mail.ts, #36); otherwise nothing is sent and the UI shows a copyable invite. */
 export interface InviteMailer { send(invite: Invite): Promise<{ sent: boolean }> }
 export const unsentMailer: InviteMailer = {
   async send(invite) {
@@ -39,7 +39,21 @@ export const unsentMailer: InviteMailer = {
     return { sent: false }
   },
 }
-export const sendInvite = (invite: Invite, mailer: InviteMailer = unsentMailer) => mailer.send(invite)
+// The sample accounts carry made-up addresses (secretary@example.invalid, ...@qcu.edu.ph), so an invite to one of them is
+// never emailed: it would bounce, or reach whoever owns that real mailbox.
+const sampleAddresses = new Set(seed().users.map((user) => user.email.toLowerCase()))
+/** Sends an invite. A failed or skipped send returns `sent: false` so the UI shows the invite once; credentials are never logged. */
+export async function sendInvite(invite: Invite, mailer: InviteMailer = unsentMailer) {
+  if (sampleAddresses.has(invite.to.toLowerCase())) {
+    console.log(`[accs] invite for ${invite.accountId} not sent: the address is a sample one`)
+    return { sent: false }
+  }
+  try { return await mailer.send(invite) }
+  catch (error) {
+    console.error(JSON.stringify({ level: 'error', message: 'Invite email not sent', accountId: invite.accountId, error: error instanceof Error ? error.name : 'Unknown' }))
+    return { sent: false }
+  }
+}
 
 // --- temporary credentials -------------------------------------------------------------------------------------------
 
