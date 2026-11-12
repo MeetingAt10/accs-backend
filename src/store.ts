@@ -248,3 +248,10 @@ export function seed(): Database {
 }
 /** The seeded accounts that sign in with the shared seed password until they set their own. Inactive ones (the secretary) never do. */
 export const demoUserIds: ReadonlySet<string> = new Set(seed().users.filter(u => u.active).map(u => u.id))
+const sampleEmails = new Map(seed().users.map(u => [u.id, u.email.toLowerCase()]))
+/**
+ * A seeded account that still has its made-up address. Such an account is never emailed, because the address may belong to
+ * someone else. Once a real address is set (the Dean through the System Administrator, the Secretary through the Dean), the
+ * account gets email like any other.
+ */
+export const isSampleAddress = (userId: string, email: string) => sampleEmails.get(userId) === email.toLowerCase()
