@@ -7,7 +7,7 @@ import { z } from 'zod'
 import { type AuthData, type AuthStore, AuthStoreConflict, createAuthStore, defaultHash, hashPassword, verifyPassword } from './auth.js'
 import { env, onLambda, tableName } from './env.js'
 import { actionRequestSchema, actionResponseSchema, changePasswordSchema, completeFirstLoginSchema, emptyBodySchema, errorResponseSchema, forgotPasswordSchema, healthResponseSchema, idParamsSchema, pageQuerySchema, pageResponseSchema, resetPasswordSchema, sessionResponseSchema, signInSchema, type User } from './schemas.js'
-import { createNewConcernMailer, createResetMailer, type NewConcernMailer, type ResetCodeMailer } from './mail.js'
+import { createNewConcernMailer, createResetMailer, createSesInviteMailer, type NewConcernMailer, type ResetCodeMailer } from './mail.js'
 import { accountRouter, applyAccounts, recordAudit, saveAccountChange, saveProfileChange, setOwnCredentials, unsentMailer, type InviteMailer } from './accounts.js'
 import { hasPermission } from './access.js'
 import { devRouter, devToolboxEnabled, isDevToolboxCall, type Stack } from './dev.js'
@@ -175,7 +175,8 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   app.get('/api/session',(_req,res)=>send(res,sessionResponseSchema,sessionView(res.locals.user as User)))
   app.get('/api/pages/:pageId',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const query=pageQuerySchema.parse(req.query);send(res,pageResponseSchema,await getPage(repository,res.locals.user as User,pageId,query))})
   app.post('/api/pages/:pageId/actions',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const body=actionRequestSchema.parse(req.body);send(res,actionResponseSchema,await performAction(repository,res.locals.user as User,pageId,body,saveAccount,saveProfile,sendMail))})
-  app.use('/api/accounts',accountRouter({repository,authStore,sessions,mailer:options.mailer??unsentMailer}))
+  // Invites go out by email when MAIL_FROM is set (#36); otherwise the screen shows them once.
+  app.use('/api/accounts',accountRouter({repository,authStore,sessions,mailer:options.mailer??(env.MAIL_FROM?createSesInviteMailer(env.MAIL_FROM):unsentMailer)}))
   if(devToolbox)app.use('/api/dev',devRouter({repository,sessions,start:startSession,out:sessionOut}))
   app.use('/api',(_req,res)=>send(res,errorResponseSchema,{error:'This API resource is not available.',code:'NOT_FOUND'},404))
   const errors:ErrorRequestHandler=(error,req,res,_next)=>{if(error instanceof z.ZodError)return send(res,errorResponseSchema,{error:'Check the required fields.',code:'VALIDATION_ERROR',fields:error.issues.map(issue=>({path:issue.path.map(String).join('.'),message:issue.message}))},400);if(error instanceof ApiError)return send(res,errorResponseSchema,{error:error.message,code:error.code},error.status);if(error instanceof AuthStoreConflict)return send(res,errorResponseSchema,{error:error.message,code:'CONFLICT'},409);if(error instanceof SyntaxError)return send(res,errorResponseSchema,{error:'The request must contain valid JSON.',code:'VALIDATION_ERROR'},400)
