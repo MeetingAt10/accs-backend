@@ -111,7 +111,11 @@ export type LoadEntry = { id: string; facultyId: string; term: string; startsOn:
  * A class material in a subject space (#44): the subject's professor shares it with the section's students. Links for now;
  * uploaded files come with the storage bucket (kind 'file').
  */
-export type Material = { id: string; spaceId: string; kind: 'link'; title: string; url: string; note?: string; authorId: string; at: string; updatedAt: string }
+export type Material = { id: string; spaceId: string; kind: 'link' | 'file'; title: string; note?: string; authorId: string; at: string; updatedAt: string
+  /** A link's address. */
+  url?: string
+  /** A file's original name, type, size, storage key, and whether its upload was confirmed (src/material-storage.ts). */
+  fileName?: string; contentType?: string; size?: number; key?: string; status?: 'pending' | 'ready' }
 export type Collection = 'reports' | 'consultations' | 'slots' | 'threads' | 'notifications' | 'audit' | 'posts' | 'moderation' | 'drafts' | 'events' | 'todos' | 'cycles' | 'assignments' | 'followUps' | 'restrictions' | 'referrals' | 'strikes' | 'strikeSettlements' | 'materials' | 'loadSchedules' | 'goodMoral' | 'clusters' | 'settings' | 'permissionOverrides' | 'telemetry'
 /**
  * The storage boundary. A backend does its I/O around the work: it loads, runs the work, then commits.

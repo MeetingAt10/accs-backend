@@ -1,8 +1,9 @@
 import { z } from 'zod'
 import { categoryProblem, concernCategories } from './categories.js'
 import { mainCampus, sectionName } from './sections.js'
+import { materialFileTypes, materialMaxBytes, safeFileName, uploadUrlSeconds, type MaterialStorage } from './material-storage.js'
 import { appointmentCategories, appointmentProblem, concernFollowUp, purposeOf, type AppointmentChoice } from './appointments.js'
-import { loadRowSchema, actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
+import { loadRowSchema, materialUploadSchema, actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
 import { allowedPages, canActCase, canAudience, canReadCase, isEarlierHandler, overseesCase, canCountCase, canFacultyResult, canPage, canPublish, canReach, canSpace, canStudentRecord, canThread, canViewCase, hasPermission, hasRole, isOrganizationMember, pageTitles, permissionRoles, permissions, scopeLabel } from './access.js'
 import { consentWording } from './consent.js'
 import type { Material, Space, Assignment, Consultation, Cycle, Database, Message, Moderation, Post, Report, Repository, Slot, Stage, Strike, Thread, UnitOfWork } from './store.js'
@@ -343,7 +344,8 @@ const isSectionSpace = (space:Space) => space.subject === 'Section group'
 function subjectsOf(db:Database,section:Space) { return db.spaces.filter(s=>!isSectionSpace(s)&&s.program===section.program&&s.section===section.section&&(s.campus??'SB')===(section.campus??'SB')&&(s.year===undefined||section.year===undefined||s.year===section.year)) }
 const teachesSubject = (user:User,space:Space) => hasRole(user,'professor','chair','dean') && space.professorIds.includes(user.id)
 const opensMaterials = (user:User,space:Space) => teachesSubject(user,space) || hasRole(user,'student') && space.studentIds.includes(user.id)
-function materialsFor(db:Database,user:User,space:Space) { return opensMaterials(user,space) ? db.materials.filter(m=>m.spaceId===space.id).map(m=>({...m,author:author(db,m.authorId)})) : undefined }
+// A file shows to students once its upload is confirmed; its professors also see pending ones. The storage key stays inside.
+function materialsFor(db:Database,user:User,space:Space) { if(!opensMaterials(user,space))return undefined; const teacher=teachesSubject(user,space); return db.materials.filter(m=>m.spaceId===space.id&&(m.kind==='link'||m.status==='ready'||teacher)).map(({key:_key,...m})=>({...m,author:author(db,m.authorId),...(m.kind==='file'&&m.status==='ready'?{downloadUrl:`/api/materials/${encodeURIComponent(m.id)}/file`}:{})})) }
 function visibleSlots(db:Database,user:User){return slotsFor(user,db.slots.filter(s=>s.facultyId===user.id||hasRole(user,'dean','chair')||canReach(db,user,find(db.users,s.facultyId))))}
 /** One request per time: the rule for a student's appointment request and for a time booked to talk about a concern. */
 function reserveSlot(repo:UnitOfWork,studentId:string,slot:Slot,choice:AppointmentChoice,reportId?:string):Consultation {
@@ -831,7 +833,9 @@ export type ProfileChange = { title: string; bio: string; education: string; off
 // Accounts live in the auth store, shared by every instance, so a role or profile change is saved there once the action has committed.
 /** An email to send after an action commits: for now, a new concern for the office receiving it (#37). */
 export type OutgoingMail = { kind: 'newConcern'; userId: string; to: string; name: string; reportId: string }
-export async function performAction(repo:Repository,user:User,pageId:string,request:ActionRequest,saveAccount?:(change:AccountChange)=>Promise<void>,saveProfile?:(id:string,change:ProfileChange)=>Promise<void>,sendMail?:(mail:OutgoingMail[])=>Promise<void>){
+/** Work done once an action has committed: emails, and stored files to delete (#44). */
+export type AfterCommit = OutgoingMail | { kind: 'deleteFile'; key: string }
+export async function performAction(repo:Repository,user:User,pageId:string,request:ActionRequest,saveAccount?:(change:AccountChange)=>Promise<void>,saveProfile?:(id:string,change:ProfileChange)=>Promise<void>,sendMail?:(work:AfterCommit[])=>Promise<void>){
   const {outbox,...result}=await repo.transact(unit=>runAction(unit,user,pageId,request))
   // Emails go out only once the change is saved, and never reach the response.
   if(outbox.length)await sendMail?.(outbox)
@@ -841,7 +845,7 @@ export async function performAction(repo:Repository,user:User,pageId:string,requ
 }
 function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest){
   if(!canPage(user,pageId)||!actionPages[request.action]?.includes(pageId))throw deny()
-  const db=repo.read();const id=request.recordId;let record:unknown;let message='Changes saved.';const outbox:OutgoingMail[]=[]
+  const db=repo.read();const id=request.recordId;let record:unknown;let message='Changes saved.';const outbox:AfterCommit[]=[]
   // The report is named by the record ID, or by `reportId` in the payload for the talk actions.
   const getOwnReport=(reportId=id)=>{const r=find(db.reports,reportIdOf(db,reportId));if(r.ownerId!==user.id||!hasRole(user,'student'))throw unavailable();return r}
   const getCase=(reportId=id)=>{const r=find(db.reports,reportIdOf(db,reportId));if(!canActCase(user,r))throw unavailable();return r}
@@ -1155,10 +1159,12 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       const space=find(db.spaces,material.spaceId)
       if(!opensMaterials(user,space))throw unavailable()
       if(!teachesSubject(user,space))throw deny()
-      if(request.action==='removeMaterial'){actionPayloads.removeMaterial.parse(request.payload??{});db.materials=db.materials.filter(m=>m.id!==material.id);audit(repo,user,'Class material removed','academic',material.id);record={id:material.id};message='Material removed.';break}
+      if(request.action==='removeMaterial'){actionPayloads.removeMaterial.parse(request.payload??{});db.materials=db.materials.filter(m=>m.id!==material.id);if(material.key)outbox.push({kind:'deleteFile',key:material.key});audit(repo,user,'Class material removed','academic',material.id);record={id:material.id};message='Material removed.';break}
       const p=actionPayloads.updateMaterial.parse(request.payload)
+      if(material.kind==='link'&&!p.url)throw new z.ZodError([{code:'custom',path:['url'],message:'Enter the link.',input:undefined}])
+      if(material.kind==='file'&&p.url)throw new z.ZodError([{code:'custom',path:['url'],message:'A file keeps its file. Remove it and add a link instead.',input:undefined}])
       delete material.note
-      Object.assign(material,{title:p.title,url:p.url,...(p.note?{note:p.note}:{}),updatedAt:now()})
+      Object.assign(material,{title:p.title,...(p.url?{url:p.url}:{}),...(p.note?{note:p.note}:{}),updatedAt:now()})
       audit(repo,user,'Class material changed','academic',material.id)
       record=material
       message='Material saved.'
@@ -1319,6 +1325,48 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
     default:throw new ApiError(400,'That action does not exist.','VALIDATION_ERROR')
   }
   return {...JSON.parse(JSON.stringify({ok:true,message,...(record===undefined?{}:{record})})) as {ok:true;message:string;record?:unknown},outbox}
+}
+// --- class material files (#44) -------------------------------------------------------------------------------------
+const filesNotSetUp = () => conflict('File uploads are not set up yet. Share a link instead.')
+/** Checks the file, records a pending material, and returns a signed upload for exactly that type and size. */
+export async function startMaterialUpload(repo:Repository,user:User,payload:unknown,storage?:MaterialStorage){
+  const p=materialUploadSchema.parse(payload)
+  const extension=p.fileName.toLowerCase().split('.').pop()??''
+  const allowed=materialFileTypes[p.contentType]
+  if(!allowed)throw new z.ZodError([{code:'custom',path:['contentType'],message:'Use a PDF, Word, PowerPoint, Excel, text, PNG or JPG file.',input:undefined}])
+  if(!allowed.includes(extension))throw new z.ZodError([{code:'custom',path:['fileName'],message:`A ${allowed.map(e=>'.'+e).join(' or ')} file name is expected for this type.`,input:undefined}])
+  if(p.size>materialMaxBytes)throw new z.ZodError([{code:'custom',path:['size'],message:'Use a file of at most 25 MB.',input:undefined}])
+  const material=await repo.transact(unit=>{
+    const db=unit.read()
+    const space=find(db.spaces,p.spaceId)
+    if(!canSpace(user,space)||isSectionSpace(space))throw unavailable()
+    if(!teachesSubject(user,space))throw deny()
+    if(!storage)throw filesNotSetUp()
+    const at=now();const id=unit.nextId('MATERIAL')
+    const m:Material={id,spaceId:space.id,kind:'file',title:p.title,...(p.note?{note:p.note}:{}),fileName:p.fileName,contentType:p.contentType,size:p.size,key:`materials/${space.id}/${id}/${safeFileName(p.fileName)}`,status:'pending',authorId:user.id,at,updatedAt:at}
+    db.materials.push(m)
+    audit(unit,user,'Class material file upload started','academic',m.id)
+    return m
+  })
+  const url=await storage!.uploadUrl(material.key!,material.contentType!,material.size!)
+  const {key:_key,...shown}=material
+  return {material:shown,upload:{url,method:'PUT',headers:{'Content-Type':material.contentType!,'Content-Length':String(material.size)},expiresInSeconds:uploadUrlSeconds}}
+}
+/** Confirms an upload once the stored file has the declared size and type; students see it from then on. */
+export async function completeMaterialUpload(repo:Repository,user:User,id:string,storage?:MaterialStorage){
+  if(!storage)throw filesNotSetUp()
+  const pending=await repo.view(unit=>{const db=unit.read();const m=find(db.materials,id);const space=find(db.spaces,m.spaceId);if(!opensMaterials(user,space))throw unavailable();if(!teachesSubject(user,space))throw deny();if(m.kind!=='file')throw conflict('Only a file is uploaded.');return m})
+  if(pending.status==='ready'){const {key:_k,...shown}=pending;return shown}
+  const stored=await storage.head(pending.key!)
+  if(!stored)throw conflict('The file has not been uploaded yet. Upload it, then try again.')
+  if(stored.size!==pending.size||stored.size>materialMaxBytes||stored.contentType!==undefined&&stored.contentType!==pending.contentType){await storage.remove(pending.key!);throw conflict('The uploaded file does not match what was declared. Upload it again.')}
+  return repo.transact(unit=>{const m=find(unit.read().materials,id);m.status='ready';m.updatedAt=now();audit(unit,user,'Class material added','academic',m.id);const {key:_k,...shown}=m;return shown})
+}
+/** A short-lived download link for a confirmed file, for the subject's professors and students only. */
+export async function materialDownloadUrl(repo:Repository,user:User,id:string,storage?:MaterialStorage){
+  const m=await repo.view(unit=>{const db=unit.read();const m=find(db.materials,id);const space=find(db.spaces,m.spaceId);if(!opensMaterials(user,space)||m.kind!=='file'||m.status!=='ready'&&!teachesSubject(user,space))throw unavailable();return m})
+  if(!storage)throw filesNotSetUp()
+  return storage.downloadUrl(m.key!,m.fileName!)
 }
 export interface AssistantProvider { answer(db:Database,user:User,question:string):{reply:string;sources:{title:string;href:string}[]} }
 export const demoAssistant:AssistantProvider={answer(db,user,question){const q=question.toLowerCase();const fallback={reply:'I can explain ACCS pages, your schedule, and the milestones on your own reports. I cannot answer that one. Please ask the office that handles it.',sources:[{title:'Help',href:'/help'}]};if(/guilt|guilty|verdict|punish|decide|restrict|another student|reveal|identity|who reported/.test(q))return fallback;const mentioned:string[]=question.match(/RPT-[0-9A-Z]+/g)??[];if(mentioned.some(id=>!db.reports.some(r=>r.id===id&&r.ownerId===user.id)))return fallback;if(/schedule|calendar|appointment|consultation/.test(q)){if(!canPage(user,'P13'))return fallback;const own=visibleConsultations(db,user);const tasks=db.todos.filter(t=>t.ownerId===user.id);return {reply:`Your calendar has ${visibleEvents(db,user).length} college events${hasRole(user,'student')?`, ${tasks.length} to-do${tasks.length===1?"":"s"}`:''} and ${own.length} appointment request${own.length===1?'':'s'}. Open the calendar or Consultations for dates and status.`,sources:[{title:'Calendar',href:'/calendar'},...(canPage(user,'P14')?[{title:'Appointments',href:'/consultations'}]:[])]}}if(/report|milestone|stage/.test(q)&&hasRole(user,'student')){const reports=db.reports.filter(r=>r.ownerId===user.id&&(!mentioned.length||mentioned.includes(r.id)));return {reply:reports.length?reports.map(r=>`${r.id}: ${statusFor(r)}. ${r.history.filter(h=>h.public).at(-1)?.update??'No update yet.'}`).join('\n'):'You have no submitted reports.',sources:[{title:'My reports',href:'/reports'}]}}if(/draft|write|word/.test(q)){return{reply:'Say what happened, when, and where, and what you want the office to look at. Name only the people the office needs to know about. Read it over before you submit. The assistant does not decide what happened.',sources:[{title:'Help',href:'/help'}]}}const entry=filteredFaq(user).find(f=>f.question.toLowerCase().split(/\W+/).filter(w=>w.length>4).some(w=>q.includes(w)));if(entry)return{reply:entry.answer,sources:[{title:entry.question,href:entry.href}]};if(/help|can you|what can/.test(q))return{reply:'I can explain ACCS pages and how reports, appointments, and evaluations work. Staff decide case outcomes and restrictions.',sources:[{title:'Help',href:'/help'}]};return fallback}}
