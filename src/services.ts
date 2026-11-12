@@ -5,7 +5,7 @@ import { appointmentCategories, appointmentProblem, concernFollowUp, purposeOf, 
 import { actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
 import { allowedPages, canActCase, canAudience, canReadCase, isEarlierHandler, overseesCase, canCountCase, canFacultyResult, canPage, canPublish, canReach, canSpace, canStudentRecord, canThread, canViewCase, hasPermission, hasRole, isOrganizationMember, pageTitles, permissionRoles, permissions, scopeLabel } from './access.js'
 import { consentWording } from './consent.js'
-import type { Assignment, Consultation, Cycle, Database, Message, Moderation, Post, Report, Repository, Slot, Stage, Strike, Thread, UnitOfWork } from './store.js'
+import type { Material, Space, Assignment, Consultation, Cycle, Database, Message, Moderation, Post, Report, Repository, Slot, Stage, Strike, Thread, UnitOfWork } from './store.js'
 
 export class ApiError extends Error { constructor(public status: number, message: string, public code = 'FORBIDDEN') { super(message) } }
 export const unavailable = () => new ApiError(404, "This record isn't available to you.", 'UNAVAILABLE')
@@ -318,6 +318,13 @@ function queuePostReview(repo: UnitOfWork, post: Post) {
   })
 }
 function visibleConsultations(db:Database,user:User){return db.consultations.filter(c=>c.studentId===user.id&&hasRole(user,'student')||c.facultyId===user.id&&hasRole(user,'professor'))}
+// Subjects and class materials (#44, baseline 6.3). A section space lists the subject spaces of the same section, each
+// with its professors. A subject's materials are for its professors and its students only, not for other offices.
+const isSectionSpace = (space:Space) => space.subject === 'Section group'
+function subjectsOf(db:Database,section:Space) { return db.spaces.filter(s=>!isSectionSpace(s)&&s.program===section.program&&s.section===section.section&&(s.campus??'SB')===(section.campus??'SB')&&(s.year===undefined||section.year===undefined||s.year===section.year)) }
+const teachesSubject = (user:User,space:Space) => hasRole(user,'professor','chair','dean') && space.professorIds.includes(user.id)
+const opensMaterials = (user:User,space:Space) => teachesSubject(user,space) || hasRole(user,'student') && space.studentIds.includes(user.id)
+function materialsFor(db:Database,user:User,space:Space) { return opensMaterials(user,space) ? db.materials.filter(m=>m.spaceId===space.id).map(m=>({...m,author:author(db,m.authorId)})) : undefined }
 function visibleSlots(db:Database,user:User){return db.slots.filter(s=>s.facultyId===user.id||hasRole(user,'dean','chair')||canReach(db,user,find(db.users,s.facultyId)))}
 /** One request per time: the rule for a student's appointment request and for a time booked to talk about a concern. */
 function reserveSlot(repo:UnitOfWork,studentId:string,slot:Slot,choice:AppointmentChoice,reportId?:string):Consultation {
@@ -399,6 +406,10 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
             return academicRoster ? { ...person(student), enrollmentStatus: 'Enrolled' } : { name: student.name, roles: student.roles }
           }),
           academicRoster,
+          // A section space lists its subjects; a subject space carries its own materials.
+          subjects: isSectionSpace(space) ? subjectsOf(db, space).map(subject => ({ id: subject.id, title: subject.title, subject: subject.subject, professors: subject.professorIds.map(id => person(find(db.users, id))), materials: materialsFor(db, user, subject), canManageMaterials: teachesSubject(user, subject) })) : undefined,
+          materials: isSectionSpace(space) ? undefined : materialsFor(db, user, space),
+          canManageMaterials: !isSectionSpace(space) && teachesSubject(user, space),
         }
         data.posts = posts.filter(post => post.audience === `space:${space.id}`).map(post => postView(db, post, user))
         data.canPost = canPublish(db, user, `space:${space.id}`, false)
@@ -741,6 +752,9 @@ const actionPages: Record<string, string[]> = {
   createConsultation: ['P15'],
   decideConsultation: ['P16'],
   saveAvailability: ['P17'],
+  addMaterial: ['P08'],
+  updateMaterial: ['P08'],
+  removeMaterial: ['P08'],
   deleteAvailability: ['P17'],
   createTodo: ['P13'],
   toggleTodo: ['P13'],
@@ -1009,6 +1023,33 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
     case'decideConsultation':{const p=actionPayloads.decideConsultation.parse(request.payload);const c=find(visibleConsultations(db,user),id);const student=c.studentId===user.id;const valid:Record<string,string[]>={Requested:['Approved','Declined','Cancelled'],Approved:['Booked','Cancelled'],Booked:['Completed','Cancelled'],Completed:[],Declined:[],Cancelled:[]};if(!valid[c.status]?.includes(p.decision)||student&&p.decision!=='Cancelled')throw conflict('That change is not available for this appointment.');if(!student)requirePermission(user,'consultation.decide');if(['Declined','Cancelled'].includes(p.decision)&&!(p.note?.trim()||request.reason?.trim()))throw new ApiError(400,'A reason is required.','VALIDATION_ERROR');const slot=find(db.slots,c.slotId);if(['Approved','Booked'].includes(p.decision)&&db.consultations.some(other=>other.id!==c.id&&other.slotId===slot.id&&['Approved','Booked'].includes(other.status)))throw conflict('This time is already booked.');c.status=p.decision;c.updatedAt=now();c.history.push({at:c.updatedAt,status:c.status,note:p.note??request.reason??'Status updated',actorId:user.id});slot.state=['Declined','Cancelled','Completed'].includes(c.status)?'open':c.status==='Booked'?'booked':'requested';notify(repo,student?c.facultyId:c.studentId,'consultation','P16',c.id);record=consultationView(db,c);message='Appointment updated.';break}
     case'saveAvailability':{requirePermission(user,'consultation.decide');const p=actionPayloads.saveAvailability.parse(request.payload);if(p.end<=p.start)throw new ApiError(400,'The end time must be later than the start time.','VALIDATION_ERROR');if(db.slots.some(s=>s.id!==id&&s.facultyId===user.id&&s.date===p.date&&s.start<p.end&&s.end>p.start))throw conflict('This time overlaps an existing slot.');if(id){const s=find(db.slots,id);if(s.facultyId!==user.id)throw unavailable();if(['booked','requested'].includes(s.state))throw conflict('This time has a request. Cancel the appointment first.');Object.assign(s,p);record=s}else{record={id:repo.nextId('SLOT'),facultyId:user.id,...p};db.slots.push(record as Database['slots'][number])}message='Availability saved.';break}
     case'deleteAvailability':{actionPayloads.deleteAvailability.parse(request.payload);requirePermission(user,'consultation.decide');const s=find(db.slots,id);if(s.facultyId!==user.id)throw unavailable();if(['booked','requested'].includes(s.state))throw conflict('Cancel the appointment before removing this time.');db.slots=db.slots.filter(slot=>slot.id!==s.id);message='Availability removed.';break}
+    case'addMaterial':{
+      const p=actionPayloads.addMaterial.parse(request.payload)
+      const space=find(db.spaces,p.spaceId)
+      if(!canSpace(user,space)||isSectionSpace(space))throw unavailable()
+      if(!teachesSubject(user,space))throw deny()
+      const at=now()
+      const material:Material={id:repo.nextId('MATERIAL'),spaceId:space.id,kind:'link',title:p.title,url:p.url,...(p.note?{note:p.note}:{}),authorId:user.id,at,updatedAt:at}
+      db.materials.push(material)
+      audit(repo,user,'Class material added','academic',material.id)
+      record=material
+      message='Material added.'
+      break
+    }
+    case'updateMaterial':case'removeMaterial':{
+      const material=find(db.materials,id)
+      const space=find(db.spaces,material.spaceId)
+      if(!opensMaterials(user,space))throw unavailable()
+      if(!teachesSubject(user,space))throw deny()
+      if(request.action==='removeMaterial'){actionPayloads.removeMaterial.parse(request.payload??{});db.materials=db.materials.filter(m=>m.id!==material.id);audit(repo,user,'Class material removed','academic',material.id);record={id:material.id};message='Material removed.';break}
+      const p=actionPayloads.updateMaterial.parse(request.payload)
+      delete material.note
+      Object.assign(material,{title:p.title,url:p.url,...(p.note?{note:p.note}:{}),updatedAt:now()})
+      audit(repo,user,'Class material changed','academic',material.id)
+      record=material
+      message='Material saved.'
+      break
+    }
     case'createTodo':{requirePermission(user,'todo.manage');const p=actionPayloads.createTodo.parse(request.payload);const todo={id:repo.nextId('TODO'),ownerId:user.id,...p,done:false};db.todos.push(todo);record=todo;message='To-do added.';break}
     case'toggleTodo':case'deleteTodo':{requirePermission(user,'todo.manage');const todo=find(db.todos,id);if(todo.ownerId!==user.id)throw unavailable();if(request.action==='toggleTodo')todo.done=actionPayloads.toggleTodo.parse(request.payload).done;else{actionPayloads.deleteTodo.parse(request.payload);db.todos=db.todos.filter(t=>t.id!==todo.id)}record=todo;message='To-do updated.';break}
     case 'createThread': {

@@ -15,6 +15,7 @@ export const persisted: Record<Collection, DomainTable> = {
   slots: 'ccs_scheduling',
   events: 'ccs_scheduling',
   todos: 'ccs_scheduling',
+  materials: 'ccs_academic',
   threads: 'ccs_messaging',
   notifications: 'ccs_notification',
   settings: 'ccs_notification',

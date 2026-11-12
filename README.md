@@ -45,6 +45,7 @@ The seed is the base. Twenty-three collections are shared by every instance and 
 |---|---|
 | `reports`, `clusters` | `ccs_grievance` |
 | `consultations`, `slots`, `events`, `todos` | `ccs_scheduling` |
+| `materials` | `ccs_academic` |
 | `threads` | `ccs_messaging` |
 | `notifications`, `settings` | `ccs_notification` |
 | `posts` (with their comments and reactions) | `ccs_community` |
@@ -62,7 +63,7 @@ One item per record: `PK = STATE#<collection>`, `SK` the record ID, `data` the r
 - `view` queries each collection it needs (strongly consistent, every page of the result, in parallel), lays the records over the seed, and runs the work on that private copy.
 - `transact` does the same, then writes only the records that changed, each conditioned on the version it read (`attribute_not_exists(PK)` for a new record), in one `TransactWriteItems` per 100 writes. If another instance changed a record first, the work runs again on fresh data, up to 3 times in all, and then the call fails with `409 CONFLICT`. A change of more than 100 records is split into several transactions; if a later one loses a race the work is not run again, since the earlier ones are already stored, and the call fails with `409`. Transactions on one instance take turns.
 - The write check is per record: two instances changing the same record cannot both win (one slot, one consultation), but a unit of work that only reads a record and acts on it is not re-checked.
-- Every `view` and action loads all 23 collections (one parallel query each) unless it names fewer. The session check on every authenticated request names only `restrictions`. Notifications, telemetry, and the audit trail grow without bound; they need a per-user key or a time window before the pilot gets large.
+- Every `view` and action loads all 24 collections (one parallel query each) unless it names fewer. The session check on every authenticated request names only `restrictions`. Notifications, telemetry, and the audit trail grow without bound; they need a per-user key or a time window before the pilot gets large.
 - A post is one record, so comments racing on the same post retry, and can reach the `409`. A cycle that generates more than 100 assignments is written in several transactions, so that change is not atomic.
 
 Four collections stay on the seed, per instance: `users` (accounts come from the auth store below), `spaces` (only changed from the auth store), and `organizations` and `offenses` (no route writes them). `src/records.ts` holds the small `RecordStore` interface (`list`, `write`), its DynamoDB implementation, and an in-memory one the tests use to run two app instances over one store.
@@ -163,6 +164,9 @@ Flagged content is hidden until it is reviewed (#43). While a post, comment or m
 ## Appointments
 
 "Consultations" are called **appointments** in everything users see (decided 11 November 2026); the API keeps its names (`createConsultation`, `decideConsultation`, the `consultations` collection, the `consultation` notification kind) so clients keep working. A booking says what it is for with a `category` and `subcategory` from `src/appointments.ts` (Academic advising, Class or subject, Thesis or capstone, Career or internship, Documents and signatures, Personal concern, and "Other (please specify)", which needs `details`); `details` is an optional note otherwise. A missing or unknown choice is a 400 `VALIDATION_ERROR` naming the field. P14 and P15 return the list as `appointmentCategories`. A time booked from a concern is filed under "Concern follow-up / Talk about a concern", which cannot be picked by hand. The current screen's free `purpose` is still accepted until it switches to the dropdowns; `purpose` is always set (the sub-category, or the description for Other) so lists keep showing it.
+
+## Subjects and class materials
+A section space (P08, `subject: 'Section group'`) lists `subjects`: the subject spaces of the same campus, program, year and section letter, each with its `professors` (#44, baseline 6.3). A subject's professors share class materials with its students: `addMaterial` `{ spaceId, title, url, note? }`, `updateMaterial` and `removeMaterial` (by `recordId`) on P08. Materials are links for now (`http` or `https` only); file uploads (up to 25 MB; PDF, Office documents, plain text, PNG and JPG) come in a second step with an S3 bucket in accs-architecture. Only the subject's professors and its students see `materials`; other offices that can open the space, such as the Dean, do not. Adding to a section space is a 404, and anyone but the subject's professors gets a 403. Every change is audited.
 
 ## Campuses and section names
 CCS runs on three campuses (#46, `src/sections.ts`): **SB** San Bartolome (1st to 4th year), **BAT** Batasan and **SF** San Francisco (1st and 2nd year only; their students move to San Bartolome for 3rd year). A section is named campus + program code + year + letter: `SBIT1A`, `BATIT1A`, `SFIT1A`, `SBCS3B`, `SFIS2A`. Section spaces carry `campus` and `year`, and their title is the section name.

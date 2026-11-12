@@ -136,7 +136,11 @@ const createPostSchema = z.object({
   }
 })
 export const questionSchema = z.object({ id: z.string(), criterion: text, text, type: z.enum(['rating', 'text']), required: z.boolean() })
+const materialUrl = z.string().trim().max(2000).pipe(z.url({ protocol: /^https?$/, error: 'Use a link that starts with http:// or https://.' }))
 export const actionPayloads = {
+  addMaterial: z.object({ spaceId: z.string().min(1), title: z.string().trim().min(1, 'Enter a title.').max(160, 'Use at most 160 characters.'), url: materialUrl, note: z.string().trim().max(1000, 'Use at most 1000 characters.').optional() }).strict(),
+  updateMaterial: z.object({ title: z.string().trim().min(1, 'Enter a title.').max(160, 'Use at most 160 characters.'), url: materialUrl, note: z.string().trim().max(1000, 'Use at most 1000 characters.').optional() }).strict(),
+  removeMaterial: z.object({}).strict(),
   createPost: createPostSchema,
   updatePost: z.object(postContent).strict(),
   deletePost: z.object({}).strict(),
