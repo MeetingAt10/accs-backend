@@ -149,6 +149,8 @@ export const loadRowSchema = z.object({
 }).refine((row) => row.end > row.start, { path: ['end'], message: 'The end time must be later than the start time.' })
 const materialUrl = z.string().trim().max(2000).pipe(z.url({ protocol: /^https?$/, error: 'Use a link that starts with http:// or https://.' }))
 export const actionPayloads = {
+  // A faculty member reports a student (decided 12 November 2026). Same categories as a concern.
+  reportStudent: z.object({ studentId: z.string().min(1), narrative: z.string().trim().min(1).max(4000), category: z.string().trim().min(1).max(80), subcategory: z.string().trim().min(1).max(80).optional(), categoryDetail: z.string().trim().max(120).optional(), severity: z.enum(['low', 'medium', 'high']), location: z.string().trim().max(200).optional(), occurredOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).strict(),
   addMaterial: z.object({ spaceId: z.string().min(1), title: z.string().trim().min(1, 'Enter a title.').max(160, 'Use at most 160 characters.'), url: materialUrl, note: z.string().trim().max(1000, 'Use at most 1000 characters.').optional() }).strict(),
   updateMaterial: z.object({ title: z.string().trim().min(1, 'Enter a title.').max(160, 'Use at most 160 characters.'), url: materialUrl, note: z.string().trim().max(1000, 'Use at most 1000 characters.').optional() }).strict(),
   removeMaterial: z.object({}).strict(),
