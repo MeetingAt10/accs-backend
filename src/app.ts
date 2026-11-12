@@ -18,7 +18,7 @@ import { createS3MaterialStorage, type MaterialStorage } from './material-storag
 import { createResetStore, resetPolicy, type ResetStore } from './resets.js'
 import { createThrottleStore, type ThrottleStore } from './throttle.js'
 import { createSessionStore, isWellFormedToken, newSessionToken, sessionIdOf, sessionPolicy, sessionState, type SessionStore } from './sessions.js'
-import { demoUserIds, type Repository } from './store.js'
+import { demoUserIds, isSampleAddress, type Repository } from './store.js'
 import { currentAccountId, formerAccountIds } from './renames.js'
 
 export function createApp(repository:Repository=createRepository({nodeEnv:env.NODE_ENV,tableName}),options:{authStore?:AuthStore;sessionStore?:SessionStore;resetStore?:ResetStore;throttleStore?:ThrottleStore;mailer?:InviteMailer;resetMailer?:ResetCodeMailer;concernMailer?:NewConcernMailer;materialStorage?:MaterialStorage;stack?:Stack}={}){
@@ -103,7 +103,7 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     await Promise.all(work.flatMap(w=>w.kind==='deleteFile'&&materialStorage?[materialStorage.remove(w.key).catch(error=>console.error(JSON.stringify({level:'error',message:'Material file not deleted',key:w.key,error:error instanceof Error?error.name:'Unknown'})))]:[]))
     const mail=work.filter((w):w is Extract<AfterCommit,{kind:'newConcern'}>=>w.kind==='newConcern')
     if(concernMailer.channel==='none'||!mail.length)return
-    await Promise.all(mail.filter(m=>concernMailer.channel!=='email'||!demoUserIds.has(m.userId)).map(async m=>{
+    await Promise.all(mail.filter(m=>concernMailer.channel!=='email'||!isSampleAddress(m.userId,m.to)).map(async m=>{
       try{await concernMailer.send({userId:m.userId,to:m.to,name:m.name,link:`${appUrl}/cases/${encodeURIComponent(m.reportId)}`})}
       catch(error){console.error(JSON.stringify({level:'error',message:'New concern email not sent',userId:m.userId,reportId:m.reportId,error:error instanceof Error?error.name:'Unknown'}))}
     }))
@@ -117,7 +117,7 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     const {emailOrId}=forgotPasswordSchema.parse(req.body);const user=await findUser(emailOrId)
     // Hash a code whether or not the account exists, so the response time does not reveal it.
     const {code,codeHash}=newResetCode()
-    if(user&&selfServiceReset&&(resetMailer.channel!=='email'||!demoUserIds.has(user.id))&&await resets.issue({userId:user.id,codeHash,now:Date.now()})==='issued')await deliverResetCode(user,code)
+    if(user&&selfServiceReset&&(resetMailer.channel!=='email'||!isSampleAddress(user.id,user.email))&&await resets.issue({userId:user.id,codeHash,now:Date.now()})==='issued')await deliverResetCode(user,code)
     send(res,actionResponseSchema,{ok:true,message:forgotMessage})
   })
   app.post('/api/auth/reset-password',async(req,res)=>{

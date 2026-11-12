@@ -68,6 +68,8 @@ export const importStudentsSchema = z.object({ students: z.array(z.unknown()).mi
 export const accountIdParamsSchema = z.object({ id: z.string().trim().min(1).max(64) }).strict()
 export const setActiveSchema = z.object({ active: z.boolean() }).strict()
 export const activateSecretarySchema = z.object({ name: fullName.optional(), email: accountEmail.optional() }).strict()
+/** The real Dean's name and email; both are required, so the account stops being a sample one. */
+export const setupDeanSchema = z.object({ name: fullName, email: accountEmail }).strict()
 export const yearLevelParamsSchema = z.object({ yearLevel: z.coerce.number().int().min(1).max(4) }).strict()
 export const setAdvisorsSchema = z.object({ facultyIds: z.array(z.string().trim().min(1).max(64)).max(50) }).strict()
 export const programParamsSchema = z.object({ program: z.enum(programs) }).strict()

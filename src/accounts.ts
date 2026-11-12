@@ -9,7 +9,7 @@ import { send } from './http.js'
 import { ulid } from './ids.js'
 import { renameAccountIds, renamedAccountIds } from './renames.js'
 import {
-  accountIdParamsSchema, accountListResponseSchema, accountsQuerySchema, accountTypesResponseSchema, actionResponseSchema, activateSecretarySchema,
+  accountIdParamsSchema, accountListResponseSchema, accountsQuerySchema, accountTypesResponseSchema, actionResponseSchema, activateSecretarySchema, setupDeanSchema,
   advisorsResponseSchema, createFacultySchema, facultyListResponseSchema, facultyQuerySchema, facultyRowSchema, importStudentsSchema, programParamsSchema,
   roles, setActiveSchema, setAdvisorsSchema, setChairSchema, studentRowSchema, yearLevelParamsSchema, type Role, type User,
 } from './schemas.js'
@@ -24,6 +24,7 @@ import { demoUserIds, newUser, seed, type Database, type Repository } from './st
 // once and only their hash is stored. Nothing here writes a username or password to the audit trail or to a log.
 
 const secretaryId = 'QCU-SECRETARY'
+const deanId = 'CCS-DEAN'
 // The accounts the secretary may switch on and off. The Dean, administrators, and the offices are not theirs.
 const secretaryScope: Role[] = ['student', 'professor', 'chair']
 
@@ -255,6 +256,38 @@ export function accountRouter({ repository, authStore, sessions, mailer }: Accou
         { type: 'student', label: 'Student', ...count(has('student')), canManage: secretary },
       ],
       secretary: secretaryAccount && summary(secretaryAccount),
+    })
+  })
+
+  // The System Administrator sets up the real Dean (decided 12 November 2026): name and email, then temporary credentials
+  // and an invite, as for the secretary. The Dean chooses their own username and password at first sign-in, and the shared
+  // sample password stops working for the account. The name and email live in the auth store, never in the code.
+  router.post('/dean/setup', async (req, res) => {
+    const user = actor(res)
+    need(user, 'account.setupDean')
+    const { name, email } = setupDeanSchema.parse(req.body ?? {})
+    const all = await users()
+    if (!all.some((account) => account.id === deanId)) throw unavailable()
+    const password = temporaryPassword()
+    const hash = hashPassword(password)
+    let account!: User
+    let username = ''
+    await authStore.update((data) => {
+      const accounts = merged(all, data)
+      const taken = takenBy(accounts.values(), deanId)
+      if (taken.has(email)) throw new ApiError(409, 'An account with this email already exists.', 'CONFLICT')
+      account = edit(data, accounts, deanId)
+      username = temporaryUsername(name, taken)
+      Object.assign(account, { name, email, active: true, mustChangeCredentials: true, username })
+      data.credentials[deanId] = hash
+    })
+    // New credentials end any session still open under the sample ones.
+    await sessions.revokeUser(deanId)
+    await audit(user, [{ action: 'Dean account set up', reference: deanId }])
+    const url = signInUrl(req)
+    const { sent } = await sendInvite({ accountId: deanId, to: email, name, signInUrl: url, username, temporaryPassword: password }, mailer)
+    done(res, sent ? 'The Dean account is set up and the sign-in details were emailed to the Dean.' : 'The Dean account is set up. Give the Dean the sign-in details; they are not shown again.', {
+      account: summary(account), credentials: { username, temporaryPassword: password }, invite: { sent, signInUrl: url },
     })
   })
 
