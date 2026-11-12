@@ -123,3 +123,42 @@ export function createNewConcernMailer(options: { nodeEnv: string; mailFrom?: st
   if (options.mailFrom) return createSesNewConcernMailer(options.mailFrom)
   return options.nodeEnv === 'production' ? noNewConcernMailer : consoleNewConcernMailer
 }
+
+// Account invites (#36). When the CCS Secretary or the Dean creates an account, the new user gets an email with the
+// sign-in link and their temporary username and password, which they must change at first sign-in. Plain text only.
+// Without MAIL_FROM nothing is sent and the screen shows the invite once, as before (`unsentMailer` in accounts.ts).
+
+export type InviteEmail = { accountId: string; to: string; name: string; signInUrl: string; username: string; temporaryPassword: string }
+
+export function inviteText(invite: InviteEmail) {
+  return [
+    `Hello ${invite.name},`,
+    '',
+    'An ACCS account was created for you.',
+    `Sign in at ${invite.signInUrl}`,
+    '',
+    `Username: ${invite.username}`,
+    `Temporary password: ${invite.temporaryPassword}`,
+    '',
+    'The first time you sign in, you will choose your own username and password. Do not share this email.',
+  ].join('\n')
+}
+
+/** Throws if SES refuses or fails; the caller logs it without the credentials and shows the invite on screen instead. */
+export function createSesInviteMailer(from: string, ses: Pick<SESv2Client, 'send'> = new SESv2Client({})) {
+  return {
+    async send(invite: InviteEmail) {
+      await ses.send(new SendEmailCommand({
+        FromEmailAddress: from,
+        Destination: { ToAddresses: [invite.to] },
+        Content: {
+          Simple: {
+            Subject: { Data: 'Your ACCS account', Charset: 'UTF-8' },
+            Body: { Text: { Data: inviteText(invite), Charset: 'UTF-8' } },
+          },
+        },
+      }))
+      return { sent: true }
+    },
+  }
+}
