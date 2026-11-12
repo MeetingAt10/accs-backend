@@ -63,6 +63,8 @@ function canSeeItem(db: Database, user: User, itemType: Moderation['itemType'], 
 function requireRole(user: User, ...roleNames: User['roles']) { if (!hasRole(user,...roleNames)) throw deny() }
 function find<T extends {id:string}>(items:T[], id:string|undefined):T { const item = items.find(entry=>entry.id===id); if (!item) throw unavailable(); return item }
 function pick<T extends {id:string}>(items:T[], id?:string):T|undefined { return id ? find(items,id) : items[0] }
+/** A report named by its report ID or, once Guidance opened one, its Case File number (CF-...). */
+const reportIdOf = (db:Database, id?:string) => id && db.reports.find(r => r.caseFileId === id && !db.reports.some(other => other.id === id))?.id || id
 function reasonOf(request:ActionRequest) { return z.string().trim().min(1,'A reason is required.').max(2000).parse(request.reason) }
 export function refreshRestrictions(db: Database, user: User): User { const date = now().slice(0,10); return { ...user, restrictions:[...new Set(db.restrictions.filter(r=>r.studentId===user.id&&r.active&&r.until>=date).flatMap(r=>r.features))] } }
 export function sessionView(user:User) { return { user, permissions:permissions(user),allowedPages:allowedPages(user),roleLabels,sampleData:true as const } }
@@ -466,9 +468,9 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
     case'P17':data.slots=db.slots.filter(s=>s.facultyId===user.id);break
     case'P18':data.reports=ownReports.map(r=>reportView(db,r,user,true));break
     case'P19':Object.assign(data,{categories:['General concern','Academic process','Facilities','Communication'],categoryOptions:concernCategories,adviser:user.adviserId?person(find(db.users,user.adviserId)):null,anonymityAllowed:!user.restrictions.includes('report.anonymous'),consentWording,draft:db.drafts[user.id]??null,sourcePost:query.from?(()=>{const p=posts.find(p=>p.id===query.from&&p.authorId===user.id);if(!p)throw unavailable();return postView(db,p,user)})():null});break
-    case'P20':{const r=pick(ownReports,query.id);if(r)data.record=reportView(db,r,user,true);data.consentWording=consentWording;break}
+    case'P20':{const r=pick(ownReports,reportIdOf(db,query.id));if(r)data.record=reportView(db,r,user,true);data.consentWording=consentWording;break}
     case'P21':data.cases=cases.filter(r=>(!query.q||r.id.toLowerCase().includes(query.q.toLowerCase()))&&(!query.status||r.status===query.status)&&(!query.category||r.category===query.category)&&(!query.severity||r.severity===query.severity)).map(r=>reportView(db,r,user));break
-    case'P22':{const r=pick(cases,query.id);if(r)data.record=reportView(db,r,user);break}
+    case'P22':{const r=pick(cases,reportIdOf(db,query.id));if(r)data.record=reportView(db,r,user);break}
     case'P23':case'P24':{const clusters=db.clusters.filter(c=>c.program===user.program);data.clusters=clusters.map(c=>({...c,reportIds:undefined,reportCount:db.reports.filter(r=>c.reportIds.includes(r.id)&&canViewCase(user,r)).length}));data.threshold=80;if(pageId==='P24'){const c=pick(clusters,query.id);if(c){data.record={...c,reportIds:undefined};data.reports=db.reports.filter(r=>c.reportIds.includes(r.id)&&canViewCase(user,r)).map(r=>reportView(db,r,user))}}break}
     case 'P25': {
       if (query.program && hasRole(user, 'chair') && query.program !== user.program) {
@@ -793,8 +795,8 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
   if(!canPage(user,pageId)||!actionPages[request.action]?.includes(pageId))throw deny()
   const db=repo.read();const id=request.recordId;let record:unknown;let message='Changes saved.';const outbox:OutgoingMail[]=[]
   // The report is named by the record ID, or by `reportId` in the payload for the talk actions.
-  const getOwnReport=(reportId=id)=>{const r=find(db.reports,reportId);if(r.ownerId!==user.id||!hasRole(user,'student'))throw unavailable();return r}
-  const getCase=(reportId=id)=>{const r=find(db.reports,reportId);if(!canActCase(user,r))throw unavailable();return r}
+  const getOwnReport=(reportId=id)=>{const r=find(db.reports,reportIdOf(db,reportId));if(r.ownerId!==user.id||!hasRole(user,'student'))throw unavailable();return r}
+  const getCase=(reportId=id)=>{const r=find(db.reports,reportIdOf(db,reportId));if(!canActCase(user,r))throw unavailable();return r}
   const addMessage=(list:Message[],body:string)=>{const m={id:repo.nextId('MESSAGE'),authorId:user.id,body,at:now()};list.push(m);return m}
   switch(request.action){
     case 'createPost': {
