@@ -28,7 +28,7 @@ describe('where each collection is stored', () => {
   it('follows the DOC006 table mapping', () => {
     expect(persisted).toEqual({
       reports: 'ccs_grievance', clusters: 'ccs_grievance',
-      consultations: 'ccs_scheduling', slots: 'ccs_scheduling', events: 'ccs_scheduling', todos: 'ccs_scheduling',
+      consultations: 'ccs_scheduling', slots: 'ccs_scheduling', events: 'ccs_scheduling', todos: 'ccs_scheduling', loadSchedules: 'ccs_scheduling',
       threads: 'ccs_messaging',
       notifications: 'ccs_notification', settings: 'ccs_notification',
       audit: 'ccs_audit',
