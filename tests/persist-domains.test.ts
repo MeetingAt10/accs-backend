@@ -30,6 +30,7 @@ describe('where each collection is stored', () => {
       reports: 'ccs_grievance', clusters: 'ccs_grievance',
       consultations: 'ccs_scheduling', slots: 'ccs_scheduling', events: 'ccs_scheduling', todos: 'ccs_scheduling', loadSchedules: 'ccs_scheduling',
       threads: 'ccs_messaging',
+      materials: 'ccs_academic',
       notifications: 'ccs_notification', settings: 'ccs_notification',
       audit: 'ccs_audit',
       posts: 'ccs_community',

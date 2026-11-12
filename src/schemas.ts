@@ -147,7 +147,11 @@ export const loadRowSchema = z.object({
   section: z.string().trim().max(20, 'Use at most 20 characters.').optional(),
   room: z.string().trim().max(40, 'Use at most 40 characters.').optional(),
 }).refine((row) => row.end > row.start, { path: ['end'], message: 'The end time must be later than the start time.' })
+const materialUrl = z.string().trim().max(2000).pipe(z.url({ protocol: /^https?$/, error: 'Use a link that starts with http:// or https://.' }))
 export const actionPayloads = {
+  addMaterial: z.object({ spaceId: z.string().min(1), title: z.string().trim().min(1, 'Enter a title.').max(160, 'Use at most 160 characters.'), url: materialUrl, note: z.string().trim().max(1000, 'Use at most 1000 characters.').optional() }).strict(),
+  updateMaterial: z.object({ title: z.string().trim().min(1, 'Enter a title.').max(160, 'Use at most 160 characters.'), url: materialUrl, note: z.string().trim().max(1000, 'Use at most 1000 characters.').optional() }).strict(),
+  removeMaterial: z.object({}).strict(),
   uploadLoadSchedule: z.object({ term: z.string().trim().min(1).max(60), startsOn: date, endsOn: date, rows: z.array(z.unknown()).min(1).max(500) }).strict(),
   createPost: createPostSchema,
   updatePost: z.object(postContent).strict(),
