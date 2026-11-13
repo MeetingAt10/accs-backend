@@ -15,9 +15,9 @@ import { seedPassword } from './helpers.js'
 const signIn = (app: ReturnType<typeof createApp>, emailOrId: string, password = seedPassword) => request(app).post('/api/auth/sign-in').send({ emailOrId, password })
 
 describe('the renamed Dean account (issue #41)', () => {
-  it('is CCS-DEAN in the seed, keeps dean@qcu.edu.ph, and no QCU-DEAN remains', () => {
+  it('is CCS-DEAN in the seed, has dean@access-ccs.com, and no QCU-DEAN remains', () => {
     const users = seed().users
-    expect(users.find((u) => u.id === 'CCS-DEAN')).toMatchObject({ name: 'Dr. Sage Linden', roles: ['dean'], email: 'dean@qcu.edu.ph' })
+    expect(users.find((u) => u.id === 'CCS-DEAN')).toMatchObject({ name: 'Dr. Sage Linden', roles: ['dean'], email: 'dean@access-ccs.com' })
     expect(JSON.stringify(seed())).not.toContain('QCU-DEAN')
   })
 
@@ -30,7 +30,7 @@ describe('the renamed Dean account (issue #41)', () => {
 
   it('signs in with CCS-DEAN, the old QCU-DEAN in any case, or the email', async () => {
     const app = createApp(createMemoryRepository(), { authStore: createMemoryAuthStore() })
-    for (const id of ['CCS-DEAN', 'QCU-DEAN', 'qcu-dean', 'dean@qcu.edu.ph']) {
+    for (const id of ['CCS-DEAN', 'QCU-DEAN', 'qcu-dean', 'dean@access-ccs.com']) {
       const response = await signIn(app, id)
       expect([id, response.status, response.body.user?.id]).toEqual([id, 200, 'CCS-DEAN'])
     }

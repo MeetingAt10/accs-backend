@@ -84,8 +84,8 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   // without a channel issues nothing: an administrator issues the code (POST /api/admin/accounts/:id/reset-code).
   const resetMailer=options.resetMailer??createResetMailer({nodeEnv:env.NODE_ENV,mailFrom:env.MAIL_FROM})
   const selfServiceReset=resetMailer.channel!=='none'
-  // Seeded demo accounts carry made-up addresses on the real qcu.edu.ph domain, so a code for one of them (ACCS-ADMIN
-  // included) would reach whoever owns that mailbox. They are never emailed; an administrator issues their codes.
+  // Seeded demo accounts carry made-up addresses on access-ccs.com (before #69, on QCU's real qcu.edu.ph domain). They
+  // are still never emailed (decision A in #69): nobody reads those mailboxes, so an administrator issues their codes.
   const resetCodeMinutes=Math.round(resetPolicy.codeTtlMs/60000)
   // A failed send is logged without the code or the address, and the caller still gives the generic answer.
   const deliverResetCode=async(user:User,code:string)=>{
