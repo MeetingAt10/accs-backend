@@ -1,3 +1,4 @@
+import { findFlaggedWord } from './profanity.js'
 import { z } from 'zod'
 import { categoryProblem, concernCategories } from './categories.js'
 import { mainCampus, sectionName } from './sections.js'
@@ -314,23 +315,32 @@ function notifyAnnouncementMembers(repo: UnitOfWork, post: Post) {
     }
   }
 }
-function queuePostReview(repo: UnitOfWork, post: Post) {
-  if (!/\b(idiot|stupid|hate)\b/i.test(post.body)) return
+/**
+ * Holds a post, comment or message that contains a flagged word (#84, src/profanity.ts) for a moderator: a pending
+ * moderation item from the Filter, which hides it from everyone but its author until someone decides (#43).
+ */
+function autoFlag(repo: UnitOfWork, item: { itemType: Moderation['itemType']; itemId: string; parentId: string; authorId: string; text: string }) {
+  const word = findFlaggedWord(item.text)
+  if (!word) return false
   const db = repo.read()
-  if (db.moderation.some(item => item.itemId === post.id && item.status === 'Pending')) return
+  if (db.moderation.some(entry => entry.itemType === item.itemType && entry.itemId === item.itemId && heldStatuses.includes(entry.status))) return true
   db.moderation.push({
     id: repo.nextId('MOD'),
-    itemType: 'post',
-    itemId: post.id,
-    parentId: post.id,
-    authorId: post.authorId,
+    itemType: item.itemType,
+    itemId: item.itemId,
+    parentId: item.parentId,
+    authorId: item.authorId,
     source: 'Filter',
-    reason: 'Word filter match. A moderator must review it.',
-    excerpt: post.body.slice(0, 160),
+    reason: 'Automatic: possible offensive language. A moderator must review it.',
+    excerpt: item.text.slice(0, 160),
     status: 'Pending',
     at: now(),
     history: [],
   })
+  return true
+}
+function queuePostReview(repo: UnitOfWork, post: Post) {
+  autoFlag(repo, { itemType: 'post', itemId: post.id, parentId: post.id, authorId: post.authorId, text: `${post.title}\n${post.body}` })
 }
 function visibleConsultations(db:Database,user:User){return db.consultations.filter(c=>c.studentId===user.id&&hasRole(user,'student')||c.facultyId===user.id&&hasRole(user,'professor'))}
 // Why a time is not available is for the faculty member and the CCS Secretary only (#32). Students do not see unavailable
@@ -905,7 +915,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       message = 'Post deleted.'
       break
     }
-    case'comment':{if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();if(user.restrictions.includes('post.comment'))throw deny();const p=actionPayloads.comment.parse(request.payload);const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'comment'))throw deny();if(p.anonymous&&!hasRole(user,'student'))throw deny();post.comments.push({...addMessage([],p.body),anonymous:p.anonymous});record=postView(db,post,user);message='Comment added.';break}
+    case'comment':{if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();if(user.restrictions.includes('post.comment'))throw deny();const p=actionPayloads.comment.parse(request.payload);const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'comment'))throw deny();if(p.anonymous&&!hasRole(user,'student'))throw deny();const added={...addMessage([],p.body),anonymous:p.anonymous};post.comments.push(added);autoFlag(repo,{itemType:'comment',itemId:added.id,parentId:post.id,authorId:user.id,text:p.body});record=postView(db,post,user);message='Comment added.';break}
     case'react':{actionPayloads.react.parse(request.payload);if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'react'))throw deny();post.reactions=post.reactions.includes(user.id)?post.reactions.filter(v=>v!==user.id):[...post.reactions,user.id];record=postView(db,post,user);message='Reaction updated.';break}
     case'flag':{const p=actionPayloads.flag.parse(request.payload);let authorId:string,body:string,parentId:string,itemId:string;if(p.itemType==='message'){const thread=find(db.threads,id);if(!canThread(db,user,thread))throw unavailable();const m=find(thread.messages,p.itemId);authorId=m.authorId;body=m.body;parentId=thread.id;itemId=m.id}else{const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private))throw unavailable();const item=p.itemType==='comment'?find(post.comments,p.itemId):post;authorId=item.authorId;body=item.body;parentId=post.id;itemId=item.id}const mod={id:repo.nextId('MOD'),itemType:p.itemType,itemId,parentId,authorId,reporterId:user.id,source:'User' as const,reason:p.reason,excerpt:body.slice(0,160),status:'Pending',at:now(),history:[]};db.moderation.push(mod);audit(repo,user,'Content reported','moderation',mod.id);record={id:mod.id,status:mod.status};message='Sent to a moderator.';break}
     case 'reportStudent': {
@@ -1195,7 +1205,8 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
         readMessageCounts: {},
       }
       if (!existing) db.threads.push(thread)
-      addMessage(thread.messages, payload.body)
+      const first = addMessage(thread.messages, payload.body)
+      autoFlag(repo, { itemType: 'message', itemId: first.id, parentId: thread.id, authorId: user.id, text: payload.body })
       thread.readMessageCounts[user.id] = thread.messages.length
       notify(repo, recipient.id, 'message', 'P12', thread.id)
       record = { id: thread.id, title: thread.title }
@@ -1211,21 +1222,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       for (const recipientId of thread.memberIds.filter(memberId => memberId !== user.id)) {
         notify(repo, recipientId, 'message', 'P12', thread.id)
       }
-      if (/\b(idiot|stupid|hate)\b/i.test(payload.body)) {
-        db.moderation.push({
-          id: repo.nextId('MOD'),
-          itemType: 'message',
-          itemId: sent.id,
-          parentId: thread.id,
-          authorId: user.id,
-          source: 'Filter',
-          reason: 'Word filter match. A moderator must review it.',
-          excerpt: payload.body.slice(0, 160),
-          status: 'Pending',
-          at: now(),
-          history: [],
-        })
-      }
+      autoFlag(repo, { itemType: 'message', itemId: sent.id, parentId: thread.id, authorId: user.id, text: payload.body })
       record = messageView(db, sent)
       message = 'Message sent.'
       break
