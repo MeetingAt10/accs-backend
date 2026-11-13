@@ -111,7 +111,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
     it('refuses an email that another account already uses', async () => {
       const { app } = setup()
       const { agent: dean } = await signIn(app, 'CCS-DEAN')
-      const response = await dean.post('/api/accounts/secretary/activate').send({ email: 'dean@qcu.edu.ph' })
+      const response = await dean.post('/api/accounts/secretary/activate').send({ email: 'dean@access-ccs.com' })
       expect(response.status).toBe(409)
       expect(response.body.code).toBe('CONFLICT')
     })
@@ -319,7 +319,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
     it('reports each row of a batch: duplicates and invalid rows fail alone', async () => {
       const { app } = setup()
       const secretary = await secretarySession(app)
-      const rows = [faculty(1), faculty(1), { ...faculty(2), email: 'prof.it@qcu.edu.ph' }, { ...faculty(3), program: 'MBA' }, { name: 'X', email: 'nope' }, faculty(5)]
+      const rows = [faculty(1), faculty(1), { ...faculty(2), email: 'prof.it@access-ccs.com' }, { ...faculty(3), program: 'MBA' }, { name: 'X', email: 'nope' }, faculty(5)]
       const results = await createFaculty(secretary, rows)
       expect(results.map((row) => [row.index, row.status, row.code])).toEqual([[0, 'created', undefined], [1, 'error', 'DUPLICATE_EMAIL'], [2, 'error', 'DUPLICATE_EMAIL'], [3, 'error', 'INVALID_ROW'], [4, 'error', 'INVALID_ROW'], [5, 'created', undefined]])
       expect(results[1]!.error).toBe('An account with this email already exists.')
@@ -395,7 +395,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       const secretary = await secretarySession(app)
       const results = await importStudents(secretary, [
         student(1),
-        student(2, { email: 'STU.IT.A@qcu.edu.ph' }),
+        student(2, { email: 'STU.IT.A@access-ccs.com' }),
         student(3, { studentId: 'qcu-2024-0101' }),
         student(4, { year: 5 }),
         student(1, { name: 'Second Student1', studentId: '26-1999' }),

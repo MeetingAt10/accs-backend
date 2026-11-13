@@ -16,7 +16,7 @@ import {
 import { ApiError, deny, unavailable, type AccountChange, type ProfileChange } from './services.js'
 import type { SessionStore } from './sessions.js'
 import { mainCampus } from './sections.js'
-import { demoUserIds, newUser, seed, type Database, type Repository } from './store.js'
+import { demoUserIds, newUser, seed, type Database, type Repository, formerSeedEmails, seedEmail } from './store.js'
 
 // Account provisioning. The Dean activates the secretary; the secretary creates faculty and students, assigns advisers
 // and program chairs, and switches accounts on and off. All account state lives in the auth store (S3), which every
@@ -40,9 +40,9 @@ export const unsentMailer: InviteMailer = {
     return { sent: false }
   },
 }
-// The sample accounts carry made-up addresses (secretary@example.invalid, ...@qcu.edu.ph), so an invite to one of them is
-// never emailed: it would bounce, or reach whoever owns that real mailbox.
-const sampleAddresses = new Set(seed().users.map((user) => user.email.toLowerCase()))
+// The sample accounts carry made-up addresses (secretary@example.invalid, ...@access-ccs.com, and before #69
+// ...@qcu.edu.ph), so an invite to one of them is never emailed: it would bounce, or reach whoever owns that mailbox.
+const sampleAddresses = new Set(seed().users.flatMap((user) => [user.email.toLowerCase(), ...formerSeedEmails(user.id)]))
 /** Sends an invite. A failed or skipped send returns `sent: false` so the UI shows the invite once; credentials are never logged. */
 export async function sendInvite(invite: Invite, mailer: InviteMailer = unsentMailer) {
   if (sampleAddresses.has(invite.to.toLowerCase())) {
@@ -120,7 +120,9 @@ export function applyAccounts(db: Database, accounts: User[]) {
   const index = new Map(db.users.map((user, position) => [user.id, position]))
   const members = new Map(db.spaces.map((space) => [space.id, new Set(space.studentIds)]))
   for (const original of accounts) {
-    const stored = renameAccountIds(original)
+    const renamed = renameAccountIds(original)
+    const newAddress = seedEmail(renamed.id)
+    const stored = newAddress && formerSeedEmails(renamed.id).includes(renamed.email.toLowerCase()) ? { ...renamed, email: newAddress } : renamed
     // A role that no longer exists (the President's Office, removed on 2026-11-10) is dropped; an account left with no
     // role cannot sign in.
     const knownRoles = stored.roles.filter((role) => (roles as readonly string[]).includes(role))

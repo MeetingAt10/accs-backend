@@ -1,5 +1,6 @@
 import { consentWording } from './consent.js'
 import { ulid } from './ids.js'
+import { formerAccountIds } from './renames.js'
 import type { ReactionKind, Role, TalkMode, User } from './schemas.js'
 
 // The President's Office stage was removed on 2026-11-10; a record stored with `executive` is read as `osas` (persist.ts).
@@ -155,7 +156,11 @@ export function createMemoryRepository(): MemoryRepository {
   }
 }
 
-function user(id: string, name: string, roles: Role[], extra: Partial<User> = {}): User { return { id, name, email: `${id.toLowerCase().replaceAll('qcu-', '').replaceAll('-', '.')}@qcu.edu.ph`, roles, restrictions: [], title: roles.includes('student') ? 'CCS student' : 'CCS personnel', bio: roles.includes('student') ? 'Student, QCU College of Computer Studies.' : 'QCU College of Computer Studies.', education: roles.includes('student') ? 'Quezon City University' : 'Quezon City University, College of Computer Studies', officeHours: 'By appointment. Request a time under Appointments.', spaceIds: [], organizationIds: [], active: true, ...extra } }
+// Seeded demo accounts get made-up addresses on access-ccs.com, the domain we own and send from (#69). Until 13 November
+// 2026 they were on qcu.edu.ph, QCU's real domain, where a made-up address could belong to a real person.
+export const seedDomain = 'access-ccs.com'
+const seedLocalPart = (id: string) => id.toLowerCase().replaceAll('qcu-', '').replaceAll('-', '.')
+function user(id: string, name: string, roles: Role[], extra: Partial<User> = {}): User { return { id, name, email: `${seedLocalPart(id)}@${seedDomain}`, roles, restrictions: [], title: roles.includes('student') ? 'CCS student' : 'CCS personnel', bio: roles.includes('student') ? 'Student, QCU College of Computer Studies.' : 'QCU College of Computer Studies.', education: roles.includes('student') ? 'Quezon City University' : 'Quezon City University, College of Computer Studies', officeHours: 'By appointment. Request a time under Appointments.', spaceIds: [], organizationIds: [], active: true, ...extra } }
 /** The account shape with its default profile text, for accounts created after the seed. */
 export const newUser = user
 const at = '2026-10-20T02:00:00.000Z'
@@ -171,7 +176,7 @@ export function seed(): Database {
     user('QCU-PROF-CS', 'Prof. Sena Brook', ['professor'], { program: 'BSCS', office: 'CCS Faculty Room', title: 'Faculty, BSCS', bio: 'Advises BSCS 2A.', officeHours: 'Thursdays, 11:00 AM to 1:00 PM, CCS Faculty Room', spaceIds: ['SPACE-CS-A'] }),
     user('QCU-CHAIR-IT', 'Dr. Morgan Ash', ['chair', 'professor'], { program: 'BSIT', office: 'BSIT Program Office', title: 'BSIT Program Chair and faculty', officeHours: 'Fridays, 10:00 AM to 12:00 PM, BSIT Program Office', spaceIds: ['SUBJECT-IT-DS'] }),
     user('QCU-CHAIR-CS', 'Dr. Ellis Wren', ['chair'], { program: 'BSCS', office: 'BSCS Program Office', title: 'BSCS Program Chair' }),
-    user('CCS-DEAN', 'Dr. Sage Linden', ['dean'], { email: 'dean@qcu.edu.ph', office: 'CCS Dean\'s Office', title: 'Dean, College of Computer Studies', officeHours: 'Weekdays, 9:00 AM to 4:00 PM, Dean\'s Office' }),
+    user('CCS-DEAN', 'Dr. Sage Linden', ['dean'], { email: `dean@${seedDomain}`, office: 'CCS Dean\'s Office', title: 'Dean, College of Computer Studies', officeHours: 'Weekdays, 9:00 AM to 4:00 PM, Dean\'s Office' }),
     user('ACCS-ADMIN', 'Casey Hart', ['administrator'], { email: 'admin@access-ccs.com', office: 'ACCS system administration', title: 'ACCS System Administrator' }),
     user('QCU-GUIDANCE', 'Alex Fern', ['guidance'], { office: 'Guidance Office', title: 'Guidance officer', officeHours: 'Weekdays, 9:00 AM to 4:00 PM' }),
     user('QCU-OSAS', 'Jamie Alder', ['osas'], { office: 'Office of Student Affairs and Services', title: 'OSAS officer', officeHours: 'Weekdays, 9:00 AM to 4:00 PM' }),
@@ -253,8 +258,19 @@ export function seed(): Database {
 export const demoUserIds: ReadonlySet<string> = new Set(seed().users.filter(u => u.active).map(u => u.id))
 const sampleEmails = new Map(seed().users.map(u => [u.id, u.email.toLowerCase()]))
 /**
+ * The qcu.edu.ph addresses a seeded account had before #69, under its current ID and any former one (QCU-DEAN was
+ * dean@qcu.edu.ph, QCU-ADMIN admin@qcu.edu.ph). Stored accounts that still carry one are read with the new address.
+ */
+export function formerSeedEmails(userId: string): string[] {
+  if (!sampleEmails.has(userId)) return []
+  const ids = [userId, ...formerAccountIds(userId)]
+  return [...new Set(ids.map(id => `${id === 'QCU-DEAN' || id === 'CCS-DEAN' ? 'dean' : seedLocalPart(id)}@qcu.edu.ph`))]
+}
+/** The address a seeded account has now, or undefined for an account that was not seeded. */
+export const seedEmail = (userId: string) => sampleEmails.get(userId)
+/**
  * A seeded account that still has its made-up address. Such an account is never emailed, because the address may belong to
  * someone else. Once a real address is set (the Dean through the System Administrator, the Secretary through the Dean), the
  * account gets email like any other.
  */
-export const isSampleAddress = (userId: string, email: string) => sampleEmails.get(userId) === email.toLowerCase()
+export const isSampleAddress = (userId: string, email: string) => sampleEmails.get(userId) === email.toLowerCase() || formerSeedEmails(userId).includes(email.toLowerCase())

@@ -1,3 +1,4 @@
+import { findFlaggedWord } from './profanity.js'
 import { z } from 'zod'
 import { categoryProblem, concernCategories } from './categories.js'
 import { mainCampus, sectionName } from './sections.js'
@@ -68,7 +69,7 @@ function pick<T extends {id:string}>(items:T[], id?:string):T|undefined { return
 const reportIdOf = (db:Database, id?:string) => id && db.reports.find(r => r.caseFileId === id && !db.reports.some(other => other.id === id))?.id || id
 function reasonOf(request:ActionRequest) { return z.string().trim().min(1,'A reason is required.').max(2000).parse(request.reason) }
 export function refreshRestrictions(db: Database, user: User): User { const date = now().slice(0,10); return { ...user, restrictions:[...new Set(db.restrictions.filter(r=>r.studentId===user.id&&r.active&&r.until>=date).flatMap(r=>r.features))] } }
-export function sessionView(user:User) { return { user, permissions:permissions(user),allowedPages:allowedPages(user),roleLabels,sampleData:true as const } }
+export function sessionView(user:User) { return { user, permissions:permissions(user),allowedPages:allowedPages(user),roleLabels } }
 function person(user:User) { return { id:user.id,name:user.name,email:user.email,roles:user.roles,program:user.program,section:user.section,...(hasRole(user,'student')?{campus:user.campus??mainCampus,...(user.program&&user.year&&user.section?{sectionName:sectionName({campus:user.campus,program:user.program,year:user.year,section:user.section})}:{})}:{}),office:user.office,title:user.title,bio:user.bio,education:user.education,officeHours:user.officeHours,studentId:user.studentId,year:user.year,standing:user.restrictions.length?'Some features paused':'Good standing' } }
 function author(db:Database,id:string,anonymous=false,alias='Student A-12') { const u=db.users.find(item=>item.id===id); return anonymous ? {name:alias,roles:['student'],anonymous:true} : u?{id:u.id,name:u.name,roles:u.roles,email:u.email}:{name:'College office',roles:[]} }
 function messageView(db:Database,message:Message,report?:Report) { return {id:message.id,body:message.body,at:message.at,author:author(db,message.authorId,!!report&&message.authorId===report.ownerId&&report.identity==='anonymous'&&!report.disclosedTo.includes(report.stage),report?.alias)} }
@@ -332,23 +333,32 @@ function notifyAnnouncementMembers(repo: UnitOfWork, post: Post) {
     }
   }
 }
-function queuePostReview(repo: UnitOfWork, post: Post) {
-  if (!/\b(idiot|stupid|hate)\b/i.test(post.body)) return
+/**
+ * Holds a post, comment or message that contains a flagged word (#84, src/profanity.ts) for a moderator: a pending
+ * moderation item from the Filter, which hides it from everyone but its author until someone decides (#43).
+ */
+function autoFlag(repo: UnitOfWork, item: { itemType: Moderation['itemType']; itemId: string; parentId: string; authorId: string; text: string }) {
+  const word = findFlaggedWord(item.text)
+  if (!word) return false
   const db = repo.read()
-  if (db.moderation.some(item => item.itemId === post.id && item.status === 'Pending')) return
+  if (db.moderation.some(entry => entry.itemType === item.itemType && entry.itemId === item.itemId && heldStatuses.includes(entry.status))) return true
   db.moderation.push({
     id: repo.nextId('MOD'),
-    itemType: 'post',
-    itemId: post.id,
-    parentId: post.id,
-    authorId: post.authorId,
+    itemType: item.itemType,
+    itemId: item.itemId,
+    parentId: item.parentId,
+    authorId: item.authorId,
     source: 'Filter',
-    reason: 'Word filter match. A moderator must review it.',
-    excerpt: post.body.slice(0, 160),
+    reason: 'Automatic: possible offensive language. A moderator must review it.',
+    excerpt: item.text.slice(0, 160),
     status: 'Pending',
     at: now(),
     history: [],
   })
+  return true
+}
+function queuePostReview(repo: UnitOfWork, post: Post) {
+  autoFlag(repo, { itemType: 'post', itemId: post.id, parentId: post.id, authorId: post.authorId, text: `${post.title}\n${post.body}` })
 }
 function visibleConsultations(db:Database,user:User){return db.consultations.filter(c=>c.studentId===user.id&&hasRole(user,'student')||c.facultyId===user.id&&hasRole(user,'professor'))}
 // Why a time is not available is for the faculty member and the CCS Secretary only (#32). Students do not see unavailable
@@ -750,7 +760,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
     case'P51':data.audit=safeAudit(db,db.audit.filter(a=>(!query.from||a.at>=query.from)&&(!query.to||a.at<=`${query.to}T23:59:59.999Z`)&&(!query.q||`${a.reference} ${a.action} ${a.module}`.toLowerCase().includes(query.q.toLowerCase()))));break
     case'P52':{const telemetry=query.period==='none'?[]:db.telemetry;data.stats=[{label:'Assistant sessions',value:telemetry.length,note:'Help assistant'},{label:'Failures',value:telemetry.filter(t=>!t.success).length,note:'Counts only'},{label:'Median response time',value:telemetry.length?`${telemetry.map(t=>t.durationMs).sort((a,b)=>a-b)[Math.floor(telemetry.length/2)]} ms`:'No data',note:'Since the server started'}];data.systemStatus={api:'Operational',assistant:'Built-in help assistant',storage:'Application store'};data.telemetry=telemetry;data.incidents=[];data.trend=telemetry.length?[{label:now().slice(0,10),value:telemetry.length}]:[];break}
   }
-  return JSON.parse(JSON.stringify({pageId,title:pageTitles[pageId],scope:scopeLabel(user),sampleData:true,data})) as {pageId:string;title:string;scope:string;sampleData:true;data:Record<string,unknown>}
+  return JSON.parse(JSON.stringify({pageId,title:pageTitles[pageId],scope:scopeLabel(user),data})) as {pageId:string;title:string;scope:string;data:Record<string,unknown>}
 }
 
 // Evaluation cycles use the student form only (#47, baseline chapter 9.1): each student evaluates every professor of their
@@ -924,7 +934,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       message = 'Post deleted.'
       break
     }
-    case'comment':{if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();if(user.restrictions.includes('post.comment'))throw deny();const p=actionPayloads.comment.parse(request.payload);const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'comment'))throw deny();if(p.anonymous&&!hasRole(user,'student'))throw deny();post.comments.push({...addMessage([],p.body),anonymous:p.anonymous});record=postView(db,post,user);message='Comment added.';break}
+    case'comment':{if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();if(user.restrictions.includes('post.comment'))throw deny();const p=actionPayloads.comment.parse(request.payload);const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'comment'))throw deny();if(p.anonymous&&!hasRole(user,'student'))throw deny();const added={...addMessage([],p.body),anonymous:p.anonymous};post.comments.push(added);autoFlag(repo,{itemType:'comment',itemId:added.id,parentId:post.id,authorId:user.id,text:p.body});record=postView(db,post,user);message='Comment added.';break}
     case'react':{const p=actionPayloads.react.parse(request.payload);if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'react'))throw deny();toggleReaction(post,user.id,p.reaction);record=postView(db,post,user);message='Reaction updated.';break}
     case'reactComment':{const p=actionPayloads.reactComment.parse(request.payload);if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'react'))throw deny();const comment=post.comments.find(c=>c.id===p.commentId);if(!comment||!canSeeItem(db,user,'comment',comment.id,comment.authorId))throw unavailable();toggleReaction(comment,user.id,p.reaction);record=postView(db,post,user);message='Reaction updated.';break}
     case'flag':{const p=actionPayloads.flag.parse(request.payload);let authorId:string,body:string,parentId:string,itemId:string;if(p.itemType==='message'){const thread=find(db.threads,id);if(!canThread(db,user,thread))throw unavailable();const m=find(thread.messages,p.itemId);authorId=m.authorId;body=m.body;parentId=thread.id;itemId=m.id}else{const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private))throw unavailable();const item=p.itemType==='comment'?find(post.comments,p.itemId):post;authorId=item.authorId;body=item.body;parentId=post.id;itemId=item.id}const mod={id:repo.nextId('MOD'),itemType:p.itemType,itemId,parentId,authorId,reporterId:user.id,source:'User' as const,reason:p.reason,excerpt:body.slice(0,160),status:'Pending',at:now(),history:[]};db.moderation.push(mod);audit(repo,user,'Content reported','moderation',mod.id);record={id:mod.id,status:mod.status};message='Sent to a moderator.';break}
@@ -1162,7 +1172,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       audit(repo,user,'Faculty load uploaded','scheduling',p.term)
       const conflicts=db.slots.filter(s=>replaced.has(s.facultyId)&&s.state!=='unavailable'&&classAt(db,s.facultyId,s.date,s.start,s.end)).length
       record={term:p.term,faculty:replaced.size,classes:accepted.length,conflicts}
-      message=conflicts?`Load saved. ${conflicts} consultation time${conflicts===1?'':'s'} overlap a class; see the list.`:'Load saved.'
+      message=conflicts?`Load saved. ${conflicts} appointment ${conflicts===1?'time overlaps':'times overlap'} a class; see the list.`:'Load saved.'
       break
     }
     case'addMaterial':{
@@ -1215,7 +1225,8 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
         readMessageCounts: {},
       }
       if (!existing) db.threads.push(thread)
-      addMessage(thread.messages, payload.body)
+      const first = addMessage(thread.messages, payload.body)
+      autoFlag(repo, { itemType: 'message', itemId: first.id, parentId: thread.id, authorId: user.id, text: payload.body })
       thread.readMessageCounts[user.id] = thread.messages.length
       notify(repo, recipient.id, 'message', 'P12', thread.id)
       record = { id: thread.id, title: thread.title }
@@ -1231,21 +1242,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       for (const recipientId of thread.memberIds.filter(memberId => memberId !== user.id)) {
         notify(repo, recipientId, 'message', 'P12', thread.id)
       }
-      if (/\b(idiot|stupid|hate)\b/i.test(payload.body)) {
-        db.moderation.push({
-          id: repo.nextId('MOD'),
-          itemType: 'message',
-          itemId: sent.id,
-          parentId: thread.id,
-          authorId: user.id,
-          source: 'Filter',
-          reason: 'Word filter match. A moderator must review it.',
-          excerpt: payload.body.slice(0, 160),
-          status: 'Pending',
-          at: now(),
-          history: [],
-        })
-      }
+      autoFlag(repo, { itemType: 'message', itemId: sent.id, parentId: thread.id, authorId: user.id, text: payload.body })
       record = messageView(db, sent)
       message = 'Message sent.'
       break
