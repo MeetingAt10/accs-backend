@@ -13,7 +13,7 @@ import { hasPermission } from './access.js'
 import { devRouter, devToolboxEnabled, isDevToolboxCall, type Stack } from './dev.js'
 import { send } from './http.js'
 import { createRepository } from './persist.js'
-import { ApiError, completeMaterialUpload, getPage, materialDownloadUrl, performAction, refreshRestrictions, sessionView, startMaterialUpload, unavailable, type AccountChange, type AfterCommit, type ProfileChange, startMessageUpload, messageFileUrl } from './services.js'
+import { ApiError, completeMaterialUpload, getPage, materialDownloadUrl, performAction, refreshRestrictions, sessionView, startMaterialUpload, unavailable, type AccountChange, type AfterCommit, type ProfileChange, startMessageUpload, messageFileUrl, postFileUrl } from './services.js'
 import { createS3MaterialStorage, type MaterialStorage } from './material-storage.js'
 import { createResetStore, resetPolicy, type ResetStore } from './resets.js'
 import { createThrottleStore, type ThrottleStore } from './throttle.js'
@@ -194,6 +194,9 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   app.post('/api/materials/:id/complete',async(req,res)=>{emptyBodySchema.parse(req.body??{});send(res,actionResponseSchema,{ok:true,message:'Material added.',record:await completeMaterialUpload(repository,res.locals.user as User,materialId.parse(req.params.id),materialStorage)})})
   app.get('/api/materials/:id/file',async(req,res)=>{res.redirect(302,await materialDownloadUrl(repository,res.locals.user as User,materialId.parse(req.params.id),materialStorage))})
   // Files in Messages: a signed upload straight to S3; the message is checked against the stored file when it is sent.
+  // Files for posts use the same upload; /api/uploads is the general name.
+  app.post('/api/uploads',async(req,res)=>{send(res,actionResponseSchema,{ok:true,message:'Upload the file to the address given, then save.',record:await startMessageUpload(res.locals.user as User,req.body,materialStorage)})})
+  app.get('/api/posts/:postId/files/:fileId',async(req,res)=>{const url=await postFileUrl(repository,res.locals.user as User,materialId.parse(req.params.postId),materialId.parse(req.params.fileId),req.query.inline==='1',materialStorage);if(req.query.format==='json'){send(res,actionResponseSchema,{ok:true,message:'File link ready.',record:{url}});return}res.redirect(302,url)})
   app.post('/api/messages/uploads',async(req,res)=>{send(res,actionResponseSchema,{ok:true,message:'Upload the file to the address given, then send the message.',record:await startMessageUpload(res.locals.user as User,req.body,materialStorage)})})
   app.get('/api/threads/:threadId/messages/:messageId/files/:fileId',async(req,res)=>{const url=await messageFileUrl(repository,res.locals.user as User,materialId.parse(req.params.threadId),materialId.parse(req.params.messageId),materialId.parse(req.params.fileId),req.query.inline==='1',materialStorage);if(req.query.format==='json'){send(res,actionResponseSchema,{ok:true,message:'File link ready.',record:{url}});return}res.redirect(302,url)})
   app.post('/api/pages/:pageId/actions',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const body=actionRequestSchema.parse(req.body);send(res,actionResponseSchema,await performAction(repository,res.locals.user as User,pageId,body,saveAccount,saveProfile,sendMail,materialStorage))})

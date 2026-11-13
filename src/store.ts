@@ -49,6 +49,8 @@ export type Post = {
   /** Each person's reaction, by user ID (#86). */
   reactionsBy?: Record<string, ReactionKind>
   comments: (Message & { anonymous: boolean; reactionsBy?: Record<string, ReactionKind> })[]
+  /** Pictures and files posted with it. */
+  attachments?: Attachment[]
   removed: boolean
 }
 export type Event = {

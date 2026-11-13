@@ -125,6 +125,7 @@ function postView(db: Database, post: Post, user: User) {
     eventPlace: post.eventPlace,
     eventContact: post.eventContact,
     notifyMembers: post.notifyMembers,
+    ...(post.attachments?.length && !post.removed ? { attachments: post.attachments.map(attachmentView) } : {}),
     author: author(db, post.authorId, post.anonymous),
     owned: post.authorId === user.id,
     ...reactionView(post, user),
@@ -888,7 +889,7 @@ export type OutgoingMail = { kind: 'newConcern'; userId: string; to: string; nam
 /** Work done once an action has committed: emails, and stored files to delete (#44). */
 export type AfterCommit = OutgoingMail | { kind: 'deleteFile'; key: string }
 export async function performAction(repo:Repository,user:User,pageId:string,request:ActionRequest,saveAccount?:(change:AccountChange)=>Promise<void>,saveProfile?:(id:string,change:ProfileChange)=>Promise<void>,sendMail?:(work:AfterCommit[])=>Promise<void>,files?:MaterialStorage){
-  if(request.action==='sendMessage'||request.action==='createThread')await checkMessageFiles(user,request,files)
+  if(fileActions.includes(request.action))await checkMessageFiles(user,request,files)
   const {outbox,...result}=await repo.transact(unit=>runAction(unit,user,pageId,request))
   // Emails go out only once the change is saved, and never reach the response.
   if(outbox.length)await sendMail?.(outbox)
@@ -908,8 +909,10 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       const payload = actionPayloads.createPost.parse(request.payload)
       if (!canPublish(db, user, payload.audience, payload.kind === 'announcement')) throw deny()
       if (payload.anonymous && (!hasRole(user, 'student') || payload.kind === 'announcement' || user.restrictions.includes('post.create'))) throw deny()
+      const { attachments: postFiles, ...postFields } = payload
       const post: Post = {
-        ...payload,
+        ...postFields,
+        ...(postFiles?.length ? { attachments: storedFiles(user.id, postFiles) } : {}),
         label: payload.kind === 'announcement' ? 'Announcement' : payload.label!,
         id: repo.nextId('POST'),
         authorId: user.id,
@@ -935,7 +938,13 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       const label = post.kind === 'announcement'
         ? 'Announcement'
         : z.object({ label: z.enum(postLabels) }).parse({ label: payload.label }).label
-      Object.assign(post, payload, { label, updatedAt: now() })
+      const { attachments: postFiles, ...postFields } = payload
+      Object.assign(post, postFields, { label, updatedAt: now() })
+      if (postFiles) {
+        if (postFiles.length) post.attachments = storedFiles(post.authorId, postFiles)
+        else delete post.attachments
+      }
+      if (!post.body && !post.attachments?.length) throw new z.ZodError([{ code: 'custom', path: ['body'], message: 'Write something or attach a file.', input: undefined }])
       queuePostReview(repo, post)
       syncPostEvent(repo, post)
       record = postView(db, post, user)
@@ -1375,7 +1384,23 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
   return {...JSON.parse(JSON.stringify({ok:true,message,...(record===undefined?{}:{record})})) as {ok:true;message:string;record?:unknown},outbox}
 }
 // --- files in Messages -----------------------------------------------------------------------------------------------
-/** Checks a file for a message and returns a signed upload for exactly that type and size. */
+/** Actions that can carry uploaded files: messages and posts. */
+const fileActions=['sendMessage','createThread','createPost','updatePost']
+/** A stored file for files uploaded by `ownerId`. */
+const storedFiles=(ownerId:string,files:{id:string;fileName:string;contentType:string;size:number}[])=>files.map(f=>({...f,key:messageFileKey(ownerId,f.id,f.fileName)}))
+/** A short-lived link to a file on a post, for people who can read the post. Pictures can open in the browser. */
+export async function postFileUrl(repo:Repository,user:User,postId:string,fileId:string,inline:boolean,storage?:MaterialStorage){
+  const file=await repo.view(unit=>{
+    const db=unit.read()
+    const post=visiblePosts(db,user).find(p=>p.id===postId)
+    const file=post&&!post.removed?post.attachments?.find(a=>a.id===fileId):undefined
+    if(!file)throw unavailable()
+    return file
+  })
+  if(!storage)throw filesNotSetUp()
+  return storage.downloadUrl(file.key,file.fileName,inline&&file.contentType.startsWith('image/'))
+}
+/** Checks a file for a message or a post and returns a signed upload for exactly that type and size. */
 export async function startMessageUpload(user:User,payload:unknown,storage?:MaterialStorage){
   requirePermission(user,'message.send')
   const p=messageUploadSchema.parse(payload)
@@ -1393,7 +1418,7 @@ export async function startMessageUpload(user:User,payload:unknown,storage?:Mate
 async function checkMessageFiles(user:User,request:ActionRequest,storage?:MaterialStorage){
   const files=(request.payload as {attachments?:unknown}|undefined)?.attachments
   if(!Array.isArray(files)||!files.length)return
-  const parsed=actionPayloads[request.action as 'sendMessage'].parse(request.payload).attachments
+  const parsed=((actionPayloads[request.action as keyof typeof actionPayloads] as z.ZodType).parse(request.payload) as {attachments?:{id:string;fileName:string;contentType:string;size:number}[]}).attachments??[]
   if(!storage)throw filesNotSetUp()
   for(const f of parsed){
     const allowed=messageFileTypes[f.contentType]
