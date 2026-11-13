@@ -169,6 +169,8 @@ export const actionPayloads = {
   // A link may change its address; a file keeps its file and changes only its title and note.
   updateMaterial: z.object({ title: z.string().trim().min(1, 'Enter a title.').max(160, 'Use at most 160 characters.'), url: materialUrl.optional(), note: z.string().trim().max(1000, 'Use at most 1000 characters.').optional() }).strict(),
   removeMaterial: z.object({}).strict(),
+  commentMaterial: z.object({ body: text }).strict(),
+  deleteMaterialComment: z.object({ commentId: z.string().min(1) }).strict(),
   uploadLoadSchedule: z.object({ term: z.string().trim().min(1).max(60), startsOn: date, endsOn: date, rows: z.array(z.unknown()).min(1).max(500) }).strict(),
   createPost: createPostSchema,
   updatePost: z.object(postContent).strict(),
