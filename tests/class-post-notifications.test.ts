@@ -52,3 +52,22 @@ describe('class post notifications', () => {
     expect(JSON.stringify(page.body.data)).toContain('"class"')
   })
 })
+
+describe('message notifications', () => {
+  const notices = async (to: string) => (await repo.transact((unit) => unit.read().notifications.filter((n) => n.kind === 'message' && n.recipientId === to).map((n) => n.body)))
+
+  it('names the sender and the start of the message', async () => {
+    const student = await login('QCU-STU-IT-A')
+    const long = 'Good afternoon, Prof.   Is 3 PM free?\n' + 'x'.repeat(200)
+    expect((await student.post('/api/pages/P12/actions').send({ action: 'sendMessage', recordId: 'THREAD-DIRECT-1', payload: { body: long } })).status).toBe(200)
+    const [body] = (await notices('QCU-PROF-IT')).slice(-1)
+    expect(body).toMatch(/^Mira Solis: Good afternoon, Prof\. Is 3 PM free\? x+…$/)
+    expect(body!.length).toBeLessThan(130)
+  })
+
+  it('names the group for a class group message', async () => {
+    const professor = await login('QCU-PROF-IT')
+    expect((await professor.post('/api/pages/P12/actions').send({ action: 'sendMessage', recordId: 'THREAD-IT-A', payload: { body: 'Room change: IC 301.' } })).status).toBe(200)
+    expect((await notices('QCU-STU-IT-A')).slice(-1)).toEqual(['Prof. Robin Elm in BSIT 3A class group: Room change: IC 301.'])
+  })
+})

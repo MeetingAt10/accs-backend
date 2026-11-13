@@ -238,6 +238,13 @@ function notify(repo:UnitOfWork,recipientId:string,kind:string,pageId:string,rec
     read: false,
   })
 }
+/** What a message notification says: who wrote, where (for a group), and the start of the message. */
+function messageNotice(sender:User,thread:Thread,body:string) {
+  const words=body.replace(/\s+/g,' ').trim()
+  const preview=words.length>100?`${words.slice(0,99)}…`:words
+  const who=thread.spaceId?`${sender.name} in ${thread.title}`:sender.name
+  return preview?`${who}: ${preview}`:`${who} sent a file.`
+}
 function unreadMessages(thread:Thread,userId:string) {
   const readCount = Math.min(thread.messages.length, thread.readMessageCounts[userId] ?? 0)
   return thread.messages.slice(readCount).filter(message => message.authorId !== userId).length
@@ -1269,7 +1276,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       const first = addMessage(thread.messages, payload.body, payload.attachments)
       if (payload.body) autoFlag(repo, { itemType: 'message', itemId: first.id, parentId: thread.id, authorId: user.id, text: payload.body })
       thread.readMessageCounts[user.id] = thread.messages.length
-      notify(repo, recipient.id, 'message', 'P12', thread.id)
+      notify(repo, recipient.id, 'message', 'P12', thread.id, { body: messageNotice(user, thread, payload.body) })
       record = { id: thread.id, title: threadTitle(db, thread, user) }
       message = 'Message sent.'
       break
@@ -1281,7 +1288,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       const sent = addMessage(thread.messages, payload.body, payload.attachments)
       thread.readMessageCounts[user.id] = thread.messages.length
       for (const recipientId of thread.memberIds.filter(memberId => memberId !== user.id)) {
-        notify(repo, recipientId, 'message', 'P12', thread.id)
+        notify(repo, recipientId, 'message', 'P12', thread.id, { body: messageNotice(user, thread, payload.body) })
       }
       if (payload.body) autoFlag(repo, { itemType: 'message', itemId: sent.id, parentId: thread.id, authorId: user.id, text: payload.body })
       record = messageView(db, sent)
