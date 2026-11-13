@@ -1138,7 +1138,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       audit(repo,user,'Faculty load uploaded','scheduling',p.term)
       const conflicts=db.slots.filter(s=>replaced.has(s.facultyId)&&s.state!=='unavailable'&&classAt(db,s.facultyId,s.date,s.start,s.end)).length
       record={term:p.term,faculty:replaced.size,classes:accepted.length,conflicts}
-      message=conflicts?`Load saved. ${conflicts} consultation time${conflicts===1?'':'s'} overlap a class; see the list.`:'Load saved.'
+      message=conflicts?`Load saved. ${conflicts} appointment ${conflicts===1?'time overlaps':'times overlap'} a class; see the list.`:'Load saved.'
       break
     }
     case'addMaterial':{

@@ -99,7 +99,7 @@ describe('availability against the load', () => {
     const secretary = await secretarySession(app)
     const saved = await upload(secretary, [wednesdayClass()])
     expect(saved.body.record.conflicts).toBe(1)
-    expect(saved.body.message).toBe('Load saved. 1 consultation time overlap a class; see the list.')
+    expect(saved.body.message).toBe('Load saved. 1 appointment time overlaps a class; see the list.')
     const prof = (await secretary.get('/api/pages/P54')).body.data.faculty.find((f: { id: string }) => f.id === 'QCU-PROF-IT')
     expect(prof.conflicts).toEqual([expect.objectContaining({ slotId: early, subject: 'CC 104 Data Structures', day: 'Wed' })])
   })
