@@ -230,7 +230,7 @@ describe('server-side sessions', () => {
 
   it('rejects old signed-token cookies and malformed values', async () => {
     const app = newApp()
-    const legacy = `${Buffer.from(JSON.stringify({ id: 'QCU-ADMIN', roles: ['administrator'] })).toString('base64url')}.c2lnbmF0dXJl`
+    const legacy = `${Buffer.from(JSON.stringify({ id: 'ACCS-ADMIN', roles: ['administrator'] })).toString('base64url')}.c2lnbmF0dXJl`
     for (const value of [legacy, '', 'x'.repeat(43)]) expect(await sessionStatus(app, `accs_session=${value}`)).toBe(401)
   })
 
@@ -260,7 +260,7 @@ describe('server-side sessions', () => {
   it('ends the sessions of a deactivated account immediately', async () => {
     const app = newApp()
     const student = cookieOf(await signIn(app))
-    const admin = cookieOf(await request(app).post('/api/auth/sign-in').send({ emailOrId: 'QCU-ADMIN', password: 'Accs@Qcu2026!' }))
+    const admin = cookieOf(await request(app).post('/api/auth/sign-in').send({ emailOrId: 'ACCS-ADMIN', password: 'Accs@Qcu2026!' }))
     const update = await request(app).post('/api/pages/P47/actions').set('Cookie', admin).send({ action: 'updateRoles', recordId: 'QCU-STU-IT-A', reason: 'Account closed', payload: { roles: ['student'], active: false } })
     expect(update.status).toBe(200)
     expect(await sessionStatus(app, student)).toBe(401)
@@ -283,7 +283,7 @@ describe('server-side sessions', () => {
 })
 
 describe('reset code limits and office-assisted reset', () => {
-  const admin = async (app: ReturnType<typeof newApp>) => String((await request(app).post('/api/auth/sign-in').send({ emailOrId: 'QCU-ADMIN', password: 'Accs@Qcu2026!' })).headers['set-cookie'][0]).split(';')[0]!
+  const admin = async (app: ReturnType<typeof newApp>) => String((await request(app).post('/api/auth/sign-in').send({ emailOrId: 'ACCS-ADMIN', password: 'Accs@Qcu2026!' })).headers['set-cookie'][0]).split(';')[0]!
   const reset = (app: ReturnType<typeof newApp>, code: string) => request(app).post('/api/auth/reset-password').send({ emailOrId: 'QCU-STU-IT-A', code, password: 'An0ther!Passw0rd' })
   const wrongCode = (code: string) => (code === '000000' ? '111111' : '000000')
 
@@ -359,7 +359,7 @@ describe('reset code limits and office-assisted reset', () => {
     const issued = await request(app).post('/api/admin/accounts/QCU-STU-IT-A/reset-code').set('Cookie', cookie).send({})
     expect(issued.status).toBe(200)
     expect(issued.body.record.code).toMatch(/^\d{6}$/)
-    expect(repository.read().audit.some(a => a.action === 'Password reset code issued' && a.reference === 'QCU-STU-IT-A' && a.actorId === 'QCU-ADMIN')).toBe(true)
+    expect(repository.read().audit.some(a => a.action === 'Password reset code issued' && a.reference === 'QCU-STU-IT-A' && a.actorId === 'ACCS-ADMIN')).toBe(true)
     expect(JSON.stringify(repository.read().audit)).not.toContain(issued.body.record.code)
     expect((await reset(app, issued.body.record.code)).status).toBe(200)
     expect((await request(app).post('/api/auth/sign-in').send({ emailOrId: 'QCU-STU-IT-A', password: 'An0ther!Passw0rd' })).status).toBe(200)

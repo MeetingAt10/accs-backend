@@ -56,13 +56,13 @@ describe.each<[string, Stack]>([
 ])('on %s', (_name, stack) => {
   it('has no such routes: 404 for a signed-in Dean, 401 for nobody, and no one is switched', async () => {
     const { app, repository } = setup(stack)
-    const { agent: dean } = await signIn(app, 'QCU-DEAN')
+    const { agent: dean } = await signIn(app, 'CCS-DEAN')
     const missing = { error: 'This API resource is not available.', code: 'NOT_FOUND' }
     for (const response of [await dean.get('/api/dev/users'), await dean.post('/api/dev/switch-user').send({ userId: 'QCU-STU-IT-A' }), await dean.post('/api/dev/switch-user').send({})]) {
       expect(response.status).toBe(404)
       expect(response.body).toEqual(missing)
     }
-    expect((await dean.get('/api/session')).body.user.id).toBe('QCU-DEAN')
+    expect((await dean.get('/api/session')).body.user.id).toBe('CCS-DEAN')
     expect(repository.read().audit.some((entry) => entry.action === 'Account switched')).toBe(false)
     // The shared session check runs first, as it does for any unknown API path.
     expect((await request(app).get('/api/dev/users')).status).toBe(401)
@@ -73,7 +73,7 @@ describe.each<[string, Stack]>([
     const { app } = setup(stack)
     const credentials = await activateSecretary(app)
     const { agent } = await signIn(app, credentials.username, credentials.temporaryPassword)
-    for (const response of [await agent.get('/api/dev/users'), await agent.post('/api/dev/switch-user').send({ userId: 'QCU-DEAN' })]) {
+    for (const response of [await agent.get('/api/dev/users'), await agent.post('/api/dev/switch-user').send({ userId: 'CCS-DEAN' })]) {
       expect([response.status, response.body.code]).toEqual([403, 'CREDENTIALS_CHANGE_REQUIRED'])
     }
   })
@@ -88,14 +88,14 @@ describe('on the development stack', () => {
 
   it('lists every account, the inactive ones and the ones from the auth store included', async () => {
     const context = setup(dev)
-    const { agent: dean } = await signIn(context.app, 'QCU-DEAN')
+    const { agent: dean } = await signIn(context.app, 'CCS-DEAN')
     const first = await dean.get('/api/dev/users')
     expect(first.status).toBe(200)
     const seeded = seed().users
     expect(first.body.users).toHaveLength(seeded.length)
     // The secretary has not been activated yet and has no username.
     expect(first.body.users.find((user: Body) => user.id === 'QCU-SECRETARY')).toEqual({ id: 'QCU-SECRETARY', name: 'CCS Secretary', roles: ['secretary'], active: false })
-    expect(first.body.users.find((user: Body) => user.id === 'QCU-DEAN')).toEqual({ id: 'QCU-DEAN', name: 'Dr. Sage Linden', roles: ['dean'], active: true })
+    expect(first.body.users.find((user: Body) => user.id === 'CCS-DEAN')).toEqual({ id: 'CCS-DEAN', name: 'Dr. Sage Linden', roles: ['dean'], active: true })
 
     const secretary = await secretarySession(context.app)
     const [made] = (await secretary.post('/api/accounts/students').send({ students: [student] })).body.record.results as Body[]
@@ -119,14 +119,14 @@ describe('on the development stack', () => {
 
   it('ends the current session, starts one for the target, and answers as sign-in does', async () => {
     const { app, repository } = setup(dev)
-    const signedIn = await request(app).post('/api/auth/sign-in').send({ emailOrId: 'QCU-DEAN', password: seedPassword })
+    const signedIn = await request(app).post('/api/auth/sign-in').send({ emailOrId: 'CCS-DEAN', password: seedPassword })
     const oldCookie = cookieOf(signedIn)
     const switched = await request(app).post('/api/dev/switch-user').set('Cookie', oldCookie).send({ userId: 'QCU-STU-IT-A' })
     expect(switched.status).toBe(200)
     const direct = await request(app).post('/api/auth/sign-in').send({ emailOrId: 'QCU-STU-IT-A', password: seedPassword })
     expect(switched.body).toEqual(direct.body)
     expect(switched.body.user.roles).toEqual(['student'])
-    expect(Object.keys(switched.body).sort()).toEqual(['allowedPages', 'permissions', 'roleLabels', 'sampleData', 'user'])
+    expect(Object.keys(switched.body).sort()).toEqual(['allowedPages', 'permissions', 'roleLabels', 'user'])
 
     // The old token is dead, the new one belongs to the student and is not the same.
     const newCookie = cookieOf(switched)
@@ -139,12 +139,12 @@ describe('on the development stack', () => {
     // One entry: who switched, to whom, and what. Nothing else.
     const entries = repository.read().audit.filter((entry) => entry.action === 'Account switched')
     expect(entries).toHaveLength(1)
-    expect(entries[0]).toMatchObject({ actorId: 'QCU-DEAN', reference: 'QCU-STU-IT-A', module: 'identity', result: 'Recorded' })
+    expect(entries[0]).toMatchObject({ actorId: 'CCS-DEAN', reference: 'QCU-STU-IT-A', module: 'identity', result: 'Recorded' })
     expect(Object.keys(entries[0]!).sort()).toEqual(['action', 'actorId', 'at', 'id', 'module', 'reference', 'result'])
     expect(JSON.stringify(entries)).not.toContain(oldCookie.split('=')[1]!)
     expect(JSON.stringify(entries)).not.toContain(newCookie.split('=')[1]!)
     // The administrator reads it in the audit trail.
-    const { agent: admin } = await signIn(app, 'QCU-ADMIN')
+    const { agent: admin } = await signIn(app, 'ACCS-ADMIN')
     expect((await admin.get('/api/pages/P51')).body.data.audit.some((entry: Body) => entry.action === 'Account switched' && entry.reference === 'QCU-STU-IT-A' && entry.actor.name === 'Dr. Sage Linden')).toBe(true)
   })
 
@@ -152,7 +152,7 @@ describe('on the development stack', () => {
     const { app } = setup(dev)
     // The Dean activates the secretary, who replaces the temporary details at the first sign-in.
     await secretarySession(app)
-    const { agent: tester } = await signIn(app, 'QCU-DEAN')
+    const { agent: tester } = await signIn(app, 'CCS-DEAN')
     const switched = await tester.post('/api/dev/switch-user').send({ userId: 'QCU-SECRETARY' })
     expect(switched.status).toBe(200)
     expect(switched.body.user).toMatchObject({ id: 'QCU-SECRETARY', roles: ['secretary'], username: 'ccs.secretary', mustChangeCredentials: false })
@@ -172,24 +172,24 @@ describe('on the development stack', () => {
   it('switches again and again, and back, each time recorded', async () => {
     const { app, repository } = setup(dev)
     const { agent } = await signIn(app, 'QCU-STU-IT-A')
-    for (const id of ['QCU-PROF-IT', 'QCU-CHAIR-IT', 'QCU-ADMIN', 'QCU-STU-IT-A', 'QCU-STU-IT-A']) {
+    for (const id of ['QCU-PROF-IT', 'QCU-CHAIR-IT', 'ACCS-ADMIN', 'QCU-STU-IT-A', 'QCU-STU-IT-A']) {
       expect((await agent.post('/api/dev/switch-user').send({ userId: id })).status).toBe(200)
       expect((await agent.get('/api/session')).body.user.id).toBe(id)
     }
     expect(repository.read().audit.filter((entry) => entry.action === 'Account switched').map((entry) => [entry.actorId, entry.reference])).toEqual([
-      ['QCU-STU-IT-A', 'QCU-PROF-IT'], ['QCU-PROF-IT', 'QCU-CHAIR-IT'], ['QCU-CHAIR-IT', 'QCU-ADMIN'], ['QCU-ADMIN', 'QCU-STU-IT-A'], ['QCU-STU-IT-A', 'QCU-STU-IT-A'],
+      ['QCU-STU-IT-A', 'QCU-PROF-IT'], ['QCU-PROF-IT', 'QCU-CHAIR-IT'], ['QCU-CHAIR-IT', 'ACCS-ADMIN'], ['ACCS-ADMIN', 'QCU-STU-IT-A'], ['QCU-STU-IT-A', 'QCU-STU-IT-A'],
     ])
   })
 
   it('refuses only an account that is not active, and an account that does not exist', async () => {
     const { app, repository } = setup(dev)
-    const { agent } = await signIn(app, 'QCU-DEAN')
+    const { agent } = await signIn(app, 'CCS-DEAN')
     const inactive = await agent.post('/api/dev/switch-user').send({ userId: 'QCU-SECRETARY' })
     expect([inactive.status, inactive.body.code]).toEqual([409, 'CONFLICT'])
     expect((await agent.post('/api/dev/switch-user').send({ userId: 'NOBODY' })).status).toBe(404)
-    for (const bad of [{}, { userId: '' }, { userId: 7 }, { userId: 'QCU-DEAN', extra: true }, { userId: 'x'.repeat(65) }]) expect([JSON.stringify(bad), (await agent.post('/api/dev/switch-user').send(bad)).status]).toEqual([JSON.stringify(bad), 400])
+    for (const bad of [{}, { userId: '' }, { userId: 7 }, { userId: 'CCS-DEAN', extra: true }, { userId: 'x'.repeat(65) }]) expect([JSON.stringify(bad), (await agent.post('/api/dev/switch-user').send(bad)).status]).toEqual([JSON.stringify(bad), 400])
     // Still the Dean, and nothing was recorded.
-    expect((await agent.get('/api/session')).body.user.id).toBe('QCU-DEAN')
+    expect((await agent.get('/api/session')).body.user.id).toBe('CCS-DEAN')
     expect(repository.read().audit.some((entry) => entry.action === 'Account switched')).toBe(false)
   })
 
@@ -206,14 +206,14 @@ describe('on the development stack', () => {
     const into = await agent.post('/api/dev/switch-user').send({ userId: 'QCU-SECRETARY' })
     expect([into.status, into.body.user.mustChangeCredentials]).toEqual([200, true])
     expect((await agent.get('/api/pages/P03')).body.code).toBe('CREDENTIALS_CHANGE_REQUIRED')
-    expect((await agent.post('/api/dev/switch-user').send({ userId: 'QCU-DEAN' })).status).toBe(200)
-    expect((await agent.get('/api/session')).body.user.id).toBe('QCU-DEAN')
+    expect((await agent.post('/api/dev/switch-user').send({ userId: 'CCS-DEAN' })).status).toBe(200)
+    expect((await agent.get('/api/session')).body.user.id).toBe('CCS-DEAN')
   })
 
   it('does not switch when the switch cannot be recorded', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { app, repository } = setup(dev)
-    const { agent } = await signIn(app, 'QCU-DEAN')
+    const { agent } = await signIn(app, 'CCS-DEAN')
     const transact = repository.transact.bind(repository)
     vi.spyOn(repository, 'transact').mockImplementation(((work: Parameters<typeof transact>[0], collections?: Parameters<typeof transact>[1]) => {
       if (collections?.includes('audit')) return Promise.reject(new Error('audit table unavailable'))
@@ -222,7 +222,7 @@ describe('on the development stack', () => {
     const refused = await agent.post('/api/dev/switch-user').send({ userId: 'QCU-STU-IT-A' })
     expect([refused.status, refused.body.code]).toEqual([500, 'INTERNAL_ERROR'])
     expect(error).toHaveBeenCalledTimes(1)
-    expect((await agent.get('/api/session')).body.user.id).toBe('QCU-DEAN')
+    expect((await agent.get('/api/session')).body.user.id).toBe('CCS-DEAN')
   })
 
   it('records the switch in the audit table of a shared record store, and nothing else', async () => {
@@ -230,15 +230,15 @@ describe('on the development stack', () => {
     const authStore = createMemoryAuthStore()
     const sessionStore = createMemorySessionStore()
     const app = createApp(createRecordRepository(store), { authStore, sessionStore, stack: dev })
-    const { agent } = await signIn(app, 'QCU-DEAN')
+    const { agent } = await signIn(app, 'CCS-DEAN')
     expect(store.all()).toEqual([])
     expect((await agent.post('/api/dev/switch-user').send({ userId: 'QCU-PROF-IT' })).status).toBe(200)
     expect(store.all().map((item) => [item.table, item.collection])).toEqual([['ccs_audit', 'audit']])
-    expect(JSON.parse(store.all()[0]!.data!)).toMatchObject({ actorId: 'QCU-DEAN', action: 'Account switched', reference: 'QCU-PROF-IT' })
+    expect(JSON.parse(store.all()[0]!.data!)).toMatchObject({ actorId: 'CCS-DEAN', action: 'Account switched', reference: 'QCU-PROF-IT' })
     // Another instance sees the new session and the entry.
     const other = createApp(createRecordRepository(store), { authStore, sessionStore, stack: dev })
     expect((await agent.get('/api/session')).body.user.id).toBe('QCU-PROF-IT')
-    const { agent: admin } = await signIn(other, 'QCU-ADMIN')
+    const { agent: admin } = await signIn(other, 'ACCS-ADMIN')
     expect((await admin.get('/api/pages/P51')).body.data.audit.some((entry: Body) => entry.action === 'Account switched')).toBe(true)
   })
 })

@@ -7,19 +7,21 @@ import { z } from 'zod'
 import { type AuthData, type AuthStore, AuthStoreConflict, createAuthStore, defaultHash, hashPassword, verifyPassword } from './auth.js'
 import { env, onLambda, tableName } from './env.js'
 import { actionRequestSchema, actionResponseSchema, changePasswordSchema, completeFirstLoginSchema, emptyBodySchema, errorResponseSchema, forgotPasswordSchema, healthResponseSchema, idParamsSchema, pageQuerySchema, pageResponseSchema, resetPasswordSchema, sessionResponseSchema, signInSchema, type User } from './schemas.js'
-import { createResetMailer, type ResetCodeMailer } from './mail.js'
+import { createNewConcernMailer, createResetMailer, createSesInviteMailer, type NewConcernMailer, type ResetCodeMailer } from './mail.js'
 import { accountRouter, applyAccounts, recordAudit, saveAccountChange, saveProfileChange, setOwnCredentials, unsentMailer, type InviteMailer } from './accounts.js'
 import { hasPermission } from './access.js'
 import { devRouter, devToolboxEnabled, isDevToolboxCall, type Stack } from './dev.js'
 import { send } from './http.js'
 import { createRepository } from './persist.js'
-import { ApiError, getPage, performAction, refreshRestrictions, sessionView, unavailable, type AccountChange, type ProfileChange } from './services.js'
+import { ApiError, completeMaterialUpload, getPage, materialDownloadUrl, performAction, refreshRestrictions, sessionView, startMaterialUpload, unavailable, type AccountChange, type AfterCommit, type ProfileChange } from './services.js'
+import { createS3MaterialStorage, type MaterialStorage } from './material-storage.js'
 import { createResetStore, resetPolicy, type ResetStore } from './resets.js'
 import { createThrottleStore, type ThrottleStore } from './throttle.js'
 import { createSessionStore, isWellFormedToken, newSessionToken, sessionIdOf, sessionPolicy, sessionState, type SessionStore } from './sessions.js'
-import { demoUserIds, type Repository } from './store.js'
+import { demoUserIds, isSampleAddress, type Repository } from './store.js'
+import { currentAccountId, formerAccountIds } from './renames.js'
 
-export function createApp(repository:Repository=createRepository({nodeEnv:env.NODE_ENV,tableName}),options:{authStore?:AuthStore;sessionStore?:SessionStore;resetStore?:ResetStore;throttleStore?:ThrottleStore;mailer?:InviteMailer;resetMailer?:ResetCodeMailer;stack?:Stack}={}){
+export function createApp(repository:Repository=createRepository({nodeEnv:env.NODE_ENV,tableName}),options:{authStore?:AuthStore;sessionStore?:SessionStore;resetStore?:ResetStore;throttleStore?:ThrottleStore;mailer?:InviteMailer;resetMailer?:ResetCodeMailer;concernMailer?:NewConcernMailer;materialStorage?:MaterialStorage;stack?:Stack}={}){
   const app=express()
   // The account switcher for testers exists only on the development stack and on local runs (src/dev.ts).
   const devToolbox=devToolboxEnabled(options.stack??{tablePrefix:env.TABLE_PREFIX,nodeEnv:env.NODE_ENV})
@@ -38,7 +40,7 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     const token=cookieValue(req);if(!isWellFormedToken(token))return undefined
     const sessionId=sessionIdOf(token);const session=await sessions.get(sessionId);const now=Date.now()
     if(!session||sessionState(session,now)!=='live')return undefined
-    const user=await repository.view(unit=>{const db=unit.read();const account=db.users.find(u=>u.id===session.userId&&u.active);return account&&refreshRestrictions(db,account)},['restrictions']);if(!user)return undefined
+    const user=await repository.view(unit=>{const db=unit.read();const account=db.users.find(u=>u.id===currentAccountId(session.userId)&&u.active);return account&&refreshRestrictions(db,account)},['restrictions']);if(!user)return undefined
     if(now-Date.parse(session.lastSeenAt)>=sessionPolicy.touchIntervalMs)await sessions.touch(sessionId,new Date(now).toISOString())
     res.locals.sessionId=sessionId;return user
   }
@@ -55,12 +57,13 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     const data=await authStore.load();if(data===synced)return
     await repository.transact(unit=>applyAccounts(unit.read(),data.users),[]);synced=data
   }
-  const findUser=(ident:string)=>{const key=ident.trim().toLowerCase();return repository.view(unit=>unit.read().users.find(u=>u.active&&(u.email.toLowerCase()===key||u.id.toLowerCase()===key||u.studentId?.toLowerCase()===key||u.username?.toLowerCase()===key)),[])}
+  // An old account ID (QCU-DEAN) signs in as the renamed account (CCS-DEAN).
+  const findUser=(ident:string)=>{const key=currentAccountId(ident.trim().toUpperCase()).toLowerCase();return repository.view(unit=>unit.read().users.find(u=>u.active&&(u.email.toLowerCase()===key||u.id.toLowerCase()===key||u.studentId?.toLowerCase()===key||u.username?.toLowerCase()===key)),[])}
   // A role change made on the administrator's pages is saved to the auth store too, so it holds on every instance.
   const saveAccount=async(change:AccountChange)=>saveAccountChange(authStore,await repository.view(unit=>unit.read().users,[]),change)
   const saveProfile=async(id:string,change:ProfileChange)=>saveProfileChange(authStore,await repository.view(unit=>unit.read().users,[]),id,change)
   // Only the seeded demo accounts fall back to the shared seed password, until they set their own. Every other account has a stored credential.
-  const credentialFor=(user:User,data:AuthData)=>data.credentials[user.id]??(demoUserIds.has(user.id)?defaultHash():undefined)
+  const credentialFor=(user:User,data:AuthData)=>data.credentials[user.id]??formerAccountIds(user.id).map(id=>data.credentials[id]).find(Boolean)??(demoUserIds.has(user.id)?defaultHash():undefined)
   const tooMany=()=>new ApiError(429,'Too many attempts. Try again in 15 minutes.','TOO_MANY_ATTEMPTS')
   // Attempt limits live in ccs_identity (src/throttle.ts), so they hold across Lambda instances. An attempt is counted
   // before the password or code is checked, so parallel guesses cannot exceed the limit; a success clears the count.
@@ -81,13 +84,29 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   // without a channel issues nothing: an administrator issues the code (POST /api/admin/accounts/:id/reset-code).
   const resetMailer=options.resetMailer??createResetMailer({nodeEnv:env.NODE_ENV,mailFrom:env.MAIL_FROM})
   const selfServiceReset=resetMailer.channel!=='none'
-  // Seeded demo accounts carry made-up addresses on the real qcu.edu.ph domain, so a code for one of them (QCU-ADMIN
-  // included) would reach whoever owns that mailbox. They are never emailed; an administrator issues their codes.
+  // Seeded demo accounts carry made-up addresses on access-ccs.com (before #69, on QCU's real qcu.edu.ph domain). They
+  // are still never emailed (decision A in #69): nobody reads those mailboxes, so an administrator issues their codes.
   const resetCodeMinutes=Math.round(resetPolicy.codeTtlMs/60000)
   // A failed send is logged without the code or the address, and the caller still gives the generic answer.
   const deliverResetCode=async(user:User,code:string)=>{
     try{await resetMailer.send({userId:user.id,to:user.email,name:user.name,code,expiresInMinutes:resetCodeMinutes})}
     catch(error){console.error(JSON.stringify({level:'error',message:'Reset code email not sent',userId:user.id,error:error instanceof Error?error.name:'Unknown'}))}
+  }
+  // New-concern emails (#37) go to the receiving office once the concern is saved. Like reset codes, seeded demo accounts
+  // are never emailed. A failed email is logged without the address and never undoes or blocks the filing.
+  const concernMailer=options.concernMailer??createNewConcernMailer({nodeEnv:env.NODE_ENV,mailFrom:env.MAIL_FROM})
+  const appUrl=(env.APP_URL??env.CORS_ORIGIN[0]??'').replace(/\/+$/,'')
+  // Class material files live in a private bucket when MATERIALS_BUCKET is set (#44); otherwise materials are links only.
+  const materialStorage=options.materialStorage??(env.MATERIALS_BUCKET?createS3MaterialStorage(env.MATERIALS_BUCKET):undefined)
+  const sendMail=async(work:AfterCommit[])=>{
+    // A removed material's file is deleted once the removal is saved; a failure leaves an orphan file, never a broken page.
+    await Promise.all(work.flatMap(w=>w.kind==='deleteFile'&&materialStorage?[materialStorage.remove(w.key).catch(error=>console.error(JSON.stringify({level:'error',message:'Material file not deleted',key:w.key,error:error instanceof Error?error.name:'Unknown'})))]:[]))
+    const mail=work.filter((w):w is Extract<AfterCommit,{kind:'newConcern'}>=>w.kind==='newConcern')
+    if(concernMailer.channel==='none'||!mail.length)return
+    await Promise.all(mail.filter(m=>concernMailer.channel!=='email'||!isSampleAddress(m.userId,m.to)).map(async m=>{
+      try{await concernMailer.send({userId:m.userId,to:m.to,name:m.name,link:`${appUrl}/cases/${encodeURIComponent(m.reportId)}`})}
+      catch(error){console.error(JSON.stringify({level:'error',message:'New concern email not sent',userId:m.userId,reportId:m.reportId,error:error instanceof Error?error.name:'Unknown'}))}
+    }))
   }
   const forgotMessage=resetMailer.channel==='email'
     ?`If an account matches, a reset code has been emailed to it. The code expires in ${resetCodeMinutes} minutes. Ask an ACCS administrator if it does not arrive.`
@@ -98,7 +117,7 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     const {emailOrId}=forgotPasswordSchema.parse(req.body);const user=await findUser(emailOrId)
     // Hash a code whether or not the account exists, so the response time does not reveal it.
     const {code,codeHash}=newResetCode()
-    if(user&&selfServiceReset&&(resetMailer.channel!=='email'||!demoUserIds.has(user.id))&&await resets.issue({userId:user.id,codeHash,now:Date.now()})==='issued')await deliverResetCode(user,code)
+    if(user&&selfServiceReset&&(resetMailer.channel!=='email'||!isSampleAddress(user.id,user.email))&&await resets.issue({userId:user.id,codeHash,now:Date.now()})==='issued')await deliverResetCode(user,code)
     send(res,actionResponseSchema,{ok:true,message:forgotMessage})
   })
   app.post('/api/auth/reset-password',async(req,res)=>{
@@ -149,6 +168,14 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     await sessions.revokeUser(user.id,res.locals.sessionId as string)
     await throttle.clear(key);send(res,actionResponseSchema,{ok:true,message:'Password changed.'})
   })
+  // Sign out of other devices (frontend #11): every other session of this account ends; this one stays signed in.
+  app.post('/api/auth/sign-out-others',async(req,res)=>{
+    emptyBodySchema.parse(req.body??{})
+    const user=res.locals.user as User
+    await sessions.revokeUser(user.id,res.locals.sessionId as string)
+    await recordAudit(repository,user,[{action:'Signed out of other devices',reference:user.id}])
+    send(res,actionResponseSchema,{ok:true,message:'Signed out of your other devices. This one stays signed in.'})
+  })
   // Office-assisted reset: an administrator issues a code, shown once, and gives it to the account holder.
   app.post('/api/admin/accounts/:id/reset-code',async(req,res)=>{
     const admin=res.locals.user as User;const id=z.string().trim().min(1).max(64).parse(req.params.id);emptyBodySchema.parse(req.body??{})
@@ -161,8 +188,14 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   })
   app.get('/api/session',(_req,res)=>send(res,sessionResponseSchema,sessionView(res.locals.user as User)))
   app.get('/api/pages/:pageId',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const query=pageQuerySchema.parse(req.query);send(res,pageResponseSchema,await getPage(repository,res.locals.user as User,pageId,query))})
-  app.post('/api/pages/:pageId/actions',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const body=actionRequestSchema.parse(req.body);send(res,actionResponseSchema,await performAction(repository,res.locals.user as User,pageId,body,saveAccount,saveProfile))})
-  app.use('/api/accounts',accountRouter({repository,authStore,sessions,mailer:options.mailer??unsentMailer}))
+  // Class material files (#44): a signed upload straight to S3, a confirmation, and a download that checks access first.
+  const materialId=z.string().trim().min(1).max(64)
+  app.post('/api/materials/uploads',async(req,res)=>{send(res,actionResponseSchema,{ok:true,message:'Upload the file to the address given, then confirm it.',record:await startMaterialUpload(repository,res.locals.user as User,req.body,materialStorage)})})
+  app.post('/api/materials/:id/complete',async(req,res)=>{emptyBodySchema.parse(req.body??{});send(res,actionResponseSchema,{ok:true,message:'Material added.',record:await completeMaterialUpload(repository,res.locals.user as User,materialId.parse(req.params.id),materialStorage)})})
+  app.get('/api/materials/:id/file',async(req,res)=>{res.redirect(302,await materialDownloadUrl(repository,res.locals.user as User,materialId.parse(req.params.id),materialStorage))})
+  app.post('/api/pages/:pageId/actions',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const body=actionRequestSchema.parse(req.body);send(res,actionResponseSchema,await performAction(repository,res.locals.user as User,pageId,body,saveAccount,saveProfile,sendMail))})
+  // Invites go out by email when MAIL_FROM is set (#36); otherwise the screen shows them once.
+  app.use('/api/accounts',accountRouter({repository,authStore,sessions,mailer:options.mailer??(env.MAIL_FROM?createSesInviteMailer(env.MAIL_FROM):unsentMailer)}))
   if(devToolbox)app.use('/api/dev',devRouter({repository,sessions,start:startSession,out:sessionOut}))
   app.use('/api',(_req,res)=>send(res,errorResponseSchema,{error:'This API resource is not available.',code:'NOT_FOUND'},404))
   const errors:ErrorRequestHandler=(error,req,res,_next)=>{if(error instanceof z.ZodError)return send(res,errorResponseSchema,{error:'Check the required fields.',code:'VALIDATION_ERROR',fields:error.issues.map(issue=>({path:issue.path.map(String).join('.'),message:issue.message}))},400);if(error instanceof ApiError)return send(res,errorResponseSchema,{error:error.message,code:error.code},error.status);if(error instanceof AuthStoreConflict)return send(res,errorResponseSchema,{error:error.message,code:'CONFLICT'},409);if(error instanceof SyntaxError)return send(res,errorResponseSchema,{error:'The request must contain valid JSON.',code:'VALIDATION_ERROR'},400)
