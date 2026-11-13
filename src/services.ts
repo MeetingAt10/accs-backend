@@ -3,7 +3,7 @@ import { categoryProblem, concernCategories } from './categories.js'
 import { mainCampus, sectionName } from './sections.js'
 import { materialFileTypes, materialMaxBytes, safeFileName, uploadUrlSeconds, type MaterialStorage } from './material-storage.js'
 import { appointmentCategories, appointmentProblem, concernFollowUp, purposeOf, type AppointmentChoice } from './appointments.js'
-import { loadRowSchema, materialUploadSchema, actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
+import { reactionKinds, type ReactionKind, loadRowSchema, materialUploadSchema, actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
 import { allowedPages, canActCase, canAudience, canReadCase, isEarlierHandler, overseesCase, canCountCase, canFacultyResult, canPage, canPublish, canReach, canSpace, canStudentRecord, canThread, canViewCase, hasPermission, hasRole, isOrganizationMember, pageTitles, permissionRoles, permissions, scopeLabel } from './access.js'
 import { consentWording } from './consent.js'
 import type { Material, Space, Assignment, Consultation, Cycle, Database, Message, Moderation, Post, Report, Repository, Slot, Stage, Strike, Thread, UnitOfWork } from './store.js'
@@ -72,6 +72,24 @@ export function sessionView(user:User) { return { user, permissions:permissions(
 function person(user:User) { return { id:user.id,name:user.name,email:user.email,roles:user.roles,program:user.program,section:user.section,...(hasRole(user,'student')?{campus:user.campus??mainCampus,...(user.program&&user.year&&user.section?{sectionName:sectionName({campus:user.campus,program:user.program,year:user.year,section:user.section})}:{})}:{}),office:user.office,title:user.title,bio:user.bio,education:user.education,officeHours:user.officeHours,studentId:user.studentId,year:user.year,standing:user.restrictions.length?'Some features paused':'Good standing' } }
 function author(db:Database,id:string,anonymous=false,alias='Student A-12') { const u=db.users.find(item=>item.id===id); return anonymous ? {name:alias,roles:['student'],anonymous:true} : u?{id:u.id,name:u.name,roles:u.roles,email:u.email}:{name:'College office',roles:[]} }
 function messageView(db:Database,message:Message,report?:Report) { return {id:message.id,body:message.body,at:message.at,author:author(db,message.authorId,!!report&&message.authorId===report.ownerId&&report.identity==='anonymous'&&!report.disclosedTo.includes(report.stage),report?.alias)} }
+/** Everyone's reaction to a post or comment: the old single reaction counts as "like" (#86). */
+function reactionsOf(item: { reactions?: string[]; reactionsBy?: Record<string, ReactionKind> }): Record<string, ReactionKind> {
+  return { ...Object.fromEntries((item.reactions ?? []).map(id => [id, 'like' as ReactionKind])), ...(item.reactionsBy ?? {}) }
+}
+/** Counts per reaction, and the viewer's own. */
+function reactionView(item: { reactions?: string[]; reactionsBy?: Record<string, ReactionKind> }, user: User) {
+  const all = reactionsOf(item)
+  const counts = Object.fromEntries(reactionKinds.map(kind => [kind, Object.values(all).filter(value => value === kind).length]))
+  return { reactionCounts: counts, myReaction: all[user.id] ?? null, reactionCount: Object.keys(all).length, reacted: user.id in all }
+}
+/** Sets, changes, or (choosing the same one again) removes the person's reaction, and moves old reactions into the new map. */
+function toggleReaction(item: { reactions?: string[]; reactionsBy?: Record<string, ReactionKind> }, userId: string, reaction: ReactionKind) {
+  const all = reactionsOf(item)
+  if (all[userId] === reaction) delete all[userId]
+  else all[userId] = reaction
+  item.reactionsBy = all
+  if ('reactions' in item) item.reactions = []
+}
 function postView(db: Database, post: Post, user: User) {
   return {
     id: post.id,
@@ -92,11 +110,11 @@ function postView(db: Database, post: Post, user: User) {
     notifyMembers: post.notifyMembers,
     author: author(db, post.authorId, post.anonymous),
     owned: post.authorId === user.id,
-    reactionCount: post.reactions.length,
-    reacted: post.reactions.includes(user.id),
+    ...reactionView(post, user),
     commentCount: post.comments.filter(comment => canSeeItem(db, user, 'comment', comment.id, comment.authorId)).length,
     comments: post.removed ? [] : post.comments.filter(comment => canSeeItem(db, user, 'comment', comment.id, comment.authorId)).map(comment => ({
       ...messageView(db, comment),
+      ...reactionView(comment, user),
       author: author(db, comment.authorId, comment.anonymous),
       ...(heldItem(db, 'comment', comment.id) ? { underReview: true } : {}),
     })),
@@ -778,6 +796,7 @@ const actionPages: Record<string, string[]> = {
   deletePost: ['P06'],
   comment: ['P06'],
   react: ['P06'],
+  reactComment: ['P06'],
   flag: ['P06', 'P12'],
   createReport: ['P19'],
   reportStudent: ['P21'],
@@ -906,7 +925,8 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       break
     }
     case'comment':{if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();if(user.restrictions.includes('post.comment'))throw deny();const p=actionPayloads.comment.parse(request.payload);const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'comment'))throw deny();if(p.anonymous&&!hasRole(user,'student'))throw deny();post.comments.push({...addMessage([],p.body),anonymous:p.anonymous});record=postView(db,post,user);message='Comment added.';break}
-    case'react':{actionPayloads.react.parse(request.payload);if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'react'))throw deny();post.reactions=post.reactions.includes(user.id)?post.reactions.filter(v=>v!==user.id):[...post.reactions,user.id];record=postView(db,post,user);message='Reaction updated.';break}
+    case'react':{const p=actionPayloads.react.parse(request.payload);if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'react'))throw deny();toggleReaction(post,user.id,p.reaction);record=postView(db,post,user);message='Reaction updated.';break}
+    case'reactComment':{const p=actionPayloads.reactComment.parse(request.payload);if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'react'))throw deny();const comment=post.comments.find(c=>c.id===p.commentId);if(!comment||!canSeeItem(db,user,'comment',comment.id,comment.authorId))throw unavailable();toggleReaction(comment,user.id,p.reaction);record=postView(db,post,user);message='Reaction updated.';break}
     case'flag':{const p=actionPayloads.flag.parse(request.payload);let authorId:string,body:string,parentId:string,itemId:string;if(p.itemType==='message'){const thread=find(db.threads,id);if(!canThread(db,user,thread))throw unavailable();const m=find(thread.messages,p.itemId);authorId=m.authorId;body=m.body;parentId=thread.id;itemId=m.id}else{const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private))throw unavailable();const item=p.itemType==='comment'?find(post.comments,p.itemId):post;authorId=item.authorId;body=item.body;parentId=post.id;itemId=item.id}const mod={id:repo.nextId('MOD'),itemType:p.itemType,itemId,parentId,authorId,reporterId:user.id,source:'User' as const,reason:p.reason,excerpt:body.slice(0,160),status:'Pending',at:now(),history:[]};db.moderation.push(mod);audit(repo,user,'Content reported','moderation',mod.id);record={id:mod.id,status:mod.status};message='Sent to a moderator.';break}
     case 'reportStudent': {
       requirePermission(user, 'student.report')

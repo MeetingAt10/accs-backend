@@ -1,6 +1,6 @@
 import { consentWording } from './consent.js'
 import { ulid } from './ids.js'
-import type { Role, TalkMode, User } from './schemas.js'
+import type { ReactionKind, Role, TalkMode, User } from './schemas.js'
 
 // The President's Office stage was removed on 2026-11-10; a record stored with `executive` is read as `osas` (persist.ts).
 export type Stage = 'adviser' | 'chair' | 'dean' | 'guidance' | 'osas'
@@ -41,8 +41,11 @@ export type Post = {
   eventPlace?: string
   eventContact?: string
   notifyMembers?: boolean
+  /** People who reacted before there was a choice of reactions (#86); each counts as "like". */
   reactions: string[]
-  comments: (Message & { anonymous: boolean })[]
+  /** Each person's reaction, by user ID (#86). */
+  reactionsBy?: Record<string, ReactionKind>
+  comments: (Message & { anonymous: boolean; reactionsBy?: Record<string, ReactionKind> })[]
   removed: boolean
 }
 export type Event = {

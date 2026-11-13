@@ -168,7 +168,8 @@ describe('a route writes through one instance', () => {
     expect(store.all().filter((item) => item.collection === 'posts').map((item) => [item.id, item.version])).toEqual([['POST-0101', 2]])
     const stored = JSON.parse(store.all().find((item) => item.collection === 'posts')!.data!)
     expect(stored.comments.map((entry: { body: string }) => entry.body)).toContain('Stored comment')
-    expect(stored.reactions).toContain('QCU-STU-CS')
+    // Each person's reaction is kept by user ID (#86).
+    expect(stored.reactionsBy).toMatchObject({ 'QCU-STU-CS': 'like' })
     const { agent: second } = await signIn(instance(), 'QCU-STU-IT-B')
     expect(JSON.stringify((await second.get('/api/pages/P06?id=POST-0101')).body)).toContain('Stored comment')
   })

@@ -151,6 +151,9 @@ export const loadRowSchema = z.object({
 }).refine((row) => row.end > row.start, { path: ['end'], message: 'The end time must be later than the start time.' })
 const materialUrl = z.string().trim().max(2000).pipe(z.url({ protocol: /^https?$/, error: 'Use a link that starts with http:// or https://.' }))
 export const materialUploadSchema = z.object({ spaceId: z.string().min(1), title: z.string().trim().min(1, 'Enter a title.').max(160, 'Use at most 160 characters.'), note: z.string().trim().max(1000, 'Use at most 1000 characters.').optional(), fileName: z.string().trim().min(1, 'Choose a file.').max(200, 'Use a shorter file name.'), contentType: z.string().trim().toLowerCase().max(120), size: z.number().int().positive('The file is empty.') }).strict()
+/** The reactions a post or comment can get (#86). */
+export const reactionKinds = ['like', 'love', 'laugh', 'wow', 'sad', 'support'] as const
+export type ReactionKind = typeof reactionKinds[number]
 export const actionPayloads = {
   // A faculty member reports a student (decided 12 November 2026). Same categories as a concern.
   reportStudent: z.object({ studentId: z.string().min(1), narrative: z.string().trim().min(1).max(4000), category: z.string().trim().min(1).max(80), subcategory: z.string().trim().min(1).max(80).optional(), categoryDetail: z.string().trim().max(120).optional(), severity: z.enum(['low', 'medium', 'high']), location: z.string().trim().max(200).optional(), occurredOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).strict(),
@@ -163,7 +166,9 @@ export const actionPayloads = {
   updatePost: z.object(postContent).strict(),
   deletePost: z.object({}).strict(),
   comment: z.object({ body: text, anonymous: z.boolean().default(false) }).strict(),
-  react: z.object({}).strict(),
+  // A choice of reactions (#86). Without one it is "like", as the single reaction was before.
+  react: z.object({ reaction: z.enum(reactionKinds).default('like') }).strict(),
+  reactComment: z.object({ commentId: z.string().min(1), reaction: z.enum(reactionKinds).default('like') }).strict(),
   flag: z.object({ reason, itemType: z.enum(['post', 'comment', 'message']).default('post'), itemId: z.string().optional() }).strict(),
   // The agreement and the three choices have no defaults: a concern is never sent on a guess about what the student allowed.
   createReport: z.object({ narrative: text, category: text.max(80), subcategory: z.string().trim().min(1).max(80).optional(), categoryDetail: z.string().trim().max(120).optional(), severity: z.enum(['low', 'medium', 'high']), identity: z.enum(['named', 'anonymous']), involvedUserIds: z.array(z.string()).default([]), conflictedAdviser: z.boolean().default(false), sourcePostId: z.string().optional(), location: z.string().max(200).optional(), occurredOn: date.optional(), consent: z.object({ readStatement: z.literal(true, { error: agree }) }, { error: agree }).strict(), // The Program Chair and the Dean have access without the student's permission (baseline of 10 November 2026). The two
