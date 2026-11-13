@@ -126,7 +126,7 @@ describe('on the development stack', () => {
     const direct = await request(app).post('/api/auth/sign-in').send({ emailOrId: 'QCU-STU-IT-A', password: seedPassword })
     expect(switched.body).toEqual(direct.body)
     expect(switched.body.user.roles).toEqual(['student'])
-    expect(Object.keys(switched.body).sort()).toEqual(['allowedPages', 'permissions', 'roleLabels', 'sampleData', 'user'])
+    expect(Object.keys(switched.body).sort()).toEqual(['allowedPages', 'permissions', 'roleLabels', 'user'])
 
     // The old token is dead, the new one belongs to the student and is not the same.
     const newCookie = cookieOf(switched)
