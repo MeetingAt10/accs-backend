@@ -39,6 +39,7 @@ describe('where each collection is stored', () => {
       restrictions: 'ccs_discipline', referrals: 'ccs_discipline', strikes: 'ccs_discipline', strikeSettlements: 'ccs_discipline', goodMoral: 'ccs_discipline',
       drafts: 'ccs_assistant', telemetry: 'ccs_assistant',
       permissionOverrides: 'ccs_identity',
+      photos: 'ccs_identity',
     })
   })
 })
