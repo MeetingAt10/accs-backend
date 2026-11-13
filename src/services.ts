@@ -206,7 +206,7 @@ function audit(repo:UnitOfWork,user:User,action:string,module:string,reference:s
 export const requiredNotificationCategories: readonly string[] = ['report', 'case', 'evaluation']
 const requiredCategoryLabels: Record<string,string> = { report: 'Report updates', case: 'Case updates', evaluation: 'Evaluation updates' }
 /** `urgent` (an urgent announcement) reaches the recipient even if they muted its category. */
-function notify(repo:UnitOfWork,recipientId:string,kind:string,pageId:string,recordId?:string,options:{urgent?:boolean}={}) {
+function notify(repo:UnitOfWork,recipientId:string,kind:string,pageId:string,recordId?:string,options:{urgent?:boolean;body?:string}={}) {
   const db = repo.read()
   const stored = db.settings[recipientId]?.priorities[kind]
   // A mute saved before a category became required is ignored, not obeyed.
@@ -215,6 +215,7 @@ function notify(repo:UnitOfWork,recipientId:string,kind:string,pageId:string,rec
   if (kind === 'message' && db.threads.find(thread => thread.id === recordId)?.mutedBy.includes(recipientId)) return
   const titles:Record<string,string> = {
     announcement: 'New college announcement',
+    class: 'New post in your class',
     message: 'New message',
     consultation: 'Appointment request updated',
     report: 'Report update',
@@ -229,7 +230,7 @@ function notify(repo:UnitOfWork,recipientId:string,kind:string,pageId:string,rec
     recipientId,
     kind,
     title: titles[kind] ?? 'New update',
-    body: 'Open this update to see the details.',
+    body: options.body ?? 'Open this update to see the details.',
     priority: options.urgent ? 'high' : preference && preference !== 'muted' ? preference : (['report', 'case', 'restriction'].includes(kind) ? 'high' : 'normal'),
     pageId,
     recordId,
@@ -245,7 +246,7 @@ function handlerIds(db:Database,r:Report) { return db.users.filter(u=>u.active&&
 /** Offices the case has moved past; they are told about every later step (#30). */
 function earlierHandlerIds(db:Database,r:Report) { return db.users.filter(u=>u.active&&isEarlierHandler(u,r)).map(u=>u.id) }
 const faq=[{id:'FAQ-1',question:'How do I book an appointment?',answer:'Open Appointments, pick one of your professors, choose what the appointment is for, and request an open time. The professor confirms or declines.',href:'/consultations',roles:['student']},{id:'FAQ-2',question:'What does anonymous reporting mean?',answer:'Your report stays linked to your verified account. Handlers see an alias until you choose to share your name with their office.',href:'/reports/new',roles:['student']},{id:'FAQ-3',question:'How are reports routed?',answer:'A report goes to the student\'s adviser first. If the report involves that adviser, it goes to the program chair instead. The program chair and the Dean can read a report only if the student allowed it. Each office decides the next step.',href:'/cases',roles:['professor','chair','dean','guidance','osas']},{id:'FAQ-4',question:'What can the assistant do?',answer:'It explains ACCS pages, your schedule, and the milestones on your own reports. It cannot decide cases or restrictions. Staff do that.',href:'/assistant',roles:roles as readonly string[]},{id:'FAQ-5',question:'Where do I find official contact details?',answer:'The directory lists faculty and staff offices and their QCU email addresses.',href:'/directory',roles:roles as readonly string[]},{id:'FAQ-6',question:'What still works when features are paused?',answer:'You can still read announcements and class information, use the assistant, and message your professors.',href:'/standing',roles:['student']},{id:'FAQ-7',question:'What does a moderation flag mean?',answer:'A flag asks a moderator to read the post in context. It does not mean anyone did something wrong, and it does not restrict anyone.',href:'/admin/moderation',roles:['administrator']}]
-function notificationCategories(user:User){return ['announcement',...(hasPermission(user,'message.send')?['message']:[]),...(hasRole(user,'student','professor')?['consultation']:[]),...(hasRole(user,'student','professor','chair','dean','guidance','osas')?['report','case']:[]),...(hasPermission(user,'evaluation.fill')||hasPermission(user,'evaluation.configure')?['evaluation']:[]),...(hasRole(user,'administrator')||hasPermission(user,'moderation.referral')?['moderation']:[])]}
+function notificationCategories(user:User){return ['announcement',...(hasRole(user,'student')?['class']:[]),...(hasPermission(user,'message.send')?['message']:[]),...(hasRole(user,'student','professor')?['consultation']:[]),...(hasRole(user,'student','professor','chair','dean','guidance','osas')?['report','case']:[]),...(hasPermission(user,'evaluation.fill')||hasPermission(user,'evaluation.configure')?['evaluation']:[]),...(hasRole(user,'administrator')||hasPermission(user,'moderation.referral')?['moderation']:[])]}
 function filteredFaq(user:User){return faq.filter(entry=>entry.roles.some(role=>user.roles.includes(role as User['roles'][number])))}
 // Three unsettled strikes hold a student's clearance until OSAS records the settlement (#34). Settled strikes stay on the
 // record and do not count again; strikes recorded after a settlement start a new count. A strike counts once OSAS confirms
@@ -332,6 +333,26 @@ function syncPostEvent(repo: UnitOfWork, post: Post) {
     place: post.eventPlace,
     contact: post.eventContact,
   })
+}
+/** A class space's name as people see it: "SBIT3A", or "SBIT3A - CC 104 Data Structures" for a subject. */
+function spaceName(space: Space) {
+  const parts = space.title.split(',')
+  const code = (parts.length > 1 ? parts[parts.length - 1]! : space.title).trim()
+  return !space.title.includes(',') || /^section group$/i.test(space.subject) ? code : `${code} - ${space.subject}`
+}
+/** A professor's post in a class space tells its students. An announcement already sent to members is not sent twice. */
+function notifyClassPost(repo: UnitOfWork, post: Post) {
+  if (post.anonymous || post.kind === 'announcement' && post.notifyMembers) return
+  const [kind, id] = post.audience.split(':')
+  if (kind !== 'space') return
+  const db = repo.read()
+  const space = db.spaces.find(item => item.id === id)
+  if (!space || !space.professorIds.includes(post.authorId)) return
+  const author = db.users.find(u => u.id === post.authorId)
+  for (const recipient of db.users.filter(u => u.active && u.id !== post.authorId && space.studentIds.includes(u.id))) {
+    if (!canAudience(db, recipient, post.audience, post.private)) continue
+    notify(repo, recipient.id, 'class', 'P06', post.id, { body: `${author?.name ?? 'Your professor'} posted in ${spaceName(space)}: ${post.title}`, urgent: post.priority === 'urgent' })
+  }
 }
 function notifyAnnouncementMembers(repo: UnitOfWork, post: Post) {
   if (post.kind !== 'announcement' || !post.notifyMembers) return
@@ -921,7 +942,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       db.posts.push(post)
       queuePostReview(repo, post)
       syncPostEvent(repo, post)
-      if (!heldItem(db, 'post', post.id)) notifyAnnouncementMembers(repo, post)
+      if (!heldItem(db, 'post', post.id)) { notifyAnnouncementMembers(repo, post); notifyClassPost(repo, post) }
       record = postView(db, post, user)
       message = 'Post published.'
       break
@@ -1369,7 +1390,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       const secretaries=p.decision==='refer'?db.users.filter(u=>u.active&&hasPermission(u,'moderation.referral')):[]
       if(p.decision==='refer'&&m.source!=='User')throw deny()
       if(p.decision==='refer'&&!secretaries.length)throw conflict('The CCS Secretary account is not active, so this cannot be referred yet.')
-      const wasHeldPost=m.itemType==='post'&&m.source==='Filter'&&m.status==='Pending'&&!db.moderation.some(other=>other!==m&&other.itemType==='post'&&other.itemId===m.itemId&&heldStatuses.includes(other.status));m.status=p.decision==='keep'?'Kept':p.decision==='refer'?referredStatus:p.decision==='warn'?'Removed and warned':'Removed';m.history.push({at:now(),actorId:user.id,decision:p.decision,reason});if(['remove','warn'].includes(p.decision)){if(m.itemType==='post')find(db.posts,m.parentId).removed=true;else if(m.itemType==='comment'){const comment=find(find(db.posts,m.parentId).comments,m.itemId);comment.body='This content was removed after review.'}else{const message=find(find(db.threads,m.parentId).messages,m.itemId);message.body='This content was removed after review.'}}if(p.decision==='keep'&&wasHeldPost){const kept=db.posts.find(post=>post.id===m.itemId);if(kept&&!kept.removed)notifyAnnouncementMembers(repo,kept)}audit(repo,user,'Moderation decision','moderation',m.id);for(const secretary of secretaries)notify(repo,secretary.id,'moderation','P50',m.id);if(p.notifyAuthor)notify(repo,m.authorId,'moderation','P40');record={id:m.id,status:m.status,history:m.history};message='Decision recorded.';break}
+      const wasHeldPost=m.itemType==='post'&&m.source==='Filter'&&m.status==='Pending'&&!db.moderation.some(other=>other!==m&&other.itemType==='post'&&other.itemId===m.itemId&&heldStatuses.includes(other.status));m.status=p.decision==='keep'?'Kept':p.decision==='refer'?referredStatus:p.decision==='warn'?'Removed and warned':'Removed';m.history.push({at:now(),actorId:user.id,decision:p.decision,reason});if(['remove','warn'].includes(p.decision)){if(m.itemType==='post')find(db.posts,m.parentId).removed=true;else if(m.itemType==='comment'){const comment=find(find(db.posts,m.parentId).comments,m.itemId);comment.body='This content was removed after review.'}else{const message=find(find(db.threads,m.parentId).messages,m.itemId);message.body='This content was removed after review.'}}if(p.decision==='keep'&&wasHeldPost){const kept=db.posts.find(post=>post.id===m.itemId);if(kept&&!kept.removed){notifyAnnouncementMembers(repo,kept);notifyClassPost(repo,kept)}}audit(repo,user,'Moderation decision','moderation',m.id);for(const secretary of secretaries)notify(repo,secretary.id,'moderation','P50',m.id);if(p.notifyAuthor)notify(repo,m.authorId,'moderation','P40');record={id:m.id,status:m.status,history:m.history};message='Decision recorded.';break}
     default:throw new ApiError(400,'That action does not exist.','VALIDATION_ERROR')
   }
   return {...JSON.parse(JSON.stringify({ok:true,message,...(record===undefined?{}:{record})})) as {ok:true;message:string;record?:unknown},outbox}
