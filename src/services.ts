@@ -68,7 +68,7 @@ function pick<T extends {id:string}>(items:T[], id?:string):T|undefined { return
 const reportIdOf = (db:Database, id?:string) => id && db.reports.find(r => r.caseFileId === id && !db.reports.some(other => other.id === id))?.id || id
 function reasonOf(request:ActionRequest) { return z.string().trim().min(1,'A reason is required.').max(2000).parse(request.reason) }
 export function refreshRestrictions(db: Database, user: User): User { const date = now().slice(0,10); return { ...user, restrictions:[...new Set(db.restrictions.filter(r=>r.studentId===user.id&&r.active&&r.until>=date).flatMap(r=>r.features))] } }
-export function sessionView(user:User) { return { user, permissions:permissions(user),allowedPages:allowedPages(user),roleLabels,sampleData:true as const } }
+export function sessionView(user:User) { return { user, permissions:permissions(user),allowedPages:allowedPages(user),roleLabels } }
 function person(user:User) { return { id:user.id,name:user.name,email:user.email,roles:user.roles,program:user.program,section:user.section,...(hasRole(user,'student')?{campus:user.campus??mainCampus,...(user.program&&user.year&&user.section?{sectionName:sectionName({campus:user.campus,program:user.program,year:user.year,section:user.section})}:{})}:{}),office:user.office,title:user.title,bio:user.bio,education:user.education,officeHours:user.officeHours,studentId:user.studentId,year:user.year,standing:user.restrictions.length?'Some features paused':'Good standing' } }
 function author(db:Database,id:string,anonymous=false,alias='Student A-12') { const u=db.users.find(item=>item.id===id); return anonymous ? {name:alias,roles:['student'],anonymous:true} : u?{id:u.id,name:u.name,roles:u.roles,email:u.email}:{name:'College office',roles:[]} }
 function messageView(db:Database,message:Message,report?:Report) { return {id:message.id,body:message.body,at:message.at,author:author(db,message.authorId,!!report&&message.authorId===report.ownerId&&report.identity==='anonymous'&&!report.disclosedTo.includes(report.stage),report?.alias)} }
@@ -732,7 +732,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
     case'P51':data.audit=safeAudit(db,db.audit.filter(a=>(!query.from||a.at>=query.from)&&(!query.to||a.at<=`${query.to}T23:59:59.999Z`)&&(!query.q||`${a.reference} ${a.action} ${a.module}`.toLowerCase().includes(query.q.toLowerCase()))));break
     case'P52':{const telemetry=query.period==='none'?[]:db.telemetry;data.stats=[{label:'Assistant sessions',value:telemetry.length,note:'Help assistant'},{label:'Failures',value:telemetry.filter(t=>!t.success).length,note:'Counts only'},{label:'Median response time',value:telemetry.length?`${telemetry.map(t=>t.durationMs).sort((a,b)=>a-b)[Math.floor(telemetry.length/2)]} ms`:'No data',note:'Since the server started'}];data.systemStatus={api:'Operational',assistant:'Built-in help assistant',storage:'Application store'};data.telemetry=telemetry;data.incidents=[];data.trend=telemetry.length?[{label:now().slice(0,10),value:telemetry.length}]:[];break}
   }
-  return JSON.parse(JSON.stringify({pageId,title:pageTitles[pageId],scope:scopeLabel(user),sampleData:true,data})) as {pageId:string;title:string;scope:string;sampleData:true;data:Record<string,unknown>}
+  return JSON.parse(JSON.stringify({pageId,title:pageTitles[pageId],scope:scopeLabel(user),data})) as {pageId:string;title:string;scope:string;data:Record<string,unknown>}
 }
 
 // Evaluation cycles use the student form only (#47, baseline chapter 9.1): each student evaluates every professor of their
