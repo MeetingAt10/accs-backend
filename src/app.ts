@@ -168,6 +168,14 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     await sessions.revokeUser(user.id,res.locals.sessionId as string)
     await throttle.clear(key);send(res,actionResponseSchema,{ok:true,message:'Password changed.'})
   })
+  // Sign out of other devices (frontend #11): every other session of this account ends; this one stays signed in.
+  app.post('/api/auth/sign-out-others',async(req,res)=>{
+    emptyBodySchema.parse(req.body??{})
+    const user=res.locals.user as User
+    await sessions.revokeUser(user.id,res.locals.sessionId as string)
+    await recordAudit(repository,user,[{action:'Signed out of other devices',reference:user.id}])
+    send(res,actionResponseSchema,{ok:true,message:'Signed out of your other devices. This one stays signed in.'})
+  })
   // Office-assisted reset: an administrator issues a code, shown once, and gives it to the account holder.
   app.post('/api/admin/accounts/:id/reset-code',async(req,res)=>{
     const admin=res.locals.user as User;const id=z.string().trim().min(1).max(64).parse(req.params.id);emptyBodySchema.parse(req.body??{})
