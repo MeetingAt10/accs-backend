@@ -35,6 +35,8 @@ export const persisted: Record<Collection, DomainTable> = {
   drafts: 'ccs_assistant',
   telemetry: 'ccs_assistant',
   permissionOverrides: 'ccs_identity',
+  // Profile photos (#85): one small image per person, kept apart from the auth store that every request loads.
+  photos: 'ccs_identity',
 }
 const stored = Object.keys(persisted) as Collection[]
 // A unit of work that loses a version race runs again on fresh data, up to this many times in all.
@@ -57,7 +59,7 @@ type Loaded = Partial<Record<Collection, StoredRecord[]>>
 const addOnly = () => new Error('Audit entries are add-only.')
 
 // Domain rules see these as objects. Each key is stored as its own record, wrapped so a value can be a plain boolean.
-const objectCollections: ReadonlySet<Collection> = new Set(['drafts', 'settings', 'permissionOverrides'])
+const objectCollections: ReadonlySet<Collection> = new Set(['drafts', 'settings', 'permissionOverrides', 'photos'])
 const toRows = (name: Collection, value: unknown): Row[] => (objectCollections.has(name) ? Object.entries(value as Row).map(([id, entry]) => ({ id, value: entry })) : (value as Row[]))
 const fromRows = (name: Collection, rows: Row[]): unknown => (objectCollections.has(name) ? Object.fromEntries(rows.map((row) => [row.id, row.value])) : rows)
 // Good Moral has one row per student and no ID of its own.

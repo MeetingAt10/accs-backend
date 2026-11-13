@@ -69,8 +69,8 @@ const reportIdOf = (db:Database, id?:string) => id && db.reports.find(r => r.cas
 function reasonOf(request:ActionRequest) { return z.string().trim().min(1,'A reason is required.').max(2000).parse(request.reason) }
 export function refreshRestrictions(db: Database, user: User): User { const date = now().slice(0,10); return { ...user, restrictions:[...new Set(db.restrictions.filter(r=>r.studentId===user.id&&r.active&&r.until>=date).flatMap(r=>r.features))] } }
 export function sessionView(user:User) { return { user, permissions:permissions(user),allowedPages:allowedPages(user),roleLabels,sampleData:true as const } }
-function person(user:User) { return { id:user.id,name:user.name,email:user.email,roles:user.roles,program:user.program,section:user.section,...(hasRole(user,'student')?{campus:user.campus??mainCampus,...(user.program&&user.year&&user.section?{sectionName:sectionName({campus:user.campus,program:user.program,year:user.year,section:user.section})}:{})}:{}),office:user.office,title:user.title,bio:user.bio,education:user.education,officeHours:user.officeHours,studentId:user.studentId,year:user.year,standing:user.restrictions.length?'Some features paused':'Good standing' } }
-function author(db:Database,id:string,anonymous=false,alias='Student A-12') { const u=db.users.find(item=>item.id===id); return anonymous ? {name:alias,roles:['student'],anonymous:true} : u?{id:u.id,name:u.name,roles:u.roles,email:u.email}:{name:'College office',roles:[]} }
+function person(user:User) { return { id:user.id,photo:user.photo,name:user.name,email:user.email,roles:user.roles,program:user.program,section:user.section,...(hasRole(user,'student')?{campus:user.campus??mainCampus,...(user.program&&user.year&&user.section?{sectionName:sectionName({campus:user.campus,program:user.program,year:user.year,section:user.section})}:{})}:{}),office:user.office,title:user.title,bio:user.bio,education:user.education,officeHours:user.officeHours,studentId:user.studentId,year:user.year,standing:user.restrictions.length?'Some features paused':'Good standing' } }
+function author(db:Database,id:string,anonymous=false,alias='Student A-12') { const u=db.users.find(item=>item.id===id); return anonymous ? {name:alias,roles:['student'],anonymous:true} : u?{id:u.id,name:u.name,roles:u.roles,email:u.email,...(u.photo?{photo:u.photo}:{})}:{name:'College office',roles:[]} }
 function messageView(db:Database,message:Message,report?:Report) { return {id:message.id,body:message.body,at:message.at,author:author(db,message.authorId,!!report&&message.authorId===report.ownerId&&report.identity==='anonymous'&&!report.disclosedTo.includes(report.stage),report?.alias)} }
 function postView(db: Database, post: Post, user: User) {
   return {
@@ -367,9 +367,11 @@ export function getPage(repo:Repository,user:User,pageId:string,query:PageQuery=
   const work=(unit:UnitOfWork)=>readPage(unit,user,pageId,query)
   return pageId==='P34'?repo.transact(work):repo.view(work)
 }
+/** Puts each person's profile photo (#85) on the loaded accounts, so every view that shows a person can show it. */
+function attachPhotos(db:Database) { for (const u of db.users) { const photo=db.photos?.[u.id]; if (photo) u.photo=photo; else delete u.photo } }
 function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},internalRole=false) {
   if(!canPage(user,pageId))throw new ApiError(403,"This page isn't available to your role.")
-  const db=repo.read(); const data:Record<string,unknown>={}; const ownReports=db.reports.filter(r=>r.ownerId===user.id);const cases=db.reports.filter(r=>canViewCase(user,r)||filedByFaculty(user,r));
+  const db=repo.read(); attachPhotos(db); const data:Record<string,unknown>={}; const ownReports=db.reports.filter(r=>r.ownerId===user.id);const cases=db.reports.filter(r=>canViewCase(user,r)||filedByFaculty(user,r));
   if (pageId === 'P04') validateFeedScope(db, user, query.scope)
   const labels = query.label?.split(',').map(label => label.trim()).filter(Boolean) ?? []
   const posts = visiblePosts(db, user, query.q).filter(post => (
@@ -711,7 +713,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
     }
     case'P37':data.people=db.users.filter(u=>u.active&&!hasRole(u,'student','organization')&&match(`${u.name} ${u.office} ${u.program} ${u.email}`)).map(person);break
     case'P38':{const u=pick(db.users.filter(u=>u.active),query.id);if(u){const {studentId: _studentId,...profile}=person(refreshRestrictions(db,u));data.record=profile}break}
-    case'P39':data.record=person(user);break
+    case'P39':data.record=person({...user,photo:db.photos?.[user.id]});break
     case'P40':data.notifications=db.notifications.filter(n=>n.recipientId===user.id);break
     case'P41':data.faq=filteredFaq(user);data.suggestions=['What can you help me with?',...(hasRole(user,'student')?['Show my schedule','Explain my report milestones']:[])];break
     case'P42':data.faq=filteredFaq(user).filter(f=>match(`${f.question} ${f.answer}`));break
@@ -824,6 +826,7 @@ const actionPages: Record<string, string[]> = {
   liftRestriction: ['P35'],
   referRestriction: ['P34', 'P35'],
   saveProfile: ['P39'],
+  setProfilePhoto: ['P39'],
   saveSettings: ['P43'],
   saveNotificationPreferences: ['P44'],
   updateRoles: ['P46', 'P47'],
@@ -849,7 +852,7 @@ export async function performAction(repo:Repository,user:User,pageId:string,requ
 }
 function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest){
   if(!canPage(user,pageId)||!actionPages[request.action]?.includes(pageId))throw deny()
-  const db=repo.read();const id=request.recordId;let record:unknown;let message='Changes saved.';const outbox:AfterCommit[]=[]
+  const db=repo.read();attachPhotos(db);const id=request.recordId;let record:unknown;let message='Changes saved.';const outbox:AfterCommit[]=[]
   // The report is named by the record ID, or by `reportId` in the payload for the talk actions.
   const getOwnReport=(reportId=id)=>{const r=find(db.reports,reportIdOf(db,reportId));if(r.ownerId!==user.id||!hasRole(user,'student'))throw unavailable();return r}
   const getCase=(reportId=id)=>{const r=find(db.reports,reportIdOf(db,reportId));if(!canActCase(user,r))throw unavailable();return r}
@@ -1313,6 +1316,13 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
     case'applyRestriction':{requireRole(user,'administrator');const p=actionPayloads.applyRestriction.parse(request.payload);reasonOf(request);const student=find(db.users,p.studentId);if(!hasRole(student,'student'))throw unavailable();if(p.until<now().slice(0,10))throw new ApiError(400,'The end date must be today or later.','VALIDATION_ERROR');const r={id:repo.nextId('RST'),...p,starts:now(),actorId:user.id,active:true};db.restrictions.push(r);audit(repo,user,'Restriction applied','restrictions',r.id);notify(repo,student.id,'restriction','P36');record=r;message='Selected features paused.';break}
     case'liftRestriction':{requireRole(user,'administrator');actionPayloads.liftRestriction.parse(request.payload);reasonOf(request);const r=find(db.restrictions,id);if(!r.active||r.until<now().slice(0,10))throw conflict('This restriction has already ended.');r.active=false;audit(repo,user,'Restriction lifted','restrictions',r.id);notify(repo,r.studentId,'restriction','P36');record=r;message='Restriction lifted.';break}
     case'referRestriction':{requireRole(user,'guidance','osas');const p=actionPayloads.referRestriction.parse(request.payload);const reason=reasonOf(request);const student=find(db.users,p.studentId);if(!canStudentRecord(db,user,student))throw unavailable();const referral={id:repo.nextId('REF'),studentId:student.id,change:p.change,decisionReference:p.decisionReference??'',reason,actorId:user.id,at:now(),status:'Awaiting administrator review'};db.referrals.push(referral);audit(repo,user,'Restriction change requested','restrictions',referral.id);for(const admin of db.users.filter(u=>hasRole(u,'administrator')))notify(repo,admin.id,'restriction','P35');record=referral;message='Request sent. Existing restrictions are unchanged.';break}
+    case'setProfilePhoto':{
+      const p=actionPayloads.setProfilePhoto.parse(request.payload)
+      // The data URL is checked again here for the decoded size: base64 is about four characters for three bytes.
+      if(p.photo&&Math.floor((p.photo.length-p.photo.indexOf(',')-1)*3/4)>80_000)throw new ApiError(400,'Use a smaller image (at most 80 KB).','VALIDATION_ERROR')
+      if(p.photo)db.photos[user.id]=p.photo;else delete db.photos[user.id]
+      attachPhotos(db)
+      record=person(find(db.users,user.id));message=p.photo?'Profile photo saved.':'Profile photo removed.';break}
     case'saveProfile':{const p=actionPayloads.saveProfile.parse(request.payload);const saved=find(db.users,user.id);Object.assign(saved,p);Object.assign(user,p);record=person(user);message='Profile saved.';break}
     case'saveSettings':{const p=actionPayloads.saveSettings.parse(request.payload);db.settings[user.id]={...(db.settings[user.id]??defaultSettings(user)),...p};record=db.settings[user.id];message='Settings saved.';break}
     case'saveNotificationPreferences':{const p=actionPayloads.saveNotificationPreferences.parse(request.payload);if(Object.keys(p.priorities).some(key=>!notificationCategories(user).includes(key)))throw new ApiError(400,'Your account does not have that notification category.','VALIDATION_ERROR');const mutedRequired=Object.entries(p.priorities).find(([key,value])=>value==='muted'&&requiredNotificationCategories.includes(key));if(mutedRequired)throw new ApiError(400,`${requiredCategoryLabels[mutedRequired[0]]} cannot be muted.`,'VALIDATION_ERROR');/* Saved preferences do not change source access. */db.settings[user.id]={...(db.settings[user.id]??defaultSettings(user)),priorities:p.priorities};record=db.settings[user.id];message='Notification priorities saved.';break}
