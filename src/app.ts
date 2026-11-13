@@ -84,8 +84,8 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   // without a channel issues nothing: an administrator issues the code (POST /api/admin/accounts/:id/reset-code).
   const resetMailer=options.resetMailer??createResetMailer({nodeEnv:env.NODE_ENV,mailFrom:env.MAIL_FROM})
   const selfServiceReset=resetMailer.channel!=='none'
-  // Seeded demo accounts carry made-up addresses on the real qcu.edu.ph domain, so a code for one of them (ACCS-ADMIN
-  // included) would reach whoever owns that mailbox. They are never emailed; an administrator issues their codes.
+  // Seeded demo accounts carry made-up addresses on access-ccs.com (before #69, on QCU's real qcu.edu.ph domain). They
+  // are still never emailed (decision A in #69): nobody reads those mailboxes, so an administrator issues their codes.
   const resetCodeMinutes=Math.round(resetPolicy.codeTtlMs/60000)
   // A failed send is logged without the code or the address, and the caller still gives the generic answer.
   const deliverResetCode=async(user:User,code:string)=>{
@@ -167,6 +167,14 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     // Keep this session; sign out every other device.
     await sessions.revokeUser(user.id,res.locals.sessionId as string)
     await throttle.clear(key);send(res,actionResponseSchema,{ok:true,message:'Password changed.'})
+  })
+  // Sign out of other devices (frontend #11): every other session of this account ends; this one stays signed in.
+  app.post('/api/auth/sign-out-others',async(req,res)=>{
+    emptyBodySchema.parse(req.body??{})
+    const user=res.locals.user as User
+    await sessions.revokeUser(user.id,res.locals.sessionId as string)
+    await recordAudit(repository,user,[{action:'Signed out of other devices',reference:user.id}])
+    send(res,actionResponseSchema,{ok:true,message:'Signed out of your other devices. This one stays signed in.'})
   })
   // Office-assisted reset: an administrator issues a code, shown once, and gives it to the account holder.
   app.post('/api/admin/accounts/:id/reset-code',async(req,res)=>{
