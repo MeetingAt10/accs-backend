@@ -5,7 +5,9 @@ import type { ReactionKind, Role, TalkMode, User } from './schemas.js'
 
 // The President's Office stage was removed on 2026-11-10; a record stored with `executive` is read as `osas` (persist.ts).
 export type Stage = 'adviser' | 'chair' | 'dean' | 'guidance' | 'osas'
-export type Message = { id: string; authorId: string; body: string; at: string }
+/** A file sent with a message. It lives in the files bucket under `key`, which only the server knows. */
+export type Attachment = { id: string; fileName: string; contentType: string; size: number; key: string }
+export type Message = { id: string; authorId: string; body: string; at: string; attachments?: Attachment[] }
 export type History = { id: string; at: string; actorId: string; actorRole: string; action: string; reason: string; update: string; public: boolean; stage: Stage }
 /** The student's agreement to send a concern, stamped by the server with the exact wording they were shown. */
 export type ReportConsent = { readStatement: true; at: string; userId: string; version: string; wording: string }

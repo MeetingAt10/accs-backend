@@ -19,14 +19,18 @@ export const materialFileTypes: Readonly<Record<string, readonly string[]>> = {
   'image/png': ['png'],
   'image/jpeg': ['jpg', 'jpeg'],
 }
+/** Files sent in Messages: the class material types plus WebP and GIF pictures, up to 10 MB each, five per message. */
+export const messageFileTypes: Readonly<Record<string, readonly string[]>> = { ...materialFileTypes, 'image/webp': ['webp'], 'image/gif': ['gif'] }
+export const messageFileMaxBytes = 10 * 1024 * 1024
+export const messageFilesPerMessage = 5
 export const uploadUrlSeconds = 600
 export const downloadUrlSeconds = 300
 
 export interface MaterialStorage {
   /** A signed PUT that only accepts this exact content type and size. */
   uploadUrl(key: string, contentType: string, size: number): Promise<string>
-  /** A signed GET that downloads the file under its original name. */
-  downloadUrl(key: string, fileName: string): Promise<string>
+  /** A signed GET that downloads the file under its original name, or shows it in the browser when `inline` is set. */
+  downloadUrl(key: string, fileName: string, inline?: boolean): Promise<string>
   /** The stored object's size and type, or undefined when nothing was uploaded. */
   head(key: string): Promise<{ size: number; contentType?: string } | undefined>
   remove(key: string): Promise<void>
@@ -38,7 +42,7 @@ export const safeFileName = (name: string) => name.replace(/[^A-Za-z0-9._-]+/g, 
 export function createS3MaterialStorage(bucket: string, s3: S3Client = new S3Client({})): MaterialStorage {
   return {
     uploadUrl: (key, contentType, size) => getSignedUrl(s3, new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: contentType, ContentLength: size }), { expiresIn: uploadUrlSeconds, signableHeaders: new Set(['content-type', 'content-length']) }),
-    downloadUrl: (key, fileName) => getSignedUrl(s3, new GetObjectCommand({ Bucket: bucket, Key: key, ResponseContentDisposition: `attachment; filename="${safeFileName(fileName)}"` }), { expiresIn: downloadUrlSeconds }),
+    downloadUrl: (key, fileName, inline = false) => getSignedUrl(s3, new GetObjectCommand({ Bucket: bucket, Key: key, ResponseContentDisposition: `${inline ? 'inline' : 'attachment'}; filename="${safeFileName(fileName)}"` }), { expiresIn: downloadUrlSeconds }),
     async head(key) {
       try {
         const object = await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
@@ -59,7 +63,7 @@ export function createMemoryMaterialStorage() {
     objects,
     put(key: string, size: number, contentType: string) { objects.set(key, { size, contentType }) },
     async uploadUrl(key: string) { return `memory://upload/${key}` },
-    async downloadUrl(key: string, fileName: string) { return `memory://download/${key}?name=${safeFileName(fileName)}` },
+    async downloadUrl(key: string, fileName: string, inline = false) { return `memory://download/${key}?name=${safeFileName(fileName)}${inline ? '&inline=1' : ''}` },
     async head(key: string) { return objects.get(key) },
     async remove(key: string) { objects.delete(key) },
   } satisfies MaterialStorage & { objects: Map<string, unknown>; put(key: string, size: number, contentType: string): void }

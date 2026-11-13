@@ -2,12 +2,13 @@ import { findFlaggedWord } from './profanity.js'
 import { z } from 'zod'
 import { categoryProblem, concernCategories } from './categories.js'
 import { mainCampus, sectionName } from './sections.js'
-import { materialFileTypes, materialMaxBytes, safeFileName, uploadUrlSeconds, type MaterialStorage } from './material-storage.js'
+import { materialFileTypes, materialMaxBytes, messageFileMaxBytes, messageFileTypes, safeFileName, uploadUrlSeconds, type MaterialStorage } from './material-storage.js'
+import { ulid } from './ids.js'
 import { appointmentCategories, appointmentProblem, concernFollowUp, purposeOf, type AppointmentChoice } from './appointments.js'
-import { reactionKinds, type ReactionKind, loadRowSchema, materialUploadSchema, actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
+import { reactionKinds, type ReactionKind, loadRowSchema, materialUploadSchema, messageUploadSchema, actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
 import { allowedPages, canActCase, canAudience, canReadCase, isEarlierHandler, overseesCase, canCountCase, canFacultyResult, canPage, canPublish, canReach, canSpace, canStudentRecord, canThread, canViewCase, hasPermission, hasRole, isOrganizationMember, pageTitles, permissionRoles, permissions, scopeLabel } from './access.js'
 import { consentWording } from './consent.js'
-import type { Material, Space, Assignment, Consultation, Cycle, Database, Message, Moderation, Post, Report, Repository, Slot, Stage, Strike, Thread, UnitOfWork } from './store.js'
+import type { Attachment, Material, Space, Assignment, Consultation, Cycle, Database, Message, Moderation, Post, Report, Repository, Slot, Stage, Strike, Thread, UnitOfWork } from './store.js'
 
 export class ApiError extends Error { constructor(public status: number, message: string, public code = 'FORBIDDEN') { super(message) } }
 export const unavailable = () => new ApiError(404, "This record isn't available to you.", 'UNAVAILABLE')
@@ -72,7 +73,22 @@ export function refreshRestrictions(db: Database, user: User): User { const date
 export function sessionView(user:User) { return { user, permissions:permissions(user),allowedPages:allowedPages(user),roleLabels } }
 function person(user:User) { return { id:user.id,photo:user.photo,name:user.name,email:user.email,roles:user.roles,program:user.program,section:user.section,...(hasRole(user,'student')?{campus:user.campus??mainCampus,...(user.program&&user.year&&user.section?{sectionName:sectionName({campus:user.campus,program:user.program,year:user.year,section:user.section})}:{})}:{}),office:user.office,title:user.title,bio:user.bio,education:user.education,officeHours:user.officeHours,studentId:user.studentId,year:user.year,standing:user.restrictions.length?'Some features paused':'Good standing' } }
 function author(db:Database,id:string,anonymous=false,alias='Student A-12') { const u=db.users.find(item=>item.id===id); return anonymous ? {name:alias,roles:['student'],anonymous:true} : u?{id:u.id,name:u.name,roles:u.roles,email:u.email,...(u.photo?{photo:u.photo}:{})}:{name:'College office',roles:[]} }
-function messageView(db:Database,message:Message,report?:Report) { return {id:message.id,body:message.body,at:message.at,author:author(db,message.authorId,!!report&&message.authorId===report.ownerId&&report.identity==='anonymous'&&!report.disclosedTo.includes(report.stage),report?.alias)} }
+/** Where a sender's upload is stored. Only the sender's own uploads can be attached, because the key starts with their ID. */
+// Under materials/, the one prefix the API role may use in the files bucket (accs-architecture api.yaml).
+const messageFileKey=(userId:string,id:string,fileName:string)=>`materials/messages/${userId}/${id}/${safeFileName(fileName)}`
+/** A file as people see it: never its storage key. */
+const attachmentView=({key:_key,...shown}:Attachment)=>shown
+/** A direct conversation started from Messages is stored under the recipient's name; each person sees the other one's name instead. */
+function threadTitle(db:Database,thread:Thread,user:User){
+  if(thread.spaceId||thread.memberIds.length!==2)return thread.title
+  const names=thread.memberIds.map(id=>db.users.find(u=>u.id===id)?.name)
+  if(!names.includes(thread.title))return thread.title
+  const other=thread.memberIds.find(id=>id!==user.id)
+  return (other&&db.users.find(u=>u.id===other)?.name)||thread.title
+}
+/** The last line shown in the conversation list: the words, or the file when only a file was sent. */
+const messagePreview=(message?:Message)=>!message?'':message.body||(message.attachments?.length?`Sent ${message.attachments.length===1?message.attachments[0]!.fileName:`${message.attachments.length} files`}`:'')
+function messageView(db:Database,message:Message,report?:Report) { return {id:message.id,body:message.body,at:message.at,...(message.attachments?.length?{attachments:message.attachments.map(attachmentView)}:{}),author:author(db,message.authorId,!!report&&message.authorId===report.ownerId&&report.identity==='anonymous'&&!report.disclosedTo.includes(report.stage),report?.alias)} }
 /** Everyone's reaction to a post or comment: the old single reaction counts as "like" (#86). */
 function reactionsOf(item: { reactions?: string[]; reactionsBy?: Record<string, ReactionKind> }): Record<string, ReactionKind> {
   return { ...Object.fromEntries((item.reactions ?? []).map(id => [id, 'like' as ReactionKind])), ...(item.reactionsBy ?? {}) }
@@ -498,13 +514,13 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
     case 'P12': {
       const threads = db.threads.filter(thread => canThread(db, user, thread))
       data.threads = threads
-        .filter(thread => match(thread.title))
+        .filter(thread => match(threadTitle(db, thread, user)))
         .map(thread => ({
           id: thread.id,
-          title: thread.title,
+          title: threadTitle(db, thread, user),
           kind: thread.spaceId ? 'group' : 'direct',
           members: thread.memberIds.map(memberId => person(find(db.users, memberId))),
-          lastMessage: thread.messages.filter(message => canSeeItem(db, user, 'message', message.id, message.authorId)).at(-1)?.body ?? '',
+          lastMessage: messagePreview(thread.messages.filter(message => canSeeItem(db, user, 'message', message.id, message.authorId)).at(-1)),
           updatedAt: thread.messages.at(-1)?.at,
           unread: unreadMessages(thread, user.id),
         }))
@@ -514,7 +530,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
         if (thread) {
           data.record = {
             id: thread.id,
-            title: thread.title,
+            title: threadTitle(db, thread, user),
             members: thread.memberIds.map(memberId => person(find(db.users, memberId))),
             messages: thread.messages.filter(message => canSeeItem(db, user, 'message', message.id, message.authorId)).map(message => ({ ...messageView(db, message), ...(heldItem(db, 'message', message.id) ? { underReview: true } : {}) })),
             muted: thread.mutedBy.includes(user.id),
@@ -871,7 +887,8 @@ export type ProfileChange = { title: string; bio: string; education: string; off
 export type OutgoingMail = { kind: 'newConcern'; userId: string; to: string; name: string; reportId: string }
 /** Work done once an action has committed: emails, and stored files to delete (#44). */
 export type AfterCommit = OutgoingMail | { kind: 'deleteFile'; key: string }
-export async function performAction(repo:Repository,user:User,pageId:string,request:ActionRequest,saveAccount?:(change:AccountChange)=>Promise<void>,saveProfile?:(id:string,change:ProfileChange)=>Promise<void>,sendMail?:(work:AfterCommit[])=>Promise<void>){
+export async function performAction(repo:Repository,user:User,pageId:string,request:ActionRequest,saveAccount?:(change:AccountChange)=>Promise<void>,saveProfile?:(id:string,change:ProfileChange)=>Promise<void>,sendMail?:(work:AfterCommit[])=>Promise<void>,files?:MaterialStorage){
+  if(request.action==='sendMessage'||request.action==='createThread')await checkMessageFiles(user,request,files)
   const {outbox,...result}=await repo.transact(unit=>runAction(unit,user,pageId,request))
   // Emails go out only once the change is saved, and never reach the response.
   if(outbox.length)await sendMail?.(outbox)
@@ -885,7 +902,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
   // The report is named by the record ID, or by `reportId` in the payload for the talk actions.
   const getOwnReport=(reportId=id)=>{const r=find(db.reports,reportIdOf(db,reportId));if(r.ownerId!==user.id||!hasRole(user,'student'))throw unavailable();return r}
   const getCase=(reportId=id)=>{const r=find(db.reports,reportIdOf(db,reportId));if(!canActCase(user,r))throw unavailable();return r}
-  const addMessage=(list:Message[],body:string)=>{const m={id:repo.nextId('MESSAGE'),authorId:user.id,body,at:now()};list.push(m);return m}
+  const addMessage=(list:Message[],body:string,files:{id:string;fileName:string;contentType:string;size:number}[]=[])=>{const m:Message={id:repo.nextId('MESSAGE'),authorId:user.id,body,at:now(),...(files.length?{attachments:files.map(f=>({...f,key:messageFileKey(user.id,f.id,f.fileName)}))}:{})};list.push(m);return m}
   switch(request.action){
     case 'createPost': {
       const payload = actionPayloads.createPost.parse(request.payload)
@@ -1228,11 +1245,11 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
         readMessageCounts: {},
       }
       if (!existing) db.threads.push(thread)
-      const first = addMessage(thread.messages, payload.body)
-      autoFlag(repo, { itemType: 'message', itemId: first.id, parentId: thread.id, authorId: user.id, text: payload.body })
+      const first = addMessage(thread.messages, payload.body, payload.attachments)
+      if (payload.body) autoFlag(repo, { itemType: 'message', itemId: first.id, parentId: thread.id, authorId: user.id, text: payload.body })
       thread.readMessageCounts[user.id] = thread.messages.length
       notify(repo, recipient.id, 'message', 'P12', thread.id)
-      record = { id: thread.id, title: thread.title }
+      record = { id: thread.id, title: threadTitle(db, thread, user) }
       message = 'Message sent.'
       break
     }
@@ -1240,12 +1257,12 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       const payload = actionPayloads.sendMessage.parse(request.payload)
       const thread = find(db.threads, id)
       if (!canThread(db, user, thread)) throw unavailable()
-      const sent = addMessage(thread.messages, payload.body)
+      const sent = addMessage(thread.messages, payload.body, payload.attachments)
       thread.readMessageCounts[user.id] = thread.messages.length
       for (const recipientId of thread.memberIds.filter(memberId => memberId !== user.id)) {
         notify(repo, recipientId, 'message', 'P12', thread.id)
       }
-      autoFlag(repo, { itemType: 'message', itemId: sent.id, parentId: thread.id, authorId: user.id, text: payload.body })
+      if (payload.body) autoFlag(repo, { itemType: 'message', itemId: sent.id, parentId: thread.id, authorId: user.id, text: payload.body })
       record = messageView(db, sent)
       message = 'Message sent.'
       break
@@ -1356,6 +1373,50 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
     default:throw new ApiError(400,'That action does not exist.','VALIDATION_ERROR')
   }
   return {...JSON.parse(JSON.stringify({ok:true,message,...(record===undefined?{}:{record})})) as {ok:true;message:string;record?:unknown},outbox}
+}
+// --- files in Messages -----------------------------------------------------------------------------------------------
+/** Checks a file for a message and returns a signed upload for exactly that type and size. */
+export async function startMessageUpload(user:User,payload:unknown,storage?:MaterialStorage){
+  requirePermission(user,'message.send')
+  const p=messageUploadSchema.parse(payload)
+  const allowed=messageFileTypes[p.contentType]
+  const extension=p.fileName.toLowerCase().split('.').pop()??''
+  if(!allowed)throw new z.ZodError([{code:'custom',path:['contentType'],message:'Send a picture (PNG, JPG, WebP or GIF), a PDF, or a Word, PowerPoint, Excel or text file.',input:undefined}])
+  if(!allowed.includes(extension))throw new z.ZodError([{code:'custom',path:['fileName'],message:`A ${allowed.map(e=>'.'+e).join(' or ')} file name is expected for this type.`,input:undefined}])
+  if(p.size>messageFileMaxBytes)throw new z.ZodError([{code:'custom',path:['size'],message:'Send a file of at most 10 MB.',input:undefined}])
+  if(!storage)throw filesNotSetUp()
+  const id=ulid()
+  const url=await storage.uploadUrl(messageFileKey(user.id,id,p.fileName),p.contentType,p.size)
+  return {attachment:{id,fileName:p.fileName,contentType:p.contentType,size:p.size},upload:{url,method:'PUT',headers:{'Content-Type':p.contentType,'Content-Length':String(p.size)},expiresInSeconds:uploadUrlSeconds}}
+}
+/** Before a message is saved, each file must be the sender's own upload, stored with the declared size and type. */
+async function checkMessageFiles(user:User,request:ActionRequest,storage?:MaterialStorage){
+  const files=(request.payload as {attachments?:unknown}|undefined)?.attachments
+  if(!Array.isArray(files)||!files.length)return
+  const parsed=actionPayloads[request.action as 'sendMessage'].parse(request.payload).attachments
+  if(!storage)throw filesNotSetUp()
+  for(const f of parsed){
+    const allowed=messageFileTypes[f.contentType]
+    if(!allowed||!allowed.includes(f.fileName.toLowerCase().split('.').pop()??'')||f.size>messageFileMaxBytes)throw conflict('That file cannot be sent. Choose it again.')
+    const stored=await storage.head(messageFileKey(user.id,f.id,f.fileName))
+    if(!stored)throw conflict(`${f.fileName} has not finished uploading. Try again.`)
+    if(stored.size!==f.size||stored.contentType!==undefined&&stored.contentType!==f.contentType)throw conflict(`${f.fileName} does not match what was uploaded. Choose it again.`)
+  }
+}
+/** A short-lived link to a file in a conversation, for its members only. Pictures can open in the browser. */
+export async function messageFileUrl(repo:Repository,user:User,threadId:string,messageId:string,fileId:string,inline:boolean,storage?:MaterialStorage){
+  const file=await repo.view(unit=>{
+    const db=unit.read()
+    const thread=find(db.threads,threadId)
+    if(!canThread(db,user,thread))throw unavailable()
+    const message=thread.messages.find(m=>m.id===messageId)
+    if(!message||!canSeeItem(db,user,'message',message.id,message.authorId))throw unavailable()
+    const file=message.attachments?.find(a=>a.id===fileId)
+    if(!file)throw unavailable()
+    return file
+  })
+  if(!storage)throw filesNotSetUp()
+  return storage.downloadUrl(file.key,file.fileName,inline&&file.contentType.startsWith('image/'))
 }
 // --- class material files (#44) -------------------------------------------------------------------------------------
 const filesNotSetUp = () => conflict('File uploads are not set up yet. Share a link instead.')
