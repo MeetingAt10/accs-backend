@@ -79,6 +79,7 @@ Four collections stay on the seed, per instance: `users` (accounts come from the
 | `POST /api/auth/reset-password` | `{ emailOrId, code, password }` | 200 and signs out every session; 400 `INVALID_CODE` |
 | `POST /api/admin/accounts/:id/reset-code` | `{}` (administrator) | 200 with `record.code`, shown once; audited as `Password reset code issued`; 403 for other roles |
 | `POST /api/auth/change-password` | `{ currentPassword, password }` (signed in) | 200; 400 `INVALID_CREDENTIALS` |
+| `POST /api/auth/sign-out-others` | `{}` (signed in) | 200. Ends every other session of the account; this one stays signed in. Audited. |
 | `POST /api/auth/sign-out` | `{}` | Clears the cookie |
 | `GET /api/session` | | `{ user, permissions, allowedPages, roleLabels }`; `user` includes `username` and `mustChangeCredentials` |
 
