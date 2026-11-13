@@ -86,6 +86,12 @@ export const facultyListResponseSchema = z.object({ faculty: z.array(accountSumm
 export const advisorsResponseSchema = z.object({ advisors: z.array(z.object({ yearLevel: z.number(), faculty: z.array(accountSummarySchema) })) })
 
 const text = z.string().trim().min(1).max(4000)
+/** A file already uploaded for a message, named by the ID its upload was given. */
+const messageAttachment = z.object({ id: z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/, 'That file is not available.'), fileName: z.string().trim().min(1).max(200), contentType: z.string().trim().toLowerCase().max(120), size: z.number().int().positive() }).strict()
+/** A message is words, files, or both. */
+const messageContent = z.object({ body: z.string().trim().max(4000).default(''), attachments: z.array(messageAttachment).max(5, 'Send at most 5 files at a time.').default([]) })
+const hasMessageContent = (p: { body: string; attachments: unknown[] }) => p.body.length > 0 || p.attachments.length > 0
+const noMessageContent = { path: ['body'], message: 'Write a message or attach a file.' }
 const reason = z.string().trim().min(1).max(2000)
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)
@@ -150,6 +156,8 @@ export const loadRowSchema = z.object({
   room: z.string().trim().max(40, 'Use at most 40 characters.').optional(),
 }).refine((row) => row.end > row.start, { path: ['end'], message: 'The end time must be later than the start time.' })
 const materialUrl = z.string().trim().max(2000).pipe(z.url({ protocol: /^https?$/, error: 'Use a link that starts with http:// or https://.' }))
+/** A file chosen for a message: the browser asks for an upload address first. */
+export const messageUploadSchema = z.object({ fileName: z.string().trim().min(1, 'Choose a file.').max(200, 'Use a shorter file name.'), contentType: z.string().trim().toLowerCase().max(120), size: z.number().int().positive('The file is empty.') }).strict()
 export const materialUploadSchema = z.object({ spaceId: z.string().min(1), title: z.string().trim().min(1, 'Enter a title.').max(160, 'Use at most 160 characters.'), note: z.string().trim().max(1000, 'Use at most 1000 characters.').optional(), fileName: z.string().trim().min(1, 'Choose a file.').max(200, 'Use a shorter file name.'), contentType: z.string().trim().toLowerCase().max(120), size: z.number().int().positive('The file is empty.') }).strict()
 /** The reactions a post or comment can get (#86). */
 export const reactionKinds = ['like', 'love', 'laugh', 'wow', 'sad', 'support'] as const
@@ -208,8 +216,8 @@ export const actionPayloads = {
   createTodo: z.object({ title: text.max(200), date }).strict(),
   toggleTodo: z.object({ done: z.boolean() }).strict(),
   deleteTodo: z.object({}).strict(),
-  createThread: z.object({ recipientId: z.string().min(1), body: text }).strict(),
-  sendMessage: z.object({ body: text }).strict(),
+  createThread: messageContent.extend({ recipientId: z.string().min(1) }).strict().refine(hasMessageContent, noMessageContent),
+  sendMessage: messageContent.strict().refine(hasMessageContent, noMessageContent),
   muteThread: z.object({ muted: z.boolean() }).strict(),
   markThreadRead: z.object({}).strict(),
   markNotification: z.object({ read: z.boolean().default(true) }).strict(),
