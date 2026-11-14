@@ -58,6 +58,16 @@ describe('files on posts', () => {
     expect((await (await login('QCU-STU-CS')).get(`/api/posts/${id}/files/${files[0]!.id}?format=json`)).status).toBe(404)
   })
 
+  it('leaves no copy of a file behind when the post is refused', async () => {
+    const student = await login('QCU-STU-IT-A')
+    const picture = await upload(student, 'QCU-STU-IT-A', photo)
+    const before = storage.objects.size
+    // Students cannot post announcements: refused after the file check, so its copy is removed again.
+    expect((await create(student, { body: 'Hi', kind: 'announcement', audience: 'college', attachments: [picture] })).status).toBe(403)
+    expect((await student.post('/api/pages/P01/actions').send({ action: 'createPost', payload: { title: 'x', body: 'Hi', audience: 'college', kind: 'discussion', label: 'Discussion', attachments: [picture] } })).status).toBe(403)
+    expect(storage.objects.size).toBe(before)
+  })
+
   it('never shows the author of an anonymous post in a file link', async () => {
     const student = await login('QCU-STU-IT-A')
     const picture = await upload(student, 'QCU-STU-IT-A', photo)

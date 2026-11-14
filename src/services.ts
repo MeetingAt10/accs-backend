@@ -949,8 +949,13 @@ export type OutgoingMail = { kind: 'newConcern'; userId: string; to: string; nam
 /** Work done once an action has committed: emails, and stored files to delete (#44). */
 export type AfterCommit = OutgoingMail | { kind: 'deleteFile'; key: string }
 export async function performAction(repo:Repository,user:User,pageId:string,request:ActionRequest,saveAccount?:(change:AccountChange)=>Promise<void>,saveProfile?:(id:string,change:ProfileChange)=>Promise<void>,sendMail?:(work:AfterCommit[])=>Promise<void>,files?:MaterialStorage){
+  // Page access first, so a request this page refuses copies no files; a refused or failed action removes its copies.
+  if(fileActions.includes(request.action)&&(!canPage(user,pageId)||!actionPages[request.action]?.includes(pageId)))throw deny()
   const fileKeys=fileActions.includes(request.action)?await checkMessageFiles(repo,user,request,files):new Map<string,string>()
-  const {outbox,...result}=await repo.transact(unit=>runAction(unit,user,pageId,request,fileKeys))
+  const {outbox,...result}=await repo.transact(unit=>runAction(unit,user,pageId,request,fileKeys)).catch(async(error:unknown)=>{
+    await Promise.all([...fileKeys.values()].map(key=>files?.remove(key).catch(()=>undefined)))
+    throw error
+  })
   // Emails go out only once the change is saved, and never reach the response.
   if(outbox.length)await sendMail?.(outbox)
   if(request.action==='updateRoles')await saveAccount?.(result.record as AccountChange)
