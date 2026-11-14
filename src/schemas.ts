@@ -13,7 +13,7 @@ export const programs = ['BSIT', 'BSCS', 'BSIS'] as const
 /** The ways a student can choose to talk about a concern. */
 export const talkModes = ['chat', 'video', 'voice', 'face_to_face'] as const
 export type TalkMode = (typeof talkModes)[number]
-export const userSchema = z.object({ id: z.string(), name: z.string(), email: z.email(), roles: z.array(roleSchema), program: z.string().optional(), section: z.string().optional(), campus: z.string().optional(), office: z.string().optional(), organizationId: z.string().optional(), restrictions: z.array(z.string()), title: z.string(), bio: z.string(), education: z.string(), officeHours: z.string(), year: z.number().optional(), studentId: z.string().optional(), spaceIds: z.array(z.string()), organizationIds: z.array(z.string()), adviserId: z.string().optional(), active: z.boolean(), username: z.string().optional(), mustChangeCredentials: z.boolean().optional() })
+export const userSchema = z.object({ id: z.string(), name: z.string(), email: z.email(), roles: z.array(roleSchema), program: z.string().optional(), section: z.string().optional(), campus: z.string().optional(), office: z.string().optional(), organizationId: z.string().optional(), restrictions: z.array(z.string()), title: z.string(), bio: z.string(), education: z.string(), photo: z.string().optional(), officeHours: z.string(), year: z.number().optional(), studentId: z.string().optional(), spaceIds: z.array(z.string()), organizationIds: z.array(z.string()), adviserId: z.string().optional(), active: z.boolean(), username: z.string().optional(), mustChangeCredentials: z.boolean().optional() })
 export type User = z.infer<typeof userSchema>
 export const pageIdSchema = z.string().regex(/^P(0[1-9]|[1-4][0-9]|5[0-4])$/)
 export const pageQuerySchema = z.object({ id: z.string().max(100).optional(), q: z.string().max(200).optional(), tab: z.string().max(50).optional(), status: z.string().max(50).optional(), program: z.string().max(20).optional(), year: z.string().max(4).optional(), section: z.string().max(20).optional(), clearance: z.enum(['clear','on_hold']).optional(), category: z.string().max(80).optional(), stage: z.string().max(40).optional(), period: z.string().max(40).optional(), from: z.string().max(40).optional(), to: z.string().max(40).optional(), severity: z.enum(['low','medium','high']).optional(), cycle: z.string().max(100).optional(), label: z.string().max(80).optional(), scope: z.string().max(100).optional(), space: z.string().max(100).optional(), priority: z.string().max(30).optional(), type: z.string().max(40).optional(), source: z.string().max(30).optional(), role: roleSchema.optional(), office: z.string().max(100).optional(), view: z.enum(['month','week','list']).optional(), date: z.string().max(40).optional(), layers: z.string().max(200).optional(), sort: z.string().max(40).optional(), received: z.string().max(40).optional(), unread: z.enum(['true','false']).optional(), standing: z.string().max(60).optional(), recipient: z.string().max(100).optional(), hasRestriction: z.enum(['true','false']).optional(), purpose: z.enum(['Case handling', 'Good Moral review', 'Restriction review', 'Program oversight']).optional(), page: z.coerce.number().int().min(1).max(10000).optional() }).strict()
@@ -86,6 +86,12 @@ export const facultyListResponseSchema = z.object({ faculty: z.array(accountSumm
 export const advisorsResponseSchema = z.object({ advisors: z.array(z.object({ yearLevel: z.number(), faculty: z.array(accountSummarySchema) })) })
 
 const text = z.string().trim().min(1).max(4000)
+/** A file already uploaded for a message, named by the ID its upload was given. */
+const messageAttachment = z.object({ id: z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/, 'That file is not available.'), fileName: z.string().trim().min(1).max(200), contentType: z.string().trim().toLowerCase().max(120), size: z.number().int().positive() }).strict()
+/** A message is words, files, or both. */
+const messageContent = z.object({ body: z.string().trim().max(4000).default(''), attachments: z.array(messageAttachment).max(5, 'Send at most 5 files at a time.').default([]) })
+const hasMessageContent = (p: { body: string; attachments: unknown[] }) => p.body.length > 0 || p.attachments.length > 0
+const noMessageContent = { path: ['body'], message: 'Write a message or attach a file.' }
 const reason = z.string().trim().min(1).max(2000)
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)
@@ -150,7 +156,12 @@ export const loadRowSchema = z.object({
   room: z.string().trim().max(40, 'Use at most 40 characters.').optional(),
 }).refine((row) => row.end > row.start, { path: ['end'], message: 'The end time must be later than the start time.' })
 const materialUrl = z.string().trim().max(2000).pipe(z.url({ protocol: /^https?$/, error: 'Use a link that starts with http:// or https://.' }))
+/** A file chosen for a message: the browser asks for an upload address first. */
+export const messageUploadSchema = z.object({ fileName: z.string().trim().min(1, 'Choose a file.').max(200, 'Use a shorter file name.'), contentType: z.string().trim().toLowerCase().max(120), size: z.number().int().positive('The file is empty.') }).strict()
 export const materialUploadSchema = z.object({ spaceId: z.string().min(1), title: z.string().trim().min(1, 'Enter a title.').max(160, 'Use at most 160 characters.'), note: z.string().trim().max(1000, 'Use at most 1000 characters.').optional(), fileName: z.string().trim().min(1, 'Choose a file.').max(200, 'Use a shorter file name.'), contentType: z.string().trim().toLowerCase().max(120), size: z.number().int().positive('The file is empty.') }).strict()
+/** The reactions a post or comment can get (#86). */
+export const reactionKinds = ['like', 'love', 'laugh', 'wow', 'sad', 'support'] as const
+export type ReactionKind = typeof reactionKinds[number]
 export const actionPayloads = {
   // A faculty member reports a student (decided 12 November 2026). Same categories as a concern.
   reportStudent: z.object({ studentId: z.string().min(1), narrative: z.string().trim().min(1).max(4000), category: z.string().trim().min(1).max(80), subcategory: z.string().trim().min(1).max(80).optional(), categoryDetail: z.string().trim().max(120).optional(), severity: z.enum(['low', 'medium', 'high']), location: z.string().trim().max(200).optional(), occurredOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).strict(),
@@ -163,7 +174,9 @@ export const actionPayloads = {
   updatePost: z.object(postContent).strict(),
   deletePost: z.object({}).strict(),
   comment: z.object({ body: text, anonymous: z.boolean().default(false) }).strict(),
-  react: z.object({}).strict(),
+  // A choice of reactions (#86). Without one it is "like", as the single reaction was before.
+  react: z.object({ reaction: z.enum(reactionKinds).default('like') }).strict(),
+  reactComment: z.object({ commentId: z.string().min(1), reaction: z.enum(reactionKinds).default('like') }).strict(),
   flag: z.object({ reason, itemType: z.enum(['post', 'comment', 'message']).default('post'), itemId: z.string().optional() }).strict(),
   // The agreement and the three choices have no defaults: a concern is never sent on a guess about what the student allowed.
   createReport: z.object({ narrative: text, category: text.max(80), subcategory: z.string().trim().min(1).max(80).optional(), categoryDetail: z.string().trim().max(120).optional(), severity: z.enum(['low', 'medium', 'high']), identity: z.enum(['named', 'anonymous']), involvedUserIds: z.array(z.string()).default([]), conflictedAdviser: z.boolean().default(false), sourcePostId: z.string().optional(), location: z.string().max(200).optional(), occurredOn: date.optional(), consent: z.object({ readStatement: z.literal(true, { error: agree }) }, { error: agree }).strict(), // The Program Chair and the Dean have access without the student's permission (baseline of 10 November 2026). The two
@@ -203,8 +216,8 @@ export const actionPayloads = {
   createTodo: z.object({ title: text.max(200), date }).strict(),
   toggleTodo: z.object({ done: z.boolean() }).strict(),
   deleteTodo: z.object({}).strict(),
-  createThread: z.object({ recipientId: z.string().min(1), body: text }).strict(),
-  sendMessage: z.object({ body: text }).strict(),
+  createThread: messageContent.extend({ recipientId: z.string().min(1) }).strict().refine(hasMessageContent, noMessageContent),
+  sendMessage: messageContent.strict().refine(hasMessageContent, noMessageContent),
   muteThread: z.object({ muted: z.boolean() }).strict(),
   markThreadRead: z.object({}).strict(),
   markNotification: z.object({ read: z.boolean().default(true) }).strict(),
@@ -226,6 +239,8 @@ export const actionPayloads = {
   decideStrike: z.object({ strikeId: z.string().min(1), decision: z.enum(['confirm', 'reject']), note: z.string().trim().max(1000).default('') }).strict(),
   settleStrikes: z.object({ studentId: z.string().min(1), kind: z.enum(['letter', 'reprimand']), reference: text.max(100), note: z.string().max(1000).default('') }).strict(),
   referRestriction: z.object({ studentId: z.string(), change: z.enum(['Lift', 'Shorten', 'Extend', 'Review']), decisionReference: z.string().max(100).optional() }).strict(),
+  // A profile photo (#85): a square JPEG, PNG or WebP the browser has already resized, sent as a data URL. null removes it.
+  setProfilePhoto: z.object({ photo: z.string().max(110_000, 'Use a smaller image (at most 80 KB).').regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/, 'Use a JPEG, PNG or WebP image.').nullable() }).strict(),
   saveProfile: z.object({ title: z.string().max(100), bio: z.string().max(1000), education: z.string().max(500), officeHours: z.string().max(200) }).strict(),
   saveSettings: z.object({ theme: z.enum(['system', 'light', 'dark']), density: z.enum(['comfortable', 'compact']) }).strict(),
   saveNotificationPreferences: z.object({ priorities: z.record(z.string(), z.enum(['high', 'normal', 'muted'])) }).strict(),

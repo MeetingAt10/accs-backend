@@ -2,15 +2,16 @@ import { findFlaggedWord } from './profanity.js'
 import { z } from 'zod'
 import { categoryProblem, concernCategories } from './categories.js'
 import { mainCampus, sectionName } from './sections.js'
-import { materialFileTypes, materialMaxBytes, safeFileName, uploadUrlSeconds, type MaterialStorage } from './material-storage.js'
+import { materialFileTypes, materialMaxBytes, messageFileMaxBytes, messageFileTypes, safeFileName, uploadUrlSeconds, type MaterialStorage } from './material-storage.js'
+import { ulid } from './ids.js'
 import { appointmentCategories, appointmentProblem, concernFollowUp, purposeOf, type AppointmentChoice } from './appointments.js'
-import { loadRowSchema, materialUploadSchema, actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
+import { reactionKinds, type ReactionKind, loadRowSchema, materialUploadSchema, messageUploadSchema, actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
 import { allowedPages, canActCase, canAudience, canReadCase, isEarlierHandler, overseesCase, canCountCase, canFacultyResult, canPage, canPublish, canReach, canSpace, canStudentRecord, canThread, canViewCase, hasPermission, hasRole, isOrganizationMember, pageTitles, permissionRoles, permissions, scopeLabel } from './access.js'
 import { consentWording } from './consent.js'
 import { route, rosterFor } from './escalation/engine.js'
 import { escalationConfig } from './escalation/lexicon.js'
 import { assign } from './escalation/similarity.js'
-import type { Material, Space, Assignment, Consultation, Cycle, Database, Message, Moderation, Post, Report, Repository, Slot, Stage, Strike, Thread, UnitOfWork } from './store.js'
+import type { Attachment, Material, Space, Assignment, Consultation, Cycle, Database, Message, Moderation, Post, Report, Repository, Slot, Stage, Strike, Thread, UnitOfWork } from './store.js'
 
 export class ApiError extends Error { constructor(public status: number, message: string, public code = 'FORBIDDEN') { super(message) } }
 export const unavailable = () => new ApiError(404, "This record isn't available to you.", 'UNAVAILABLE')
@@ -73,9 +74,42 @@ const reportIdOf = (db:Database, id?:string) => id && db.reports.find(r => r.cas
 function reasonOf(request:ActionRequest) { return z.string().trim().min(1,'A reason is required.').max(2000).parse(request.reason) }
 export function refreshRestrictions(db: Database, user: User): User { const date = now().slice(0,10); return { ...user, restrictions:[...new Set(db.restrictions.filter(r=>r.studentId===user.id&&r.active&&r.until>=date).flatMap(r=>r.features))] } }
 export function sessionView(user:User) { return { user, permissions:permissions(user),allowedPages:allowedPages(user),roleLabels } }
-function person(user:User) { return { id:user.id,name:user.name,email:user.email,roles:user.roles,program:user.program,section:user.section,...(hasRole(user,'student')?{campus:user.campus??mainCampus,...(user.program&&user.year&&user.section?{sectionName:sectionName({campus:user.campus,program:user.program,year:user.year,section:user.section})}:{})}:{}),office:user.office,title:user.title,bio:user.bio,education:user.education,officeHours:user.officeHours,studentId:user.studentId,year:user.year,standing:user.restrictions.length?'Some features paused':'Good standing' } }
-function author(db:Database,id:string,anonymous=false,alias='Student A-12') { const u=db.users.find(item=>item.id===id); return anonymous ? {name:alias,roles:['student'],anonymous:true} : u?{id:u.id,name:u.name,roles:u.roles,email:u.email}:{name:'College office',roles:[]} }
-function messageView(db:Database,message:Message,report?:Report) { return {id:message.id,body:message.body,at:message.at,author:author(db,message.authorId,!!report&&message.authorId===report.ownerId&&report.identity==='anonymous'&&!report.disclosedTo.includes(report.stage),report?.alias)} }
+function person(user:User) { return { id:user.id,photo:user.photo,name:user.name,email:user.email,roles:user.roles,program:user.program,section:user.section,...(hasRole(user,'student')?{campus:user.campus??mainCampus,...(user.program&&user.year&&user.section?{sectionName:sectionName({campus:user.campus,program:user.program,year:user.year,section:user.section})}:{})}:{}),office:user.office,title:user.title,bio:user.bio,education:user.education,officeHours:user.officeHours,studentId:user.studentId,year:user.year,standing:user.restrictions.length?'Some features paused':'Good standing' } }
+function author(db:Database,id:string,anonymous=false,alias='Student A-12') { const u=db.users.find(item=>item.id===id); return anonymous ? {name:alias,roles:['student'],anonymous:true} : u?{id:u.id,name:u.name,roles:u.roles,email:u.email,...(u.photo?{photo:u.photo}:{})}:{name:'College office',roles:[]} }
+/** Where a sender's upload is stored. Only the sender's own uploads can be attached, because the key starts with their ID. */
+// Under materials/, the one prefix the API role may use in the files bucket (accs-architecture api.yaml).
+const messageFileKey=(userId:string,id:string,fileName:string)=>`materials/messages/${userId}/${id}/${safeFileName(fileName)}`
+/** A file as people see it: never its storage key. */
+const attachmentView=({key:_key,...shown}:Attachment)=>shown
+/** A direct conversation started from Messages is stored under the recipient's name; each person sees the other one's name instead. */
+function threadTitle(db:Database,thread:Thread,user:User){
+  if(thread.spaceId||thread.memberIds.length!==2)return thread.title
+  const names=thread.memberIds.map(id=>db.users.find(u=>u.id===id)?.name)
+  if(!names.includes(thread.title))return thread.title
+  const other=thread.memberIds.find(id=>id!==user.id)
+  return (other&&db.users.find(u=>u.id===other)?.name)||thread.title
+}
+/** The last line shown in the conversation list: the words, or the file when only a file was sent. */
+const messagePreview=(message?:Message)=>!message?'':message.body||(message.attachments?.length?`Sent ${message.attachments.length===1?message.attachments[0]!.fileName:`${message.attachments.length} files`}`:'')
+function messageView(db:Database,message:Message,report?:Report) { return {id:message.id,body:message.body,at:message.at,...(message.attachments?.length?{attachments:message.attachments.map(attachmentView)}:{}),author:author(db,message.authorId,!!report&&message.authorId===report.ownerId&&report.identity==='anonymous'&&!report.disclosedTo.includes(report.stage),report?.alias)} }
+/** Everyone's reaction to a post or comment: the old single reaction counts as "like" (#86). */
+function reactionsOf(item: { reactions?: string[]; reactionsBy?: Record<string, ReactionKind> }): Record<string, ReactionKind> {
+  return { ...Object.fromEntries((item.reactions ?? []).map(id => [id, 'like' as ReactionKind])), ...(item.reactionsBy ?? {}) }
+}
+/** Counts per reaction, and the viewer's own. */
+function reactionView(item: { reactions?: string[]; reactionsBy?: Record<string, ReactionKind> }, user: User) {
+  const all = reactionsOf(item)
+  const counts = Object.fromEntries(reactionKinds.map(kind => [kind, Object.values(all).filter(value => value === kind).length]))
+  return { reactionCounts: counts, myReaction: all[user.id] ?? null, reactionCount: Object.keys(all).length, reacted: user.id in all }
+}
+/** Sets, changes, or (choosing the same one again) removes the person's reaction, and moves old reactions into the new map. */
+function toggleReaction(item: { reactions?: string[]; reactionsBy?: Record<string, ReactionKind> }, userId: string, reaction: ReactionKind) {
+  const all = reactionsOf(item)
+  if (all[userId] === reaction) delete all[userId]
+  else all[userId] = reaction
+  item.reactionsBy = all
+  if ('reactions' in item) item.reactions = []
+}
 function postView(db: Database, post: Post, user: User) {
   return {
     id: post.id,
@@ -96,11 +130,11 @@ function postView(db: Database, post: Post, user: User) {
     notifyMembers: post.notifyMembers,
     author: author(db, post.authorId, post.anonymous),
     owned: post.authorId === user.id,
-    reactionCount: post.reactions.length,
-    reacted: post.reactions.includes(user.id),
+    ...reactionView(post, user),
     commentCount: post.comments.filter(comment => canSeeItem(db, user, 'comment', comment.id, comment.authorId)).length,
     comments: post.removed ? [] : post.comments.filter(comment => canSeeItem(db, user, 'comment', comment.id, comment.authorId)).map(comment => ({
       ...messageView(db, comment),
+      ...reactionView(comment, user),
       author: author(db, comment.authorId, comment.anonymous),
       ...(heldItem(db, 'comment', comment.id) ? { underReview: true } : {}),
     })),
@@ -391,9 +425,11 @@ export function getPage(repo:Repository,user:User,pageId:string,query:PageQuery=
   const work=(unit:UnitOfWork)=>readPage(unit,user,pageId,query)
   return pageId==='P34'?repo.transact(work):repo.view(work)
 }
+/** Puts each person's profile photo (#85) on the loaded accounts, so every view that shows a person can show it. */
+function attachPhotos(db:Database) { for (const u of db.users) { const photo=db.photos?.[u.id]; if (photo) u.photo=photo; else delete u.photo } }
 function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},internalRole=false) {
   if(!canPage(user,pageId))throw new ApiError(403,"This page isn't available to your role.")
-  const db=repo.read(); const data:Record<string,unknown>={}; const ownReports=db.reports.filter(r=>r.ownerId===user.id);const cases=db.reports.filter(r=>canViewCase(user,r)||filedByFaculty(user,r));
+  const db=repo.read(); attachPhotos(db); const data:Record<string,unknown>={}; const ownReports=db.reports.filter(r=>r.ownerId===user.id);const cases=db.reports.filter(r=>canViewCase(user,r)||filedByFaculty(user,r));
   if (pageId === 'P04') validateFeedScope(db, user, query.scope)
   const labels = query.label?.split(',').map(label => label.trim()).filter(Boolean) ?? []
   const posts = visiblePosts(db, user, query.q).filter(post => (
@@ -492,13 +528,13 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
     case 'P12': {
       const threads = db.threads.filter(thread => canThread(db, user, thread))
       data.threads = threads
-        .filter(thread => match(thread.title))
+        .filter(thread => match(threadTitle(db, thread, user)))
         .map(thread => ({
           id: thread.id,
-          title: thread.title,
+          title: threadTitle(db, thread, user),
           kind: thread.spaceId ? 'group' : 'direct',
           members: thread.memberIds.map(memberId => person(find(db.users, memberId))),
-          lastMessage: thread.messages.filter(message => canSeeItem(db, user, 'message', message.id, message.authorId)).at(-1)?.body ?? '',
+          lastMessage: messagePreview(thread.messages.filter(message => canSeeItem(db, user, 'message', message.id, message.authorId)).at(-1)),
           updatedAt: thread.messages.at(-1)?.at,
           unread: unreadMessages(thread, user.id),
         }))
@@ -508,7 +544,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
         if (thread) {
           data.record = {
             id: thread.id,
-            title: thread.title,
+            title: threadTitle(db, thread, user),
             members: thread.memberIds.map(memberId => person(find(db.users, memberId))),
             messages: thread.messages.filter(message => canSeeItem(db, user, 'message', message.id, message.authorId)).map(message => ({ ...messageView(db, message), ...(heldItem(db, 'message', message.id) ? { underReview: true } : {}) })),
             muted: thread.mutedBy.includes(user.id),
@@ -735,7 +771,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
     }
     case'P37':data.people=db.users.filter(u=>u.active&&!hasRole(u,'student','organization')&&match(`${u.name} ${u.office} ${u.program} ${u.email}`)).map(person);break
     case'P38':{const u=pick(db.users.filter(u=>u.active),query.id);if(u){const {studentId: _studentId,...profile}=person(refreshRestrictions(db,u));data.record=profile}break}
-    case'P39':data.record=person(user);break
+    case'P39':data.record=person({...user,photo:db.photos?.[user.id]});break
     case'P40':data.notifications=db.notifications.filter(n=>n.recipientId===user.id);break
     case'P41':data.faq=filteredFaq(user);data.suggestions=['What can you help me with?',...(hasRole(user,'student')?['Show my schedule','Explain my report milestones']:[])];break
     case'P42':data.faq=filteredFaq(user).filter(f=>match(`${f.question} ${f.answer}`));break
@@ -802,6 +838,7 @@ const actionPages: Record<string, string[]> = {
   deletePost: ['P06'],
   comment: ['P06'],
   react: ['P06'],
+  reactComment: ['P06'],
   flag: ['P06', 'P12'],
   createReport: ['P19'],
   reportStudent: ['P21'],
@@ -848,6 +885,7 @@ const actionPages: Record<string, string[]> = {
   liftRestriction: ['P35'],
   referRestriction: ['P34', 'P35'],
   saveProfile: ['P39'],
+  setProfilePhoto: ['P39'],
   saveSettings: ['P43'],
   saveNotificationPreferences: ['P44'],
   updateRoles: ['P46', 'P47'],
@@ -863,7 +901,8 @@ export type ProfileChange = { title: string; bio: string; education: string; off
 export type OutgoingMail = { kind: 'newConcern'; userId: string; to: string; name: string; reportId: string }
 /** Work done once an action has committed: emails, and stored files to delete (#44). */
 export type AfterCommit = OutgoingMail | { kind: 'deleteFile'; key: string }
-export async function performAction(repo:Repository,user:User,pageId:string,request:ActionRequest,saveAccount?:(change:AccountChange)=>Promise<void>,saveProfile?:(id:string,change:ProfileChange)=>Promise<void>,sendMail?:(work:AfterCommit[])=>Promise<void>){
+export async function performAction(repo:Repository,user:User,pageId:string,request:ActionRequest,saveAccount?:(change:AccountChange)=>Promise<void>,saveProfile?:(id:string,change:ProfileChange)=>Promise<void>,sendMail?:(work:AfterCommit[])=>Promise<void>,files?:MaterialStorage){
+  if(request.action==='sendMessage'||request.action==='createThread')await checkMessageFiles(user,request,files)
   const {outbox,...result}=await repo.transact(unit=>runAction(unit,user,pageId,request))
   // Emails go out only once the change is saved, and never reach the response.
   if(outbox.length)await sendMail?.(outbox)
@@ -873,11 +912,11 @@ export async function performAction(repo:Repository,user:User,pageId:string,requ
 }
 function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest){
   if(!canPage(user,pageId)||!actionPages[request.action]?.includes(pageId))throw deny()
-  const db=repo.read();const id=request.recordId;let record:unknown;let message='Changes saved.';const outbox:AfterCommit[]=[]
+  const db=repo.read();attachPhotos(db);const id=request.recordId;let record:unknown;let message='Changes saved.';const outbox:AfterCommit[]=[]
   // The report is named by the record ID, or by `reportId` in the payload for the talk actions.
   const getOwnReport=(reportId=id)=>{const r=find(db.reports,reportIdOf(db,reportId));if(r.ownerId!==user.id||!hasRole(user,'student'))throw unavailable();return r}
   const getCase=(reportId=id)=>{const r=find(db.reports,reportIdOf(db,reportId));if(!canActCase(user,r))throw unavailable();return r}
-  const addMessage=(list:Message[],body:string)=>{const m={id:repo.nextId('MESSAGE'),authorId:user.id,body,at:now()};list.push(m);return m}
+  const addMessage=(list:Message[],body:string,files:{id:string;fileName:string;contentType:string;size:number}[]=[])=>{const m:Message={id:repo.nextId('MESSAGE'),authorId:user.id,body,at:now(),...(files.length?{attachments:files.map(f=>({...f,key:messageFileKey(user.id,f.id,f.fileName)}))}:{})};list.push(m);return m}
   switch(request.action){
     case 'createPost': {
       const payload = actionPayloads.createPost.parse(request.payload)
@@ -930,7 +969,8 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       break
     }
     case'comment':{if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();if(user.restrictions.includes('post.comment'))throw deny();const p=actionPayloads.comment.parse(request.payload);const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'comment'))throw deny();if(p.anonymous&&!hasRole(user,'student'))throw deny();const added={...addMessage([],p.body),anonymous:p.anonymous};post.comments.push(added);autoFlag(repo,{itemType:'comment',itemId:added.id,parentId:post.id,authorId:user.id,text:p.body});record=postView(db,post,user);message='Comment added.';break}
-    case'react':{actionPayloads.react.parse(request.payload);if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'react'))throw deny();post.reactions=post.reactions.includes(user.id)?post.reactions.filter(v=>v!==user.id):[...post.reactions,user.id];record=postView(db,post,user);message='Reaction updated.';break}
+    case'react':{const p=actionPayloads.react.parse(request.payload);if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'react'))throw deny();toggleReaction(post,user.id,p.reaction);record=postView(db,post,user);message='Reaction updated.';break}
+    case'reactComment':{const p=actionPayloads.reactComment.parse(request.payload);if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'react'))throw deny();const comment=post.comments.find(c=>c.id===p.commentId);if(!comment||!canSeeItem(db,user,'comment',comment.id,comment.authorId))throw unavailable();toggleReaction(comment,user.id,p.reaction);record=postView(db,post,user);message='Reaction updated.';break}
     case'flag':{const p=actionPayloads.flag.parse(request.payload);let authorId:string,body:string,parentId:string,itemId:string;if(p.itemType==='message'){const thread=find(db.threads,id);if(!canThread(db,user,thread))throw unavailable();const m=find(thread.messages,p.itemId);authorId=m.authorId;body=m.body;parentId=thread.id;itemId=m.id}else{const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private))throw unavailable();const item=p.itemType==='comment'?find(post.comments,p.itemId):post;authorId=item.authorId;body=item.body;parentId=post.id;itemId=item.id}const mod={id:repo.nextId('MOD'),itemType:p.itemType,itemId,parentId,authorId,reporterId:user.id,source:'User' as const,reason:p.reason,excerpt:body.slice(0,160),status:'Pending',at:now(),history:[]};db.moderation.push(mod);audit(repo,user,'Content reported','moderation',mod.id);record={id:mod.id,status:mod.status};message='Sent to a moderator.';break}
     case 'reportStudent': {
       requirePermission(user, 'student.report')
@@ -1224,11 +1264,11 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
         readMessageCounts: {},
       }
       if (!existing) db.threads.push(thread)
-      const first = addMessage(thread.messages, payload.body)
-      autoFlag(repo, { itemType: 'message', itemId: first.id, parentId: thread.id, authorId: user.id, text: payload.body })
+      const first = addMessage(thread.messages, payload.body, payload.attachments)
+      if (payload.body) autoFlag(repo, { itemType: 'message', itemId: first.id, parentId: thread.id, authorId: user.id, text: payload.body })
       thread.readMessageCounts[user.id] = thread.messages.length
       notify(repo, recipient.id, 'message', 'P12', thread.id)
-      record = { id: thread.id, title: thread.title }
+      record = { id: thread.id, title: threadTitle(db, thread, user) }
       message = 'Message sent.'
       break
     }
@@ -1236,12 +1276,12 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       const payload = actionPayloads.sendMessage.parse(request.payload)
       const thread = find(db.threads, id)
       if (!canThread(db, user, thread)) throw unavailable()
-      const sent = addMessage(thread.messages, payload.body)
+      const sent = addMessage(thread.messages, payload.body, payload.attachments)
       thread.readMessageCounts[user.id] = thread.messages.length
       for (const recipientId of thread.memberIds.filter(memberId => memberId !== user.id)) {
         notify(repo, recipientId, 'message', 'P12', thread.id)
       }
-      autoFlag(repo, { itemType: 'message', itemId: sent.id, parentId: thread.id, authorId: user.id, text: payload.body })
+      if (payload.body) autoFlag(repo, { itemType: 'message', itemId: sent.id, parentId: thread.id, authorId: user.id, text: payload.body })
       record = messageView(db, sent)
       message = 'Message sent.'
       break
@@ -1329,6 +1369,13 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
     case'applyRestriction':{requireRole(user,'administrator');const p=actionPayloads.applyRestriction.parse(request.payload);reasonOf(request);const student=find(db.users,p.studentId);if(!hasRole(student,'student'))throw unavailable();if(p.until<now().slice(0,10))throw new ApiError(400,'The end date must be today or later.','VALIDATION_ERROR');const r={id:repo.nextId('RST'),...p,starts:now(),actorId:user.id,active:true};db.restrictions.push(r);audit(repo,user,'Restriction applied','restrictions',r.id);notify(repo,student.id,'restriction','P36');record=r;message='Selected features paused.';break}
     case'liftRestriction':{requireRole(user,'administrator');actionPayloads.liftRestriction.parse(request.payload);reasonOf(request);const r=find(db.restrictions,id);if(!r.active||r.until<now().slice(0,10))throw conflict('This restriction has already ended.');r.active=false;audit(repo,user,'Restriction lifted','restrictions',r.id);notify(repo,r.studentId,'restriction','P36');record=r;message='Restriction lifted.';break}
     case'referRestriction':{requireRole(user,'guidance','osas');const p=actionPayloads.referRestriction.parse(request.payload);const reason=reasonOf(request);const student=find(db.users,p.studentId);if(!canStudentRecord(db,user,student))throw unavailable();const referral={id:repo.nextId('REF'),studentId:student.id,change:p.change,decisionReference:p.decisionReference??'',reason,actorId:user.id,at:now(),status:'Awaiting administrator review'};db.referrals.push(referral);audit(repo,user,'Restriction change requested','restrictions',referral.id);for(const admin of db.users.filter(u=>hasRole(u,'administrator')))notify(repo,admin.id,'restriction','P35');record=referral;message='Request sent. Existing restrictions are unchanged.';break}
+    case'setProfilePhoto':{
+      const p=actionPayloads.setProfilePhoto.parse(request.payload)
+      // The data URL is checked again here for the decoded size: base64 is about four characters for three bytes.
+      if(p.photo&&Math.floor((p.photo.length-p.photo.indexOf(',')-1)*3/4)>80_000)throw new ApiError(400,'Use a smaller image (at most 80 KB).','VALIDATION_ERROR')
+      if(p.photo)db.photos[user.id]=p.photo;else delete db.photos[user.id]
+      attachPhotos(db)
+      record=person(find(db.users,user.id));message=p.photo?'Profile photo saved.':'Profile photo removed.';break}
     case'saveProfile':{const p=actionPayloads.saveProfile.parse(request.payload);const saved=find(db.users,user.id);Object.assign(saved,p);Object.assign(user,p);record=person(user);message='Profile saved.';break}
     case'saveSettings':{const p=actionPayloads.saveSettings.parse(request.payload);db.settings[user.id]={...(db.settings[user.id]??defaultSettings(user)),...p};record=db.settings[user.id];message='Settings saved.';break}
     case'saveNotificationPreferences':{const p=actionPayloads.saveNotificationPreferences.parse(request.payload);if(Object.keys(p.priorities).some(key=>!notificationCategories(user).includes(key)))throw new ApiError(400,'Your account does not have that notification category.','VALIDATION_ERROR');const mutedRequired=Object.entries(p.priorities).find(([key,value])=>value==='muted'&&requiredNotificationCategories.includes(key));if(mutedRequired)throw new ApiError(400,`${requiredCategoryLabels[mutedRequired[0]]} cannot be muted.`,'VALIDATION_ERROR');/* Saved preferences do not change source access. */db.settings[user.id]={...(db.settings[user.id]??defaultSettings(user)),priorities:p.priorities};record=db.settings[user.id];message='Notification priorities saved.';break}
@@ -1345,6 +1392,50 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
     default:throw new ApiError(400,'That action does not exist.','VALIDATION_ERROR')
   }
   return {...JSON.parse(JSON.stringify({ok:true,message,...(record===undefined?{}:{record})})) as {ok:true;message:string;record?:unknown},outbox}
+}
+// --- files in Messages -----------------------------------------------------------------------------------------------
+/** Checks a file for a message and returns a signed upload for exactly that type and size. */
+export async function startMessageUpload(user:User,payload:unknown,storage?:MaterialStorage){
+  requirePermission(user,'message.send')
+  const p=messageUploadSchema.parse(payload)
+  const allowed=messageFileTypes[p.contentType]
+  const extension=p.fileName.toLowerCase().split('.').pop()??''
+  if(!allowed)throw new z.ZodError([{code:'custom',path:['contentType'],message:'Send a picture (PNG, JPG, WebP or GIF), a PDF, or a Word, PowerPoint, Excel or text file.',input:undefined}])
+  if(!allowed.includes(extension))throw new z.ZodError([{code:'custom',path:['fileName'],message:`A ${allowed.map(e=>'.'+e).join(' or ')} file name is expected for this type.`,input:undefined}])
+  if(p.size>messageFileMaxBytes)throw new z.ZodError([{code:'custom',path:['size'],message:'Send a file of at most 10 MB.',input:undefined}])
+  if(!storage)throw filesNotSetUp()
+  const id=ulid()
+  const url=await storage.uploadUrl(messageFileKey(user.id,id,p.fileName),p.contentType,p.size)
+  return {attachment:{id,fileName:p.fileName,contentType:p.contentType,size:p.size},upload:{url,method:'PUT',headers:{'Content-Type':p.contentType,'Content-Length':String(p.size)},expiresInSeconds:uploadUrlSeconds}}
+}
+/** Before a message is saved, each file must be the sender's own upload, stored with the declared size and type. */
+async function checkMessageFiles(user:User,request:ActionRequest,storage?:MaterialStorage){
+  const files=(request.payload as {attachments?:unknown}|undefined)?.attachments
+  if(!Array.isArray(files)||!files.length)return
+  const parsed=actionPayloads[request.action as 'sendMessage'].parse(request.payload).attachments
+  if(!storage)throw filesNotSetUp()
+  for(const f of parsed){
+    const allowed=messageFileTypes[f.contentType]
+    if(!allowed||!allowed.includes(f.fileName.toLowerCase().split('.').pop()??'')||f.size>messageFileMaxBytes)throw conflict('That file cannot be sent. Choose it again.')
+    const stored=await storage.head(messageFileKey(user.id,f.id,f.fileName))
+    if(!stored)throw conflict(`${f.fileName} has not finished uploading. Try again.`)
+    if(stored.size!==f.size||stored.contentType!==undefined&&stored.contentType!==f.contentType)throw conflict(`${f.fileName} does not match what was uploaded. Choose it again.`)
+  }
+}
+/** A short-lived link to a file in a conversation, for its members only. Pictures can open in the browser. */
+export async function messageFileUrl(repo:Repository,user:User,threadId:string,messageId:string,fileId:string,inline:boolean,storage?:MaterialStorage){
+  const file=await repo.view(unit=>{
+    const db=unit.read()
+    const thread=find(db.threads,threadId)
+    if(!canThread(db,user,thread))throw unavailable()
+    const message=thread.messages.find(m=>m.id===messageId)
+    if(!message||!canSeeItem(db,user,'message',message.id,message.authorId))throw unavailable()
+    const file=message.attachments?.find(a=>a.id===fileId)
+    if(!file)throw unavailable()
+    return file
+  })
+  if(!storage)throw filesNotSetUp()
+  return storage.downloadUrl(file.key,file.fileName,inline&&file.contentType.startsWith('image/'))
 }
 // --- class material files (#44) -------------------------------------------------------------------------------------
 const filesNotSetUp = () => conflict('File uploads are not set up yet. Share a link instead.')

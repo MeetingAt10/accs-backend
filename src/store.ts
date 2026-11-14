@@ -2,11 +2,13 @@ import { consentWording } from './consent.js'
 import { ulid } from './ids.js'
 import type { Decision } from './escalation/engine.js'
 import { formerAccountIds } from './renames.js'
-import type { Role, TalkMode, User } from './schemas.js'
+import type { ReactionKind, Role, TalkMode, User } from './schemas.js'
 
 // The President's Office stage was removed on 2026-11-10; a record stored with `executive` is read as `osas` (persist.ts).
 export type Stage = 'adviser' | 'chair' | 'dean' | 'guidance' | 'osas'
-export type Message = { id: string; authorId: string; body: string; at: string }
+/** A file sent with a message. It lives in the files bucket under `key`, which only the server knows. */
+export type Attachment = { id: string; fileName: string; contentType: string; size: number; key: string }
+export type Message = { id: string; authorId: string; body: string; at: string; attachments?: Attachment[] }
 export type History = { id: string; at: string; actorId: string; actorRole: string; action: string; reason: string; update: string; public: boolean; stage: Stage }
 /** The student's agreement to send a concern, stamped by the server with the exact wording they were shown. */
 export type ReportConsent = { readStatement: true; at: string; userId: string; version: string; wording: string }
@@ -44,8 +46,11 @@ export type Post = {
   eventPlace?: string
   eventContact?: string
   notifyMembers?: boolean
+  /** People who reacted before there was a choice of reactions (#86); each counts as "like". */
   reactions: string[]
-  comments: (Message & { anonymous: boolean })[]
+  /** Each person's reaction, by user ID (#86). */
+  reactionsBy?: Record<string, ReactionKind>
+  comments: (Message & { anonymous: boolean; reactionsBy?: Record<string, ReactionKind> })[]
   removed: boolean
 }
 export type Event = {
@@ -99,7 +104,7 @@ export type Audit = { id: string; at: string; actorId: string; action: string; m
 export type Moderation = { id: string; itemType: 'post' | 'comment' | 'message'; itemId: string; parentId: string; authorId: string; reporterId?: string; source: 'Filter' | 'User'; reason: string; excerpt: string; status: string; at: string; history: { at: string; actorId: string; decision: string; reason: string }[] }
 export type Database = {
   users: User[]; spaces: Space[]; organizations: Organization[]; posts: Post[]; threads: Thread[]; slots: Slot[]; consultations: Consultation[]; reports: Report[]; drafts: Record<string, Record<string, unknown>>; todos: { id: string; ownerId: string; title: string; date: string; done: boolean }[];
-  events: Event[]; cycles: Cycle[]; assignments: Assignment[]; restrictions: Restriction[]; referrals: Referral[]; strikes: Strike[]; strikeSettlements: StrikeSettlement[]; materials: Material[]; loadSchedules: LoadEntry[]; offenses: { id: string; studentId: string; level: number; summary: string; decisionReference: string; actorRole: string; at: string; status: string }[]; goodMoral: { studentId: string; status: string; decisionSource: string; notes: string; actorId: string; at: string }[]; clusters: { id: string; program: string; title: string; reportIds: string[]; similarity: number; supporting: string; dissenting: string; phrases: string[]; status: string; history: { at: string; actorId: string; decision: string; reason: string }[] }[]; notifications: Notification[]; audit: Audit[]; moderation: Moderation[]; settings: Record<string, { theme: string; density: string; priorities: Record<string, string> }>; permissionOverrides: Record<string, boolean>; telemetry: { id: string; at: string; category: string; durationMs: number; success: boolean }[]; followUps: { id: string; facultyId: string; actorId: string; note: string; at: string }[];
+  events: Event[]; cycles: Cycle[]; assignments: Assignment[]; restrictions: Restriction[]; referrals: Referral[]; strikes: Strike[]; strikeSettlements: StrikeSettlement[]; materials: Material[]; loadSchedules: LoadEntry[]; offenses: { id: string; studentId: string; level: number; summary: string; decisionReference: string; actorRole: string; at: string; status: string }[]; goodMoral: { studentId: string; status: string; decisionSource: string; notes: string; actorId: string; at: string }[]; clusters: { id: string; program: string; title: string; reportIds: string[]; similarity: number; supporting: string; dissenting: string; phrases: string[]; status: string; history: { at: string; actorId: string; decision: string; reason: string }[] }[]; notifications: Notification[]; audit: Audit[]; moderation: Moderation[]; photos: Record<string, string>; settings: Record<string, { theme: string; density: string; priorities: Record<string, string> }>; permissionOverrides: Record<string, boolean>; telemetry: { id: string; at: string; category: string; durationMs: number; success: boolean }[]; followUps: { id: string; facultyId: string; actorId: string; note: string; at: string }[];
 }
 /** What domain rules see while they run. They stay synchronous, so one unit of work is never interleaved with another. */
 export interface UnitOfWork { read(): Database; nextId(prefix: string): string }
@@ -119,7 +124,7 @@ export type Material = { id: string; spaceId: string; kind: 'link' | 'file'; tit
   url?: string
   /** A file's original name, type, size, storage key, and whether its upload was confirmed (src/material-storage.ts). */
   fileName?: string; contentType?: string; size?: number; key?: string; status?: 'pending' | 'ready' }
-export type Collection = 'reports' | 'consultations' | 'slots' | 'threads' | 'notifications' | 'audit' | 'posts' | 'moderation' | 'drafts' | 'events' | 'todos' | 'cycles' | 'assignments' | 'followUps' | 'restrictions' | 'referrals' | 'strikes' | 'strikeSettlements' | 'materials' | 'loadSchedules' | 'goodMoral' | 'clusters' | 'settings' | 'permissionOverrides' | 'telemetry'
+export type Collection = 'reports' | 'consultations' | 'slots' | 'threads' | 'notifications' | 'audit' | 'posts' | 'moderation' | 'drafts' | 'events' | 'todos' | 'cycles' | 'assignments' | 'followUps' | 'restrictions' | 'referrals' | 'strikes' | 'strikeSettlements' | 'materials' | 'loadSchedules' | 'goodMoral' | 'clusters' | 'settings' | 'photos' | 'permissionOverrides' | 'telemetry'
 /**
  * The storage boundary. A backend does its I/O around the work: it loads, runs the work, then commits.
  * - `view`: read-only. Anything the work changes is discarded, and what it returns is detached from the store.
@@ -250,7 +255,7 @@ export function seed(): Database {
     clusters: [{ id: 'CLUSTER-0101', program: 'BSIT', title: 'Lab schedule changes', reportIds: ['RPT-0241', 'RPT-0242', 'RPT-0243'], similarity: 86, supporting: 'Reports say students could not plan their lab work after the timetable changed.', dissenting: 'One report says a corrected notice was posted later.', phrases: ['lab timetable', 'schedule changes'], status: 'To review', history: [] }],
     notifications: users.map((u, index) => ({ id: `NOTIF-${index + 1}`, recipientId: u.id, kind: 'announcement', title: 'New college announcement', body: 'Open the feed to read it.', priority: 'normal', pageId: 'P04', at, read: false })),
     audit: [{ id: 'AUDIT-QCU-1', at, actorId: 'ACCS-ADMIN', action: 'Accounts loaded', module: 'identity', reference: 'QCU-ACCOUNTS', result: 'Recorded' }],
-    moderation: [{ id: 'MOD-0101', itemType: 'comment', itemId: 'COMMENT-0101', parentId: 'POST-0102', authorId: 'QCU-STU-IT-B', reporterId: 'QCU-STU-IT-A', source: 'User', reason: 'Reported by a classmate as off-topic', excerpt: 'Same problem in BSIT 3B. A posted lab schedule would help us plan.', status: 'Pending', at, history: [] }], settings: {}, permissionOverrides: {}, telemetry: [], followUps: [],
+    moderation: [{ id: 'MOD-0101', itemType: 'comment', itemId: 'COMMENT-0101', parentId: 'POST-0102', authorId: 'QCU-STU-IT-B', reporterId: 'QCU-STU-IT-A', source: 'User', reason: 'Reported by a classmate as off-topic', excerpt: 'Same problem in BSIT 3B. A posted lab schedule would help us plan.', status: 'Pending', at, history: [] }], settings: {}, photos: {}, permissionOverrides: {}, telemetry: [], followUps: [],
   }
 }
 /** The seeded accounts that sign in with the shared seed password until they set their own. Inactive ones (the secretary) never do. */

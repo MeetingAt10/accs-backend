@@ -13,12 +13,13 @@ import { hasPermission } from './access.js'
 import { devRouter, devToolboxEnabled, isDevToolboxCall, type Stack } from './dev.js'
 import { send } from './http.js'
 import { createRepository } from './persist.js'
-import { ApiError, completeMaterialUpload, getPage, materialDownloadUrl, performAction, refreshRestrictions, sessionView, startMaterialUpload, unavailable, type AccountChange, type AfterCommit, type ProfileChange } from './services.js'
+import { ApiError, completeMaterialUpload, getPage, materialDownloadUrl, performAction, refreshRestrictions, sessionView, startMaterialUpload, unavailable, type AccountChange, type AfterCommit, type ProfileChange, startMessageUpload, messageFileUrl } from './services.js'
 import { createS3MaterialStorage, type MaterialStorage } from './material-storage.js'
 import { createResetStore, resetPolicy, type ResetStore } from './resets.js'
 import { createThrottleStore, type ThrottleStore } from './throttle.js'
 import { createSessionStore, isWellFormedToken, newSessionToken, sessionIdOf, sessionPolicy, sessionState, type SessionStore } from './sessions.js'
 import { demoUserIds, isSampleAddress, type Repository } from './store.js'
+import { recordException, requestTelemetry } from './telemetry.js'
 import { currentAccountId, formerAccountIds } from './renames.js'
 
 export function createApp(repository:Repository=createRepository({nodeEnv:env.NODE_ENV,tableName}),options:{authStore?:AuthStore;sessionStore?:SessionStore;resetStore?:ResetStore;throttleStore?:ThrottleStore;mailer?:InviteMailer;resetMailer?:ResetCodeMailer;concernMailer?:NewConcernMailer;materialStorage?:MaterialStorage;stack?:Stack}={}){
@@ -31,7 +32,7 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   const throttle=options.throttleStore??createThrottleStore({nodeEnv:env.NODE_ENV,tableName:tableName('ccs_identity'),onLambda})
   // The deployed app and API sit on different domains, so the session cookie must be cross-site there.
   const cookieOptions={httpOnly:true,sameSite:env.NODE_ENV==='production'?'none' as const:'lax' as const,secure:env.NODE_ENV==='production',path:'/'}
-  app.use(helmet());app.use(cors({origin:env.CORS_ORIGIN,credentials:true}));app.use(express.json({limit:'128kb'}))
+  app.use(requestTelemetry);app.use(helmet());app.use(cors({origin:env.CORS_ORIGIN,credentials:true}));app.use(express.json({limit:'128kb'}))
   app.get(['/health','/api/health'],(_req,res)=>send(res,healthResponseSchema,{status:'ok'}))
   const cookieValue=(req:Request)=>req.headers.cookie?.split(';').map(part=>part.trim()).find(part=>part.startsWith('accs_session='))?.slice('accs_session='.length)
   // Resolves the session cookie to a live SESSION item, then to the account. Roles are read from the
@@ -193,7 +194,10 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   app.post('/api/materials/uploads',async(req,res)=>{send(res,actionResponseSchema,{ok:true,message:'Upload the file to the address given, then confirm it.',record:await startMaterialUpload(repository,res.locals.user as User,req.body,materialStorage)})})
   app.post('/api/materials/:id/complete',async(req,res)=>{emptyBodySchema.parse(req.body??{});send(res,actionResponseSchema,{ok:true,message:'Material added.',record:await completeMaterialUpload(repository,res.locals.user as User,materialId.parse(req.params.id),materialStorage)})})
   app.get('/api/materials/:id/file',async(req,res)=>{res.redirect(302,await materialDownloadUrl(repository,res.locals.user as User,materialId.parse(req.params.id),materialStorage))})
-  app.post('/api/pages/:pageId/actions',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const body=actionRequestSchema.parse(req.body);send(res,actionResponseSchema,await performAction(repository,res.locals.user as User,pageId,body,saveAccount,saveProfile,sendMail))})
+  // Files in Messages: a signed upload straight to S3; the message is checked against the stored file when it is sent.
+  app.post('/api/messages/uploads',async(req,res)=>{send(res,actionResponseSchema,{ok:true,message:'Upload the file to the address given, then send the message.',record:await startMessageUpload(res.locals.user as User,req.body,materialStorage)})})
+  app.get('/api/threads/:threadId/messages/:messageId/files/:fileId',async(req,res)=>{const url=await messageFileUrl(repository,res.locals.user as User,materialId.parse(req.params.threadId),materialId.parse(req.params.messageId),materialId.parse(req.params.fileId),req.query.inline==='1',materialStorage);if(req.query.format==='json'){send(res,actionResponseSchema,{ok:true,message:'File link ready.',record:{url}});return}res.redirect(302,url)})
+  app.post('/api/pages/:pageId/actions',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const body=actionRequestSchema.parse(req.body);send(res,actionResponseSchema,await performAction(repository,res.locals.user as User,pageId,body,saveAccount,saveProfile,sendMail,materialStorage))})
   // Invites go out by email when MAIL_FROM is set (#36); otherwise the screen shows them once.
   app.use('/api/accounts',accountRouter({repository,authStore,sessions,mailer:options.mailer??(env.MAIL_FROM?createSesInviteMailer(env.MAIL_FROM):unsentMailer)}))
   if(devToolbox)app.use('/api/dev',devRouter({repository,sessions,start:startSession,out:sessionOut}))
@@ -213,6 +217,7 @@ export const app=createApp()
  */
 export function logUnexpected(req: Request, error: unknown) {
   const err = error instanceof Error ? error : new Error(String(error))
+  recordException(err)
   console.error(JSON.stringify({
     level: 'error',
     msg: 'Unhandled error',
