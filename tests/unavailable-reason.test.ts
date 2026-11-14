@@ -55,7 +55,7 @@ describe('a reason for "not available"', () => {
     expect(((await student.get('/api/pages/P15?id=QCU-PROF-IT')).body.data.slots as { id: string }[]).map((s) => s.id)).not.toContain(id)
     expect(((await student.get('/api/pages/P13')).body.data.slots as { id: string }[]).map((s) => s.id)).not.toContain(id)
     // The Dean sees the time, without the reason.
-    const fromDean = ((await (await login('CCS-DEAN')).get('/api/pages/P13')).body.data.slots as { id: string; reason?: string }[]).find((s) => s.id === id)
+    const fromDean = ((await (await login('QCU-FAC-PAULA-DELACRUZ')).get('/api/pages/P13')).body.data.slots as { id: string; reason?: string }[]).find((s) => s.id === id)
     expect(fromDean).toMatchObject({ id, state: 'unavailable' })
     expect(fromDean).not.toHaveProperty('reason')
   })

@@ -60,7 +60,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
     it('starts inactive, so the secretary cannot sign in until the Dean activates the account', async () => {
       const { app } = setup()
       expect((await signIn(app, 'QCU-SECRETARY')).response.status).toBe(401)
-      const { agent: dean } = await signIn(app, 'CCS-DEAN')
+      const { agent: dean } = await signIn(app, 'QCU-FAC-PAULA-DELACRUZ')
       const types = await dean.get('/api/accounts/types')
       expect(types.status).toBe(200)
       expect(types.body.types.map((row: { type: string }) => row.type)).toEqual(['secretary', 'faculty', 'advisor', 'chair', 'student'])
@@ -73,7 +73,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
     it('returns temporary credentials once with an unsent invite, and stores only a hash', async () => {
       const log = vi.spyOn(console, 'log').mockImplementation(() => {})
       const { app, authStore } = setup()
-      const { agent: dean } = await signIn(app, 'CCS-DEAN')
+      const { agent: dean } = await signIn(app, 'QCU-FAC-PAULA-DELACRUZ')
       const response = await dean.post('/api/accounts/secretary/activate').send({})
       const { credentials, invite, account } = response.body.record
       expect(response.status).toBe(200)
@@ -94,7 +94,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       const log = vi.spyOn(console, 'log').mockImplementation(() => {})
       const invites: Invite[] = []
       const { app } = setup({ mailer: { send: async (invite) => { invites.push(invite); return { sent: true } } } })
-      const { agent: dean } = await signIn(app, 'CCS-DEAN')
+      const { agent: dean } = await signIn(app, 'QCU-FAC-PAULA-DELACRUZ')
       const response = await dean.post('/api/accounts/secretary/activate').set('Origin', 'http://localhost:5173').send({ name: 'Maria Santos', email: 'Maria.Santos@Gmail.com' })
       expect(response.body.record.invite).toEqual({ sent: true, signInUrl: 'http://localhost:5173/sign-in' })
       expect(response.body.record.account).toMatchObject({ name: 'Maria Santos', email: 'maria.santos@gmail.com' })
@@ -111,7 +111,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
 
     it('refuses an email that another account already uses', async () => {
       const { app } = setup()
-      const { agent: dean } = await signIn(app, 'CCS-DEAN')
+      const { agent: dean } = await signIn(app, 'QCU-FAC-PAULA-DELACRUZ')
       const response = await dean.post('/api/accounts/secretary/activate').send({ email: 'dean@access-ccs.com' })
       expect(response.status).toBe(409)
       expect(response.body.code).toBe('CONFLICT')
@@ -189,7 +189,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       expect(permissions).toContain('account.provision')
       expect(permissions).not.toContain('account.activateSecretary')
       expect(permissions).not.toContain('role.manage')
-      expect((await signIn(app, 'CCS-DEAN')).response.body.permissions).toContain('account.activateSecretary')
+      expect((await signIn(app, 'QCU-FAC-PAULA-DELACRUZ')).response.body.permissions).toContain('account.activateSecretary')
     })
   })
 
@@ -225,7 +225,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
 
     it('keeps the Dean to the account types and the secretary, and the secretary to everything else', async () => {
       const { app } = setup()
-      const { agent: dean } = await signIn(app, 'CCS-DEAN')
+      const { agent: dean } = await signIn(app, 'QCU-FAC-PAULA-DELACRUZ')
       const deanRoutes = ['/api/accounts/types', '/api/accounts/secretary/activate']
       for (const [method, path, body] of routes.filter(([, path]) => !deanRoutes.includes(path))) expect((await dean[method](path).send(body)).status, path).toBe(403)
       const secretary = await secretarySession(app)
@@ -254,7 +254,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       const secretary = await secretarySession(app)
       const own = await secretary.post('/api/accounts/QCU-SECRETARY/active').send({ active: false })
       expect([own.status, own.body]).toEqual([403, { error: "You can't deactivate your own account.", code: 'FORBIDDEN' }])
-      const { agent: dean } = await signIn(app, 'CCS-DEAN')
+      const { agent: dean } = await signIn(app, 'QCU-FAC-PAULA-DELACRUZ')
       expect((await dean.post('/api/accounts/CCS-DEAN/active').send({ active: false })).status).toBe(403)
       expect((await secretary.get('/api/session')).status).toBe(200)
     })
@@ -262,10 +262,10 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
     it('keeps the secretary to students, faculty, and chairs, and the secretary account to the Dean', async () => {
       const { app } = setup()
       const secretary = await secretarySession(app)
-      for (const id of ['CCS-DEAN', 'ACCS-ADMIN', 'QCU-GUIDANCE', 'QCU-OSAS', 'QCU-ORG']) {
+      for (const id of ['QCU-FAC-PAULA-DELACRUZ', 'ACCS-ADMIN', 'QCU-GUIDANCE', 'QCU-OSAS', 'QCU-ORG']) {
         expect((await secretary.post(`/api/accounts/${id}/active`).send({ active: false })).status, id).toBe(403)
       }
-      expect((await signIn(app, 'CCS-DEAN')).response.status).toBe(200)
+      expect((await signIn(app, 'QCU-FAC-PAULA-DELACRUZ')).response.status).toBe(200)
       expect((await secretary.post('/api/accounts/NOPE/active').send({ active: false })).status).toBe(404)
       expect((await secretary.post('/api/accounts/QCU-PROF-OTHER/active').send({})).status).toBe(400)
       // A seeded faculty member and a chair-only account are the secretary's to switch.
@@ -276,7 +276,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
     it('lets the Dean switch the secretary off and on, keeping the secretary own details', async () => {
       const { app } = setup()
       const secretary = await secretarySession(app)
-      const { agent: dean } = await signIn(app, 'CCS-DEAN')
+      const { agent: dean } = await signIn(app, 'QCU-FAC-PAULA-DELACRUZ')
       expect((await dean.post('/api/accounts/QCU-SECRETARY/active').send({ active: false })).status).toBe(200)
       expect((await secretary.get('/api/session')).status).toBe(401)
       expect((await signIn(app, 'ccs.secretary', secretaryPassword)).response.status).toBe(401)
@@ -353,7 +353,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       const bscs = (await secretary.get('/api/accounts/faculty').query({ program: 'BSCS' })).body.faculty as { program: string }[]
       expect(bscs.length).toBeGreaterThan(0)
       expect(bscs.every((row) => row.program === 'BSCS')).toBe(true)
-      expect((await secretary.get('/api/accounts/faculty').query({ q: 'ROBIN' })).body.faculty.map((row: { id: string }) => row.id)).toEqual(['QCU-PROF-IT'])
+      expect((await secretary.get('/api/accounts/faculty').query({ q: 'CHARLIE' })).body.faculty.map((row: { id: string }) => row.id)).toEqual(['QCU-PROF-IT'])
       expect((await secretary.get('/api/accounts/faculty').query({ program: 'MBA' })).status).toBe(400)
     })
   })
@@ -435,7 +435,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       expect(students.body.accounts.every((account: { roles: string[] }) => account.roles.includes('student'))).toBe(true)
       expect(JSON.stringify(students.body)).not.toMatch(/scrypt|username|password/i)
       expect((await secretary.get('/api/accounts').query({ q: '26-1002' })).body.accounts.map((a: { email: string }) => a.email)).toEqual(['student.2@gmail.com'])
-      expect((await secretary.get('/api/accounts').query({ q: 'mira' })).body.accounts.map((a: { id: string }) => a.id)).toEqual(['QCU-STU-IT-A'])
+      expect((await secretary.get('/api/accounts').query({ q: 'foxtrot' })).body.accounts.map((a: { id: string }) => a.id)).toEqual(['QCU-STU-IT-A'])
       expect((await secretary.get('/api/accounts').query({ role: 'wizard' })).status).toBe(400)
     })
   })
@@ -631,7 +631,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       await secretary.post(`/api/accounts/${pupil!.account.id}/active`).send({ active: true })
       const audit = (await peek(repository, (db) => db.audit)).slice(1)
       expect(audit.map((entry) => [entry.actorId, entry.action, entry.reference, entry.module])).toEqual([
-        ['CCS-DEAN', 'Secretary account activated', 'QCU-SECRETARY', 'identity'],
+        ['QCU-FAC-PAULA-DELACRUZ', 'Secretary account activated', 'QCU-SECRETARY', 'identity'],
         ['QCU-SECRETARY', 'Sign-in details set', 'QCU-SECRETARY', 'identity'],
         ['QCU-SECRETARY', 'Faculty account created', prof!.account.id, 'identity'],
         ['QCU-SECRETARY', 'Student account created', pupil!.account.id, 'identity'],
@@ -666,7 +666,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
     it('keeps decision codes and approval notes out of the account messages', async () => {
       const { app } = setup()
       const secretary = await secretarySession(app)
-      const { agent: dean } = await signIn(app, 'CCS-DEAN')
+      const { agent: dean } = await signIn(app, 'QCU-FAC-PAULA-DELACRUZ')
       const texts: string[] = []
       const keep = (response: request.Response) => { texts.push(String(response.body.message ?? response.body.error)); for (const row of response.body.record?.results ?? []) texts.push(String(row.error ?? '')) }
       keep(await dean.post('/api/accounts/secretary/activate').send({}))

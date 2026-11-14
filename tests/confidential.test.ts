@@ -29,7 +29,7 @@ const report = (id: string) => repo.read().reports.find((r) => r.id === id)!
 
 describe('the confidential mark (issue #31)', () => {
   it('limits the Program Chair and the Dean to the status, and keeps the details from them', async () => {
-    const [student, adviser, chair, dean] = await Promise.all(['QCU-STU-CS', 'QCU-PROF-CS', 'QCU-CHAIR-CS', 'CCS-DEAN'].map(login))
+    const [student, adviser, chair, dean] = await Promise.all(['QCU-STU-CS', 'QCU-PROF-CS', 'QCU-CHAIR-CS', 'QCU-FAC-PAULA-DELACRUZ'].map(login))
     const id = await file(student!)
     await student!.post('/api/pages/P20/actions').send({ action: 'chooseTalkMode', payload: { reportId: id, mode: 'chat', consent: { participate: true } } })
     await adviser!.post('/api/pages/P22/actions').send({ action: 'sendReportMessage', recordId: id, payload: { body: 'I am here to help.' } })
@@ -40,7 +40,7 @@ describe('the confidential mark (issue #31)', () => {
       expect(seen).toMatchObject({ id, statusOnly: true, confidential: true, status: 'With Adviser', office: 'Adviser' })
       expect(seen.timeline.map((entry: { action: string }) => entry.action)).toEqual(['Submitted', 'Marked confidential'])
       const text = JSON.stringify(seen)
-      for (const secret of [statement.narrative, 'Noa Vale', 'I am here to help.', 'The student asked']) expect(text).not.toContain(secret)
+      for (const secret of [statement.narrative, 'Demo Student Hotel', 'I am here to help.', 'The student asked']) expect(text).not.toContain(secret)
       expect(seen).not.toHaveProperty('narrative')
       expect(seen).not.toHaveProperty('reporter')
       expect(seen).not.toHaveProperty('messages')
@@ -94,7 +94,7 @@ describe('the confidential mark (issue #31)', () => {
   })
 
   it('can be set only by the adviser, only while the concern is with them, and never on a concern about the adviser', async () => {
-    const [student, adviser, chair, dean] = await Promise.all(['QCU-STU-CS', 'QCU-PROF-CS', 'QCU-CHAIR-CS', 'CCS-DEAN'].map(login))
+    const [student, adviser, chair, dean] = await Promise.all(['QCU-STU-CS', 'QCU-PROF-CS', 'QCU-CHAIR-CS', 'QCU-FAC-PAULA-DELACRUZ'].map(login))
     const id = await file(student!)
     expect((await mark(chair!, id, true)).status).toBe(404)
     expect((await mark(dean!, id, true)).status).toBe(404)
@@ -111,20 +111,20 @@ describe('the confidential mark (issue #31)', () => {
 
 describe('what readers who are not handling the concern see (issue #31)', () => {
   it('shows the chair and the Dean an alias when the student shared their name with the adviser only', async () => {
-    const [student, chair, dean] = await Promise.all(['QCU-STU-CS', 'QCU-CHAIR-CS', 'CCS-DEAN'].map(login))
+    const [student, chair, dean] = await Promise.all(['QCU-STU-CS', 'QCU-CHAIR-CS', 'QCU-FAC-PAULA-DELACRUZ'].map(login))
     const id = await file(student!, { identity: 'anonymous' })
     expect((await student!.post('/api/pages/P20/actions').send({ action: 'discloseIdentity', recordId: id, payload: {} })).status).toBe(200)
     expect(report(id).disclosedTo).toEqual(['adviser'])
-    expect((await view(await login('QCU-PROF-CS'), id)).reporter).toMatchObject({ name: 'Noa Vale' })
+    expect((await view(await login('QCU-PROF-CS'), id)).reporter).toMatchObject({ name: 'Demo Student Hotel' })
     for (const overseer of [chair!, dean!]) {
       const seen = await view(overseer, id)
       expect(seen.reporter).toMatchObject({ anonymous: true })
-      expect(JSON.stringify(seen)).not.toContain('Noa Vale')
+      expect(JSON.stringify(seen)).not.toContain('Demo Student Hotel')
     }
   })
 
   it('shows an office that handled the case earlier its status, not the statement (issue #30)', async () => {
-    const [dean, guidance] = await Promise.all(['CCS-DEAN', 'QCU-GUIDANCE'].map(login))
+    const [dean, guidance] = await Promise.all(['QCU-FAC-PAULA-DELACRUZ', 'QCU-GUIDANCE'].map(login))
     const act = (agent: Agent, type: string) => agent.post('/api/pages/P22/actions').send({ action: 'caseAction', recordId: 'RPT-0243', reason: 'Next step', payload: { type, update: 'Moved on.' } })
     expect((await act(dean!, 'transfer')).status).toBe(200)
     expect((await act(guidance!, 'convert')).status).toBe(200)

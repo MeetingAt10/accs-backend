@@ -95,13 +95,13 @@ describe('uploading a class material file', () => {
 
   it('is for the subject\'s professors only, and is downloaded only by its professors and students', async () => {
     expect((await start(await login('QCU-STU-IT-A'))).status).toBe(403)
-    expect((await start(await login('CCS-DEAN'))).status).toBe(403)
+    expect((await start(await login('QCU-FAC-PAULA-DELACRUZ'))).status).toBe(403)
     expect((await start(await login('QCU-PROF-OTHER'))).status).toBe(404)
     expect((await start(await login('QCU-PROF-IT'), { spaceId: 'SPACE-IT-A' })).status).toBe(404)
     const id = await uploaded(await login('QCU-PROF-IT'))
     expect((await (await login('QCU-STU-IT-A')).get(`/api/materials/${id}/file`).redirects(0)).status).toBe(302)
     expect((await (await login('QCU-CHAIR-IT')).get(`/api/materials/${id}/file`).redirects(0)).status).toBe(302)
-    for (const other of ['QCU-STU-IT-B', 'QCU-PROF-OTHER', 'CCS-DEAN']) expect([other, (await (await login(other)).get(`/api/materials/${id}/file`)).status]).toEqual([other, 404])
+    for (const other of ['QCU-STU-IT-B', 'QCU-PROF-OTHER', 'QCU-FAC-PAULA-DELACRUZ']) expect([other, (await (await login(other)).get(`/api/materials/${id}/file`)).status]).toEqual([other, 404])
     // Only the subject's professors confirm an upload.
     const { material } = (await start(await login('QCU-PROF-IT'))).body.record
     expect((await complete(await login('QCU-STU-IT-A'), material.id)).status).toBe(403)

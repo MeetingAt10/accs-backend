@@ -38,7 +38,7 @@ describe('the section space', () => {
       )
     })
     // BATIT1A gets the Batasan 1st-year subject, not San Bartolome's SBIT1A one.
-    expect((await space(await login('CCS-DEAN'), 'SPACE-BAT-1A')).body.data.record.subjects.map((x: { id: string }) => x.id)).toEqual(['SUBJECT-BAT-1A'])
+    expect((await space(await login('QCU-FAC-PAULA-DELACRUZ'), 'SPACE-BAT-1A')).body.data.record.subjects.map((x: { id: string }) => x.id)).toEqual(['SUBJECT-BAT-1A'])
     const record = (await space(await login('QCU-STU-IT-A'), 'SPACE-IT-A')).body.data.record
     expect(record.subjects).toEqual([expect.objectContaining({ id: 'SUBJECT-IT-DS', subject: 'CC 104 Data Structures', professors: [expect.objectContaining({ id: 'QCU-PROF-IT' }), expect.objectContaining({ id: 'QCU-CHAIR-IT' })] })])
     // A subject space lists no subjects of its own.
@@ -67,16 +67,16 @@ describe('class materials', () => {
     expect((await space(await login('QCU-STU-IT-B'), 'SUBJECT-IT-DS')).status).toBe(404)
     expect((await space(await login('QCU-PROF-OTHER'), 'SUBJECT-IT-DS')).status).toBe(404)
     // The Dean can open the space, but not its materials.
-    const fromDean = (await space(await login('CCS-DEAN'), 'SUBJECT-IT-DS')).body.data.record
+    const fromDean = (await space(await login('QCU-FAC-PAULA-DELACRUZ'), 'SUBJECT-IT-DS')).body.data.record
     expect(fromDean.materials).toBeUndefined()
-    expect((await space(await login('CCS-DEAN'), 'SPACE-IT-A')).body.data.record.subjects[0].materials).toBeUndefined()
+    expect((await space(await login('QCU-FAC-PAULA-DELACRUZ'), 'SPACE-IT-A')).body.data.record.subjects[0].materials).toBeUndefined()
   })
 
   it('lets only the subject\'s professors add, change or remove materials', async () => {
     const professor = await login('QCU-PROF-IT')
     const id = (await add(professor)).body.record.id as string
     expect((await add(await login('QCU-STU-IT-A'))).status).toBe(403)
-    expect((await add(await login('CCS-DEAN'))).status).toBe(403)
+    expect((await add(await login('QCU-FAC-PAULA-DELACRUZ'))).status).toBe(403)
     expect((await add(await login('QCU-PROF-OTHER'))).status).toBe(404)
     // Materials belong to a subject, not to the section space.
     expect((await add(professor, { spaceId: 'SPACE-IT-A' })).status).toBe(404)

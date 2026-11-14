@@ -109,7 +109,7 @@ const writes: { collection: string; table: string; step: Step }[] = [
   { collection: 'posts', table: 'ccs_community', step: { as: 'QCU-STU-IT-A', page: 'P05', action: 'createPost', payload: post } },
   { collection: 'moderation', table: 'ccs_moderation', step: { as: 'QCU-STU-IT-A', page: 'P06', action: 'flag', recordId: 'POST-0101', payload: { reason: 'Off topic' } } },
   { collection: 'todos', table: 'ccs_scheduling', step: { as: 'QCU-STU-IT-A', page: 'P13', action: 'createTodo', payload: { title: 'Stored', date: '2026-11-05' } } },
-  { collection: 'cycles', table: 'ccs_evaluation', step: { as: 'CCS-DEAN', page: 'P30', action: 'createCycle', payload: { title: 'Stored cycle', term: 'Term', opens: '2027-01-01', closes: '2027-03-01' } } },
+  { collection: 'cycles', table: 'ccs_evaluation', step: { as: 'QCU-FAC-PAULA-DELACRUZ', page: 'P30', action: 'createCycle', payload: { title: 'Stored cycle', term: 'Term', opens: '2027-01-01', closes: '2027-03-01' } } },
   { collection: 'followUps', table: 'ccs_evaluation', step: { as: 'QCU-CHAIR-IT', page: 'P29', action: 'saveFollowUp', recordId: 'QCU-PROF-IT', payload: { note: 'Discussed' } } },
   { collection: 'restrictions', table: 'ccs_discipline', step: { as: 'ACCS-ADMIN', page: 'P35', action: 'applyRestriction', reason: 'Approved', payload: { studentId: 'QCU-STU-IT-A', features: ['post.create'], basis: 'Approved review', decisionReference: 'QCU-DEC-002', until: '2099-01-01' } } },
   { collection: 'referrals', table: 'ccs_discipline', step: { as: 'QCU-GUIDANCE', page: 'P35', action: 'referRestriction', reason: 'Review the status', payload: { studentId: 'QCU-STU-IT-A', change: 'Review' } } },
@@ -138,7 +138,7 @@ describe('a route writes through one instance', () => {
 
   it('stores an announcement event in ccs_scheduling', async () => {
     const { store, cold, instance } = stack()
-    const { agent } = await signIn(instance(), 'CCS-DEAN')
+    const { agent } = await signIn(instance(), 'QCU-FAC-PAULA-DELACRUZ')
     const response = await agent.post('/api/pages/P05/actions').send({ action: 'createPost', payload: { title: 'Open house', body: 'Details.', audience: 'college', kind: 'announcement', eventDate: '2027-01-15', eventTime: '09:00', eventPlace: 'IC 301' } })
     expect(response.status, JSON.stringify(response.body)).toBe(200)
     expect(store.all().filter((item) => item.collection === 'events').map((item) => item.table)).toEqual(['ccs_scheduling'])
@@ -147,7 +147,7 @@ describe('a route writes through one instance', () => {
 
   it('stores generated assignments in ccs_evaluation when a cycle moves to review', async () => {
     const { store, instance } = stack()
-    const { agent: dean } = await signIn(instance(), 'CCS-DEAN')
+    const { agent: dean } = await signIn(instance(), 'QCU-FAC-PAULA-DELACRUZ')
     const dates = { opens: '2027-01-01', closes: '2027-03-01' }
     const created = await dean.post('/api/pages/P30/actions').send({ action: 'createCycle', payload: { title: 'Stored cycle', term: 'Term', ...dates } })
     const id = created.body.record.id as string
@@ -223,7 +223,7 @@ describe('the record repository behaves like memory', () => {
   beforeAll(() => { vi.spyOn(console, 'log').mockImplementation(() => {}) })
   afterAll(() => vi.restoreAllMocks())
 
-  const accounts = ['QCU-STU-IT-A', 'QCU-ORG', 'QCU-PROF-IT', 'QCU-CHAIR-IT', 'CCS-DEAN', 'ACCS-ADMIN', 'QCU-GUIDANCE', 'QCU-OSAS']
+  const accounts = ['QCU-STU-IT-A', 'QCU-ORG', 'QCU-PROF-IT', 'QCU-CHAIR-IT', 'QCU-FAC-PAULA-DELACRUZ', 'ACCS-ADMIN', 'QCU-GUIDANCE', 'QCU-OSAS']
   const pageIds = Array.from({ length: 50 }, (_, n) => `P${String(n + 3).padStart(2, '0')}`)
 
   it.each(accounts)('%s gets the same status on every page', async (id) => {

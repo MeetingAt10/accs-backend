@@ -31,7 +31,7 @@ const move = (dean: Agent, id: string, status: string) => dean.post('/api/pages/
 
 describe('evaluation cycles use the student form only', () => {
   it('creates and saves cycles with the student form, and refuses any other form', async () => {
-    const dean = await login('CCS-DEAN')
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
     const cycle = await draft(dean)
     expect(cycle.forms).toEqual(['student'])
     for (const forms of [['peer'], ['student', 'peer'], ['upward-chair'], ['upward-dean'], []]) {
@@ -46,12 +46,12 @@ describe('evaluation cycles use the student form only', () => {
 
   it('turns a stored draft with old forms into a student-form cycle when it is saved', async () => {
     await repo.transact((unit) => { unit.read().cycles.find((c) => c.id === 'CYCLE-2026-2')!.forms = ['student', 'peer'] })
-    const saved = await save(await login('CCS-DEAN'), 'CYCLE-2026-2')
+    const saved = await save(await login('QCU-FAC-PAULA-DELACRUZ'), 'CYCLE-2026-2')
     expect([saved.status, saved.body.record.forms]).toEqual([200, ['student']])
   })
 
   it('assigns each student every professor of their class spaces, and nothing to faculty', async () => {
-    const dean = await login('CCS-DEAN')
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
     const { id } = await draft(dean)
     await save(dean, id)
     expect((await move(dean, id, 'In review')).status).toBe(200)

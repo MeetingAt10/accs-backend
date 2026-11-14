@@ -23,7 +23,7 @@ describe('evaluation read models', () => {
   }
 
   it('DEAN-03-V returns faculty completion and review status for the cycle editor', async () => {
-    const dean = await login('CCS-DEAN')
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
     const response = await dean.get('/api/pages/P31?id=CYCLE-2026-2')
 
     expect(response.status).toBe(200)

@@ -66,7 +66,7 @@ describe("a student's own completion", () => {
 
 describe('the clearance list (P53)', () => {
   it('lists every active student for the Dean, OSAS and the Secretary, with the current cycle by default', async () => {
-    for (const agent of [await login('CCS-DEAN'), await login('QCU-OSAS'), await secretarySession(app)]) {
+    for (const agent of [await login('QCU-FAC-PAULA-DELACRUZ'), await login('QCU-OSAS'), await secretarySession(app)]) {
       const data = await list(agent)
       expect(ids(data.students)).toEqual(students())
       expect(data.cycle.id).toBe('CYCLE-2026-1')
@@ -85,11 +85,11 @@ describe('the clearance list (P53)', () => {
   })
 
   it('filters by program, year, section, status and name, and counts each status', async () => {
-    const dean = await login('CCS-DEAN')
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
     await submit(await login('QCU-STU-IT-A'), 'EVAL-STU-IT-1')
     expect(ids((await list(dean, '?program=BSCS')).students)).toEqual(['QCU-STU-CS'])
     expect(ids((await list(dean, '?program=BSIT&year=3&section=B')).students)).toEqual(['QCU-STU-IT-B'])
-    expect(ids((await list(dean, '?q=Mira')).students)).toEqual(['QCU-STU-IT-A'])
+    expect(ids((await list(dean, '?q=Foxtrot')).students)).toEqual(['QCU-STU-IT-A'])
     expect(ids((await list(dean, '?status=submitted')).students)).toEqual(['QCU-STU-IT-A'])
     const unfinished = await list(dean, '?status=pending,missing')
     expect(ids(unfinished.students)).not.toContain('QCU-STU-IT-A')
@@ -105,17 +105,17 @@ describe('the clearance list (P53)', () => {
 
   it('leaves out deactivated students', async () => {
     await repo.transact((unit) => { unit.read().users.find((u) => u.id === 'QCU-STU-IT-B')!.active = false })
-    expect(ids((await list(await login('CCS-DEAN'))).students)).not.toContain('QCU-STU-IT-B')
+    expect(ids((await list(await login('QCU-FAC-PAULA-DELACRUZ'))).students)).not.toContain('QCU-STU-IT-B')
   })
 
   it('shows "nothing to evaluate" for a student with no professors in the cycle', async () => {
     await repo.transact((unit) => { const db = unit.read(); db.assignments = db.assignments.filter((a) => a.evaluatorId !== 'QCU-STU-CS') })
-    const row = (await list(await login('CCS-DEAN'), '?program=BSCS')).students[0]!
+    const row = (await list(await login('QCU-FAC-PAULA-DELACRUZ'), '?program=BSCS')).students[0]!
     expect(row.evaluation).toMatchObject({ status: 'none', label: 'Nothing to evaluate', total: 0 })
   })
 
   it('opens a chosen published or closed cycle, but not a draft or one in review', async () => {
-    const dean = await login('CCS-DEAN')
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
     expect((await list(dean, '?cycle=CYCLE-2026-1')).cycle.id).toBe('CYCLE-2026-1')
     expect((await dean.get('/api/pages/P53?cycle=CYCLE-2026-2')).status).toBe(404)
     expect((await dean.get('/api/pages/P53?cycle=CYCLE-NOPE')).status).toBe(404)

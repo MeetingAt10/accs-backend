@@ -61,7 +61,7 @@ describe('the new-concern email', () => {
 
   it('never goes to an adviser the concern names', async () => {
     const adviser = repo.read().users.find((u) => u.id === 'QCU-PROF-IT')!
-    await file({ narrative: `${adviser.name} keeps making remarks about me in class.` })
+    await file({ narrative: `Si ${adviser.name} laging absent sa class namin.` })
     expect(sent.map((m) => m.userId)).toEqual(['QCU-CHAIR-IT'])
     sent = []
     await file({ involvedUserIds: ['QCU-PROF-IT'] })

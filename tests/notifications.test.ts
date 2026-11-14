@@ -123,7 +123,7 @@ describe('case and evaluation updates are required', () => {
   })
 
   it('lists only the required categories an account has', async () => {
-    expect((await (await login('CCS-DEAN')).get('/api/pages/P44')).body.data.requiredCategories).toEqual(['report', 'case', 'evaluation'])
+    expect((await (await login('QCU-FAC-PAULA-DELACRUZ')).get('/api/pages/P44')).body.data.requiredCategories).toEqual(['report', 'case', 'evaluation'])
     expect((await (await login('QCU-GUIDANCE')).get('/api/pages/P44')).body.data.requiredCategories).toEqual(['report', 'case'])
   })
 
@@ -138,7 +138,7 @@ describe('case and evaluation updates are required', () => {
 
   it('delivers an evaluation update even when a mute was saved earlier', async () => {
     repo.read().settings[member] = { theme: 'system', density: 'comfortable', priorities: { evaluation: 'muted' } }
-    const dean = await login('CCS-DEAN')
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
     const before = noticesFor(member, 'evaluation').length
     const published = await dean.post('/api/pages/P31/actions').send({ action: 'cycleAction', recordId: 'CYCLE-2026-2', payload: { status: 'Published' } })
     expect(published.status, JSON.stringify(published.body)).toBe(200)

@@ -16,9 +16,9 @@ describe('CCS personnel seed', () => {
     expect(withRoster.users).toHaveLength(base.users.length + 58)
     const count = (role: string) => accounts.filter((u) => u.roles.includes(role as never)).length
     expect([count('professor'), count('staff'), count('secretary')]).toEqual([50, 7, 1])
-    expect(accounts.every((u) => u.roles.length === 1)).toBe(true)
+    expect(accounts.filter((u) => u.roles.length !== 1).map((u) => u.id)).toEqual(['QCU-FAC-PAULA-DELACRUZ'])
     expect(accounts.find((u) => u.roles[0] === 'secretary')).toMatchObject({ id: 'QCU-SECRETARY-MARICRIS-FERNANDEZ', email: 'maricris.fernandez@access-ccs.com', title: 'CCS secretary', office: 'CCS Office' })
-    expect(accounts.find((u) => u.id === 'QCU-FAC-PAULA-DELACRUZ')).toMatchObject({ program: 'BSIS', title: 'Faculty (Plantilla), BSIS', office: 'CCS Faculty Room' })
+    expect(accounts.find((u) => u.id === 'QCU-FAC-PAULA-DELACRUZ')).toMatchObject({ name: 'Dr. Paula Joy L. Dela Cruz', roles: ['dean', 'professor'], title: 'Dean, College of Computer Studies', office: 'CCS Dean\'s Office' })
     expect(accounts.find((u) => u.id === 'QCU-FAC-MANUEL-LOSANES')).toMatchObject({ name: 'Manuel L. Los Añes Jr.', email: 'manuel.losanes@access-ccs.com', title: 'Faculty (COS full-time), BSIT' })
     expect(accounts.find((u) => u.id === 'QCU-STAFF-KEVIN-GARCIA')).toMatchObject({ roles: ['staff'], title: 'Administrative personnel', office: 'CCS Office' })
     expect(accounts.find((u) => u.id === 'QCU-FAC-JOHN-GARCIA')?.email).toBe('john.garcia@access-ccs.com')
@@ -37,6 +37,22 @@ describe('CCS personnel seed', () => {
     }
     expect(withRoster.users.some((u) => u.adviserId && rosterIds.has(u.adviserId))).toBe(false)
     expect(withRoster.spaces.some((s) => s.professorIds.some((id) => rosterIds.has(id)))).toBe(false)
+  })
+
+  it('has no demo account under its old name and only generic Demo names', () => {
+    const old = ['Mira Solis', 'Luca Reed', 'Noa Vale', 'Tess Finch', 'Rina Cole', 'Robin Elm', 'Rowan Quill', 'Sena Brook', 'Morgan Ash', 'Ellis Wren', 'Sage Linden', 'Casey Hart', 'Alex Fern', 'Jamie Alder']
+    for (const db of [base, withRoster]) {
+      const demo = db.users.filter((u) => !rosterIds.has(u.id))
+      expect(demo.filter((u) => old.some((n) => u.name.includes(n)))).toEqual([])
+      expect(demo.filter((u) => u.id !== 'QCU-SECRETARY' && !u.name.startsWith('Demo ')).map((u) => u.id)).toEqual([])
+    }
+  })
+
+  it('has Dr. Paula as the one active Dean with the roster, and the demo Dean on production', () => {
+    const active = (db: typeof base) => db.users.filter((u) => u.active && u.roles.includes('dean')).map((u) => u.id)
+    expect(active(withRoster)).toEqual(['QCU-FAC-PAULA-DELACRUZ'])
+    expect(withRoster.users.find((u) => u.id === 'CCS-DEAN')).toMatchObject({ active: false, roles: ['dean'] })
+    expect(active(base)).toEqual(['CCS-DEAN'])
   })
 
   it('leaves out the roster with includeRoster false (the production stack)', () => {

@@ -85,7 +85,7 @@ describe('API over the repository boundary', () => {
 
   it('commits the audit entry written while a student record is read', async () => {
     const app = createApp(repo, { authStore: createMemoryAuthStore() })
-    const dean = await signIn(app, 'CCS-DEAN')
+    const dean = await signIn(app, 'QCU-FAC-PAULA-DELACRUZ')
     const response = await dean.get('/api/pages/P34?id=QCU-STU-RESTRICTED&purpose=Case%20handling')
     expect(response.status).toBe(200)
     expect(repo.read().audit.filter(entry => entry.action === 'Record opened' && entry.purpose === 'Case handling')).toHaveLength(1)

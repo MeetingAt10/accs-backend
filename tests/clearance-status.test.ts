@@ -38,7 +38,7 @@ const own = async (id: string) => (await (await login(id)).get('/api/pages/P36')
 
 describe('the clearance status', () => {
   it('is clear by default, and an open cycle blocks no one', async () => {
-    const dean = await login('CCS-DEAN')
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
     const data = await rows(dean)
     expect(data.students.every((r) => r.clearance.status === 'clear' && r.clearance.label === 'Clear' && r.clearance.reasons.length === 0)).toBe(true)
     expect(data.clearanceSummary).toEqual({ clear: data.students.length, onHold: 0 })
@@ -48,7 +48,7 @@ describe('the clearance status', () => {
   it('holds a student who did not finish the current cycle once it closes', async () => {
     await submit(await login('QCU-STU-IT-A'), 'EVAL-STU-IT-1')
     await setCycle('Closed')
-    const dean = await login('CCS-DEAN')
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
     expect(await of(dean, 'QCU-STU-IT-A')).toMatchObject({ status: 'clear' })
     expect(await of(dean, 'QCU-STU-IT-B')).toEqual({ status: 'on_hold', label: 'On hold', reasons: [{ kind: 'evaluation', message: 'Evaluations not finished for 1st Semester AY 2026-2027', cycleId: 'CYCLE-2026-1' }] })
     expect((await own('QCU-STU-IT-B')).status).toBe('on_hold')
@@ -64,17 +64,17 @@ describe('the clearance status', () => {
       db.cycles.push({ ...structuredClone(db.cycles[0]!), id: 'CYCLE-2027-1', title: 'Next term', opens: '2027-06-01', closes: '2027-07-01', status: 'Published' })
     })
     // The older closed cycle was missed, but the current one is still open.
-    expect((await of(await login('CCS-DEAN'), 'QCU-STU-IT-B')).status).toBe('clear')
+    expect((await of(await login('QCU-FAC-PAULA-DELACRUZ'), 'QCU-STU-IT-B')).status).toBe('clear')
     await setCycle('Closed', 'CYCLE-2027-1')
     // QCU-STU-IT-B has nothing to evaluate in the new cycle, so it holds no one.
-    expect((await of(await login('CCS-DEAN'), 'QCU-STU-IT-B')).status).toBe('clear')
+    expect((await of(await login('QCU-FAC-PAULA-DELACRUZ'), 'QCU-STU-IT-B')).status).toBe('clear')
   })
 
   it('holds a student with unsettled strikes until OSAS settles them, and ignores pending ones', async () => {
     await addStrikes('QCU-STU-CS', 2)
     await addStrikes('QCU-STU-CS', 2, 'recommended')
     await addStrikes('QCU-STU-CS', 1, 'rejected')
-    const dean = await login('CCS-DEAN')
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
     expect((await of(dean, 'QCU-STU-CS')).status).toBe('clear')
     await addStrikes('QCU-STU-CS', 1, 'confirmed')
     expect(await of(dean, 'QCU-STU-CS')).toEqual({ status: 'on_hold', label: 'On hold', reasons: [{ kind: 'strikes', message: 'Strikes not settled with OSAS', unsettledStrikes: 3 }] })
@@ -98,7 +98,7 @@ describe('the clearance status', () => {
   it('filters the list by clearance and counts each, within the Program Chair\'s program', async () => {
     expect((await submit(await login('QCU-STU-IT-A'), 'EVAL-STU-IT-1')).status).toBe(200)
     await setCycle('Closed')
-    const dean = await login('CCS-DEAN')
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
     const onHold = await rows(dean, '?clearance=on_hold')
     expect(onHold.students.map((r) => r.student.id)).not.toContain('QCU-STU-IT-A')
     expect(onHold.students.every((r) => r.clearance.status === 'on_hold')).toBe(true)
@@ -112,7 +112,7 @@ describe('the clearance status', () => {
 
   it('shows on the student record for the offices that may open it', async () => {
     await addStrikes('QCU-STU-CS', 3)
-    const record = (await (await login('CCS-DEAN')).get('/api/pages/P34?id=QCU-STU-CS&purpose=Case%20handling')).body.data.record
+    const record = (await (await login('QCU-FAC-PAULA-DELACRUZ')).get('/api/pages/P34?id=QCU-STU-CS&purpose=Case%20handling')).body.data.record
     expect(record.clearanceStatus).toMatchObject({ status: 'on_hold', reasons: [expect.objectContaining({ kind: 'strikes', unsettledStrikes: 3 })] })
     // The Secretary still cannot open student records.
     expect((await (await secretarySession(app)).get('/api/pages/P34?id=QCU-STU-CS&purpose=Case%20handling')).status).toBe(403)

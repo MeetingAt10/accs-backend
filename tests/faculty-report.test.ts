@@ -52,7 +52,7 @@ describe('a faculty member reports a student', () => {
     const filed = await file(await login('QCU-CHAIR-IT'))
     expect(filed.status, JSON.stringify(filed.body)).toBe(200)
     expect(reportOf(filed.body.record.id).stage).toBe('dean')
-    expect((await (await login('CCS-DEAN')).get(`/api/pages/P22?id=${filed.body.record.id}`)).body.data.record.allowedActions).toContain('transfer')
+    expect((await (await login('QCU-FAC-PAULA-DELACRUZ')).get(`/api/pages/P22?id=${filed.body.record.id}`)).body.data.record.allowedActions).toContain('transfer')
   })
 
   it('does not tell the student, who cannot see it anywhere', async () => {
@@ -86,7 +86,7 @@ describe('a faculty member reports a student', () => {
   it('can lead to a strike: the Dean recommends one against the reported student', async () => {
     const id = (await file(await login('QCU-PROF-IT'))).body.record.id as string
     await repo.transact((unit) => { unit.read().reports.find((r) => r.id === id)!.stage = 'dean' })
-    const recommended = await (await login('CCS-DEAN')).post('/api/pages/P22/actions').send({ action: 'recommendStrike', payload: { studentId: 'QCU-STU-IT-A', reportId: id, note: 'Confirmed with witnesses.' } })
+    const recommended = await (await login('QCU-FAC-PAULA-DELACRUZ')).post('/api/pages/P22/actions').send({ action: 'recommendStrike', payload: { studentId: 'QCU-STU-IT-A', reportId: id, note: 'Confirmed with witnesses.' } })
     expect(recommended.status, JSON.stringify(recommended.body)).toBe(200)
   })
 

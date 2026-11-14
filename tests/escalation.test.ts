@@ -131,13 +131,13 @@ describe('escalation through the API', () => {
 
   it('routes on the surname alone, stores the trace, shows it to the handler and not to the student', async () => {
     const { repo, app } = setup()
-    const { agent: student } = await signIn(app, 'QCU-STU-CS') // adviser: Prof. Sena Brook
-    const filed = await file(student, 'Si sir Brook laging absent sa class namin.')
+    const { agent: student } = await signIn(app, 'QCU-STU-CS') // adviser: Demo Professor Echo
+    const filed = await file(student, 'Si sir Echo laging absent sa class namin.')
     expect(filed.status).toBe(200)
     expect(filed.body.record).toMatchObject({ stage: 'chair', aboutAdvisor: true })
     expect(filed.body.record.routing).toBeUndefined()
     const stored = repo.read().reports.find((r) => r.id === filed.body.record.id)!
-    expect(stored.routing).toMatchObject({ rule: 'adviser-conflict', mentions: [{ personId: 'QCU-PROF-CS', alias: 'brook', term: 'laging absent' }] })
+    expect(stored.routing).toMatchObject({ rule: 'adviser-conflict', mentions: [{ personId: 'QCU-PROF-CS', alias: 'echo', term: 'laging absent' }] })
     const { agent: chair } = await signIn(app, 'QCU-CHAIR-CS')
     const opened = await chair.get(`/api/pages/P22?id=${stored.id}`)
     expect(opened.body.data.record.routing).toMatchObject({ rule: 'adviser-conflict', engineVersion: expect.any(String) })
@@ -188,7 +188,7 @@ describe('escalation edge cases through the API', () => {
     const repo = createMemoryRepository()
     const app = createApp(repo, { authStore: createMemoryAuthStore() })
     const { agent } = await signIn(app, 'QCU-STU-CS')
-    const filed = await file(agent, 'Si Dr. Wren laging late sa meeting namin.', { involvedUserIds: ['QCU-CHAIR-CS'] })
+    const filed = await file(agent, 'Si Dr. Bravo laging late sa meeting namin.', { involvedUserIds: ['QCU-CHAIR-CS'] })
     expect(filed.status).toBe(200)
     expect(repo.read().reports.find((r) => r.id === filed.body.record.id)!.involvedUserIds).toContain('QCU-CHAIR-CS')
   })
@@ -196,8 +196,8 @@ describe('escalation edge cases through the API', () => {
   it('accepts a complaint about a chair who also teaches the student, and leaves it with the adviser with a note', async () => {
     const repo = createMemoryRepository()
     const app = createApp(repo, { authStore: createMemoryAuthStore() })
-    const { agent } = await signIn(app, 'QCU-STU-IT-A') // Dr. Morgan Ash chairs BSIT and teaches this student's Data Structures class
-    const filed = await file(agent, 'Si Dr. Ash laging late sa Data Structures.')
+    const { agent } = await signIn(app, 'QCU-STU-IT-A') // Demo Chair Alpha chairs BSIT and teaches this student's Data Structures class
+    const filed = await file(agent, 'Si Dr. Alpha laging late sa Data Structures.')
     expect(filed.status).toBe(200)
     const stored = repo.read().reports.find((r) => r.id === filed.body.record.id)!
     expect(stored).toMatchObject({ stage: 'adviser', routing: { heldBack: ['The Program Chair may be involved.'] } })
@@ -245,8 +245,8 @@ describe('escalation edge cases through the API', () => {
     const store = createMemoryRecordStore()
     const app = createApp(createRecordRepository(store), { authStore: createMemoryAuthStore() })
     const { agent } = await signIn(app, 'QCU-STU-CS')
-    const a = await file(agent, 'Si sir Brook laging absent, the BSCS 2A lab schedule was moved to Saturday without notice.')
-    const b = await file(agent, 'Si sir Brook laging absent, our BSCS 2A lab schedule was moved to Saturday without any notice.')
+    const a = await file(agent, 'Si sir Echo laging absent, the BSCS 2A lab schedule was moved to Saturday without notice.')
+    const b = await file(agent, 'Si sir Echo laging absent, our BSCS 2A lab schedule was moved to Saturday without any notice.')
     expect([a.status, b.status]).toEqual([200, 200])
     const fresh = await createRecordRepository(store).view((unit) => unit.read())
     expect(fresh.reports.find((r) => r.id === a.body.record.id)!.routing).toMatchObject({ rule: 'adviser-conflict' })
@@ -260,7 +260,7 @@ describe('escalation lab on the dev toolbox', () => {
     const app = createApp(repo, { authStore: createMemoryAuthStore() })
     const { agent } = await signIn(app, 'QCU-STU-CS')
     const before = repo.read().reports.length
-    const res = await agent.post('/api/dev/escalation/try').send({ reporterId: 'QCU-STU-CS', narrative: 'si sir brook laging absent' })
+    const res = await agent.post('/api/dev/escalation/try').send({ reporterId: 'QCU-STU-CS', narrative: 'si sir echo laging absent' })
     expect(res.status).toBe(200)
     expect(res.body.decision).toMatchObject({ stage: 'chair', trace: { rule: 'adviser-conflict' } })
     expect(res.body.roster.map((p: { role: string }) => p.role)).toEqual(expect.arrayContaining(['adviser', 'chair', 'dean']))

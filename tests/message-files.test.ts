@@ -40,18 +40,18 @@ const thread = async (agent: Agent, id: string) => (await agent.get(`/api/pages/
 
 describe('direct conversation names', () => {
   it('shows each person the other person, not themselves', async () => {
-    const dean = await login('CCS-DEAN')
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
     const created = await dean.post('/api/pages/P11/actions').send({ action: 'createThread', payload: { recipientId: 'QCU-PROF-IT', body: 'helo' } })
     expect(created.status, JSON.stringify(created.body)).toBe(200)
     const id = created.body.record.id as string
-    expect(created.body.record.title).toBe('Prof. Robin Elm')
-    expect((await thread(dean, id)).record.title).toBe('Prof. Robin Elm')
+    expect(created.body.record.title).toBe('Demo Professor Charlie')
+    expect((await thread(dean, id)).record.title).toBe('Demo Professor Charlie')
     const professor = await login('QCU-PROF-IT')
     const seen = await thread(professor, id)
-    expect(seen.record.title).toBe('Dr. Sage Linden')
-    expect(seen.threads.find((t: { id: string }) => t.id === id).title).toBe('Dr. Sage Linden')
+    expect(seen.record.title).toBe('Dr. Paula Joy L. Dela Cruz')
+    expect(seen.threads.find((t: { id: string }) => t.id === id).title).toBe('Dr. Paula Joy L. Dela Cruz')
     // Searching finds it by the name each person sees.
-    expect((await professor.get('/api/pages/P11?q=Sage')).body.data.threads.map((t: { id: string }) => t.id)).toContain(id)
+    expect((await professor.get('/api/pages/P11?q=Paula')).body.data.threads.map((t: { id: string }) => t.id)).toContain(id)
   })
 
   it('keeps a conversation with its own topic as it is', async () => {
@@ -98,8 +98,8 @@ describe('files in messages', () => {
   })
 
   it('starts a conversation with a file', async () => {
-    const dean = await login('CCS-DEAN')
-    const file = await upload(dean, 'CCS-DEAN', photo)
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
+    const file = await upload(dean, 'QCU-FAC-PAULA-DELACRUZ', photo)
     const created = await dean.post('/api/pages/P11/actions').send({ action: 'createThread', payload: { recipientId: 'QCU-PROF-IT', body: '', attachments: [file] } })
     expect(created.status, JSON.stringify(created.body)).toBe(200)
     expect((await thread(dean, created.body.record.id)).record.messages[0].attachments).toEqual([file])

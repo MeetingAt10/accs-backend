@@ -46,7 +46,7 @@ describe('fixed case order (issue #29)', () => {
   })
 
   it('sends the Dean only to Guidance, and Guidance only to OSAS after a Case File', async () => {
-    const dean = await login('CCS-DEAN')
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
     expect((await act(dean, 'RPT-0243', 'transfer', { nextStage: 'osas' })).status).toBe(409)
     expect(report('RPT-0243').stage).toBe('dean')
     expect((await act(dean, 'RPT-0243', 'transfer')).status).toBe(200)
@@ -62,7 +62,7 @@ describe('fixed case order (issue #29)', () => {
   it('no longer accepts a "return" action or a President\'s Office stage', async () => {
     const osas = await login('QCU-OSAS')
     expect((await act(osas, 'RPT-0246', 'return')).status).toBe(400)
-    const dean = await login('CCS-DEAN')
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
     expect((await act(dean, 'RPT-0243', 'transfer', { nextStage: 'executive' })).status).toBe(400)
   })
 })
@@ -71,7 +71,7 @@ describe('the President\'s Office role is gone (issue #29)', () => {
   it('has no president role, label, permission or sample account', async () => {
     expect(roles).not.toContain('president')
     expect(repo.read().users.some((u) => u.id === 'QCU-PRESIDENT')).toBe(false)
-    const session = (await (await login('CCS-DEAN')).get('/api/session')).body
+    const session = (await (await login('QCU-FAC-PAULA-DELACRUZ')).get('/api/session')).body
     expect(Object.keys(session.roleLabels)).not.toContain('president')
     expect((await request(app).post('/api/auth/sign-in').send({ emailOrId: 'QCU-PRESIDENT', password: seedPassword })).status).toBe(401)
   })
