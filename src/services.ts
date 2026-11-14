@@ -436,7 +436,7 @@ function subjectsOf(db:Database,section:Space) { return db.spaces.filter(s=>!isS
 const teachesSubject = (user:User,space:Space) => hasRole(user,'professor','chair','dean') && space.professorIds.includes(user.id)
 const opensMaterials = (user:User,space:Space) => teachesSubject(user,space) || hasRole(user,'student') && space.studentIds.includes(user.id)
 // A file shows to students once its upload is confirmed; its professors also see pending ones. The storage key stays inside.
-function materialsFor(db:Database,user:User,space:Space) { if(!opensMaterials(user,space))return undefined; const teacher=teachesSubject(user,space); return db.materials.filter(m=>m.spaceId===space.id&&(m.kind==='link'||m.status==='ready'||teacher)).map(({key:_key,...m})=>({...m,author:author(db,m.authorId),...(m.kind==='file'&&m.status==='ready'?{downloadUrl:`/api/materials/${encodeURIComponent(m.id)}/file`}:{})})) }
+function materialsFor(db:Database,user:User,space:Space) { if(!opensMaterials(user,space))return undefined; const teacher=teachesSubject(user,space); return db.materials.filter(m=>m.spaceId===space.id&&(m.kind==='link'||m.status==='ready'||teacher)).map(({key:_key,comments,...m})=>({...m,author:author(db,m.authorId),comments:(comments??[]).map(c=>({...messageView(db,c),canDelete:c.authorId===user.id||teacher})),...(m.kind==='file'&&m.status==='ready'?{downloadUrl:`/api/materials/${encodeURIComponent(m.id)}/file`}:{})})) }
 function visibleSlots(db:Database,user:User){return slotsFor(user,db.slots.filter(s=>s.facultyId===user.id||hasRole(user,'dean','chair')||canReach(db,user,find(db.users,s.facultyId))))}
 /** One request per time: the rule for a student's appointment request and for a time booked to talk about a concern. */
 function reserveSlot(repo:UnitOfWork,studentId:string,slot:Slot,choice:AppointmentChoice,reportId?:string):Consultation {
@@ -886,6 +886,8 @@ const actionPages: Record<string, string[]> = {
   addMaterial: ['P08'],
   updateMaterial: ['P08'],
   removeMaterial: ['P08'],
+  commentMaterial: ['P08'],
+  deleteMaterialComment: ['P08'],
   uploadLoadSchedule: ['P54'],
   deleteAvailability: ['P17'],
   createTodo: ['P13'],
@@ -1272,6 +1274,29 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       audit(repo,user,'Class material added','academic',material.id)
       record=material
       message='Material added.'
+      break
+    }
+    case'commentMaterial':case'deleteMaterialComment':{
+      const material=find(db.materials,id)
+      const space=find(db.spaces,material.spaceId)
+      if(!opensMaterials(user,space)||material.kind==='file'&&material.status!=='ready')throw unavailable()
+      if(request.action==='deleteMaterialComment'){
+        const p=actionPayloads.deleteMaterialComment.parse(request.payload)
+        const comment=(material.comments??[]).find(c=>c.id===p.commentId)
+        if(!comment)throw unavailable()
+        if(comment.authorId!==user.id&&!teachesSubject(user,space))throw deny()
+        material.comments=(material.comments??[]).filter(c=>c.id!==comment.id)
+        audit(repo,user,'Class material comment removed','academic',material.id)
+        record={id:comment.id};message='Comment removed.';break
+      }
+      if(user.restrictions.includes('post.comment'))throw deny()
+      const p=actionPayloads.commentMaterial.parse(request.payload)
+      // Comments on materials are not held for review like forum comments, so a blocked word is refused outright.
+      if(findFlaggedWord(p.body))throw new z.ZodError([{code:'custom',path:['body'],message:'Please rephrase: this comment has a word the portal does not allow.',input:undefined}])
+      material.comments=material.comments??[]
+      const added=addMessage(material.comments,p.body)
+      record={...messageView(db,added),canDelete:true}
+      message='Comment added.'
       break
     }
     case'updateMaterial':case'removeMaterial':{

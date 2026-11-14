@@ -127,7 +127,9 @@ export type Material = { id: string; spaceId: string; kind: 'link' | 'file'; tit
   /** A link's address. */
   url?: string
   /** A file's original name, type, size, storage key, and whether its upload was confirmed (src/material-storage.ts). */
-  fileName?: string; contentType?: string; size?: number; key?: string; status?: 'pending' | 'ready' }
+  fileName?: string; contentType?: string; size?: number; key?: string; status?: 'pending' | 'ready'
+  /** Questions and replies from the subject's students and professors. */
+  comments?: Message[] }
 export type Collection = 'reports' | 'consultations' | 'slots' | 'threads' | 'notifications' | 'audit' | 'posts' | 'moderation' | 'drafts' | 'events' | 'todos' | 'cycles' | 'assignments' | 'followUps' | 'restrictions' | 'referrals' | 'strikes' | 'strikeSettlements' | 'materials' | 'loadSchedules' | 'goodMoral' | 'clusters' | 'settings' | 'photos' | 'permissionOverrides' | 'telemetry'
 /**
  * The storage boundary. A backend does its I/O around the work: it loads, runs the work, then commits.
