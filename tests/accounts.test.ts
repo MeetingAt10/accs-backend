@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { sendInvite, temporaryPassword, type Invite, type InviteMailer } from '../src/accounts.js'
 import { createApp } from '../src/app.js'
 import { createMemoryAuthStore, passwordProblem } from '../src/auth.js'
+import { facultyRoster } from '../src/faculty-roster.js'
 import { createRecordRepository } from '../src/persist.js'
 import { createMemoryRecordStore } from '../src/records.js'
 import { createMemorySessionStore } from '../src/sessions.js'
@@ -63,7 +64,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       const types = await dean.get('/api/accounts/types')
       expect(types.status).toBe(200)
       expect(types.body.types.map((row: { type: string }) => row.type)).toEqual(['secretary', 'faculty', 'advisor', 'chair', 'student'])
-      expect(types.body.types[0]).toMatchObject({ type: 'secretary', active: 0, inactive: 1, canManage: true })
+      expect(types.body.types[0]).toMatchObject({ type: 'secretary', active: 1, inactive: 1, canManage: true })  // the real secretary from the roster is active, the QCU-SECRETARY placeholder is not
       // The Dean manages the secretary account only.
       expect(types.body.types.slice(1).every((row: { canManage: boolean }) => !row.canManage)).toBe(true)
       expect(types.body.secretary).toMatchObject({ id: 'QCU-SECRETARY', name: 'CCS Secretary', active: false })
@@ -510,8 +511,8 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       await secretary.put('/api/accounts/advisors/2').send({ facultyIds: [it, cs] })
       const types = (await secretary.get('/api/accounts/types')).body.types as { type: string; active: number; inactive: number; canManage: boolean }[]
       expect(types.find((row) => row.type === 'advisor')).toMatchObject({ active: 2, inactive: 0, canManage: true })
-      expect(types.find((row) => row.type === 'secretary')).toMatchObject({ active: 1, inactive: 0, canManage: false })
-      expect(types.find((row) => row.type === 'faculty')).toMatchObject({ active: 4 + 2 })
+      expect(types.find((row) => row.type === 'secretary')).toMatchObject({ active: 2, inactive: 0, canManage: false })  // the activated placeholder and the roster secretary
+      expect(types.find((row) => row.type === 'faculty')).toMatchObject({ active: 4 + 2 + facultyRoster.filter((p) => p.roles.includes('professor')).length })
     })
   })
 

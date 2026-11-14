@@ -1,4 +1,6 @@
 import { consentWording } from './consent.js'
+import { env } from './env.js'
+import { facultyRoster } from './faculty-roster.js'
 import { ulid } from './ids.js'
 import type { Decision } from './escalation/engine.js'
 import { formerAccountIds } from './renames.js'
@@ -168,7 +170,9 @@ function user(id: string, name: string, roles: Role[], extra: Partial<User> = {}
 /** The account shape with its default profile text, for accounts created after the seed. */
 export const newUser = user
 const at = '2026-10-20T02:00:00.000Z'
-export function seed(): Database {
+/** Real CCS personnel (src/faculty-roster.ts) are seeded on every stack except production. */
+export const seedRoster = !(env.TABLE_PREFIX ?? '').startsWith('accs-prod-')
+export function seed(includeRoster = seedRoster): Database {
   const users: User[] = [
     user('QCU-STU-IT-A', 'Mira Solis', ['student'], { campus: 'SB', program: 'BSIT', section: 'A', year: 3, studentId: 'QCU-2024-0101', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], organizationIds: ['ORG-COMPUTING'] }),
     user('QCU-STU-IT-B', 'Luca Reed', ['student'], { campus: 'SB', program: 'BSIT', section: 'B', year: 3, studentId: 'QCU-2024-0102', adviserId: 'QCU-PROF-OTHER', spaceIds: ['SPACE-IT-B'] }),
@@ -220,8 +224,10 @@ export function seed(): Database {
   assignments.push({ id: 'EVAL-REVIEW-IT', evaluatorId: 'QCU-STU-IT-A', facultyId: 'QCU-PROF-IT', cycleId: 'CYCLE-2026-2', relation: 'Student to faculty', subject: 'Draft form for 2nd Semester' }, { id: 'EVAL-REVIEW-OTHER', evaluatorId: 'QCU-STU-IT-B', facultyId: 'QCU-PROF-OTHER', cycleId: 'CYCLE-2026-2', relation: 'Student to faculty', subject: 'Draft form for 2nd Semester' })
   for (const faculty of users.filter(u => u.roles.some(r => ['professor', 'chair', 'dean'].includes(r)))) for (let n = 0; n < 5; n++) assignments.push({ id: `EVAL-SAMPLE-${faculty.id}-${n}`, evaluatorId: `SAMPLE-EVALUATOR-${n}`, facultyId: faculty.id, cycleId: 'CYCLE-2026-1', relation: 'Student to faculty', subject: 'Course evaluation', answers: { Q1: n % 2 ? 4 : 5, Q2: 4, Q3: n % 2 ? 5 : 4 }, submittedAt: at, comment: '' })
   const restrictions: Restriction[] = [{ id: 'RST-0101', studentId: 'QCU-STU-RESTRICTED', features: ['post.create', 'post.comment', 'report.anonymous'], basis: 'OSAS decision on file', decisionReference: 'QCU-DEC-001', starts: at, until: '2026-12-01', actorId: 'QCU-ADMIN', active: true }]
+  // After the evaluation and notification loops, so the roster gets no sample evaluations or notifications.
+  const roster = includeRoster ? facultyRoster.map(({ id, name, email, roles, program, title }) => user(id, name, roles, { email, title, office: roles[0] === 'professor' ? 'CCS Faculty Room' : 'CCS Office', ...(program ? { program } : {}) })) : []
   return {
-    users, spaces, organizations: [{ id: 'ORG-COMPUTING', name: 'CCS Computing Society', description: 'Student organization of the College of Computer Studies. Runs workshops and peer tutoring.', representativeId: 'QCU-ORG', memberIds: ['QCU-STU-IT-A'] }], posts, reports, drafts: {},
+    users: [...users, ...roster], spaces, organizations: [{ id: 'ORG-COMPUTING', name: 'CCS Computing Society', description: 'Student organization of the College of Computer Studies. Runs workshops and peer tutoring.', representativeId: 'QCU-ORG', memberIds: ['QCU-STU-IT-A'] }], posts, reports, drafts: {},
     threads: [
       {
         id: 'THREAD-IT-A',
