@@ -27,7 +27,7 @@ describe('class post notifications', () => {
     const notices = await classNotices(created.body.record.id)
     const students = await repo.transact((unit) => unit.read().spaces.find((s) => s.id === 'SUBJECT-IT-DS')!.studentIds)
     expect(notices.map((n) => n.to).sort()).toEqual([...students].sort())
-    expect(notices[0]).toMatchObject({ title: 'New post in your class', body: 'Prof. Robin Elm posted in SBIT3A - CC 104 Data Structures: Week 6 notes' })
+    expect(notices[0]).toMatchObject({ title: 'New post in your class', body: 'Demo Professor Charlie posted in SBIT3A - CC 104 Data Structures: Week 6 notes' })
     // Nobody outside the class, and not the professor.
     expect(notices.map((n) => n.to)).not.toContain('QCU-STU-CS')
     expect(notices.map((n) => n.to)).not.toContain('QCU-PROF-IT')
@@ -40,7 +40,7 @@ describe('class post notifications', () => {
   })
 
   it('does not send an announcement twice', async () => {
-    const created = await post(await login('QCU-PROF-IT'), { kind: 'announcement', label: undefined, notifyMembers: true, priority: 'general', eventDate: '2026-12-01', eventTime: '09:00', eventPlace: 'IC 301', eventContact: 'Prof. Robin Elm' })
+    const created = await post(await login('QCU-PROF-IT'), { kind: 'announcement', label: undefined, notifyMembers: true, priority: 'general', eventDate: '2026-12-01', eventTime: '09:00', eventPlace: 'IC 301', eventContact: 'Demo Professor Charlie' })
     expect(created.status, JSON.stringify(created.body)).toBe(200)
     expect(await classNotices(created.body.record.id)).toEqual([])
     const announced = await repo.transact((unit) => unit.read().notifications.filter((n) => n.kind === 'announcement' && n.recordId === created.body.record.id).length)
@@ -61,13 +61,13 @@ describe('message notifications', () => {
     const long = 'Good afternoon, Prof.   Is 3 PM free?\n' + 'x'.repeat(200)
     expect((await student.post('/api/pages/P12/actions').send({ action: 'sendMessage', recordId: 'THREAD-DIRECT-1', payload: { body: long } })).status).toBe(200)
     const [body] = (await notices('QCU-PROF-IT')).slice(-1)
-    expect(body).toMatch(/^Mira Solis: Good afternoon, Prof\. Is 3 PM free\? x+…$/)
+    expect(body).toMatch(/^Demo Student Foxtrot: Good afternoon, Prof\. Is 3 PM free\? x+…$/)
     expect(body!.length).toBeLessThan(130)
   })
 
   it('names the group for a class group message', async () => {
     const professor = await login('QCU-PROF-IT')
     expect((await professor.post('/api/pages/P12/actions').send({ action: 'sendMessage', recordId: 'THREAD-IT-A', payload: { body: 'Room change: IC 301.' } })).status).toBe(200)
-    expect((await notices('QCU-STU-IT-A')).slice(-1)).toEqual(['Prof. Robin Elm in BSIT 3A class group: Room change: IC 301.'])
+    expect((await notices('QCU-STU-IT-A')).slice(-1)).toEqual(['Demo Professor Charlie in BSIT 3A class group: Room change: IC 301.'])
   })
 })

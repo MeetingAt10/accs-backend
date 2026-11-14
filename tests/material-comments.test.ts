@@ -36,8 +36,8 @@ describe('comments on class materials', () => {
     expect((await act(professor, 'commentMaterial', id, { body: 'Yes, slides 10 to 14.' })).status).toBe(200)
     const [material] = await materials(student)
     expect(material!.comments.map((c) => [c.author.name, c.body, c.canDelete])).toEqual([
-      ['Mira Solis', 'Is slide 12 in the quiz?', true],
-      ['Prof. Robin Elm', 'Yes, slides 10 to 14.', false],
+      ['Demo Student Foxtrot', 'Is slide 12 in the quiz?', true],
+      ['Demo Professor Charlie', 'Yes, slides 10 to 14.', false],
     ])
     // The professor may remove any comment on the subject's materials.
     expect((await materials(professor))[0]!.comments.every((c) => c.canDelete)).toBe(true)
@@ -65,7 +65,7 @@ describe('comments on class materials', () => {
     const rude = await act(student, 'commentMaterial', id, { body: 'bobo ng slides' })
     expect(rude.status).toBe(400)
     expect(JSON.stringify(rude.body)).toContain('Please rephrase')
-    // Tess Finch has the "post.comment" restriction.
+    // Demo Student India has the "post.comment" restriction.
     expect((await act(await login('QCU-STU-RESTRICTED'), 'commentMaterial', id, { body: 'Hello' })).status).toBe(403)
     expect((await materials(student))[0]!.comments).toEqual([])
   })
