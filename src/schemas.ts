@@ -87,7 +87,7 @@ export const advisorsResponseSchema = z.object({ advisors: z.array(z.object({ ye
 
 const text = z.string().trim().min(1).max(4000)
 /** A file already uploaded for a message, named by the ID its upload was given. */
-const messageAttachment = z.object({ id: z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/, 'That file is not available.'), fileName: z.string().trim().min(1).max(200), contentType: z.string().trim().toLowerCase().max(120), size: z.number().int().positive() }).strict()
+export const messageAttachment = z.object({ id: z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/, 'That file is not available.'), fileName: z.string().trim().min(1).max(200), contentType: z.string().trim().toLowerCase().max(120), size: z.number().int().positive() }).strict()
 /** A message is words, files, or both. */
 const messageContent = z.object({ body: z.string().trim().max(4000).default(''), attachments: z.array(messageAttachment).max(5, 'Send at most 5 files at a time.').default([]) })
 const hasMessageContent = (p: { body: string; attachments: unknown[] }) => p.body.length > 0 || p.attachments.length > 0
@@ -114,7 +114,10 @@ export const postLabels = ['Discussion', 'Rant', 'Assistance', 'Support'] as con
 export const announcementPriorities = ['general', 'important', 'urgent'] as const
 const postContent = {
   title: text.max(160),
-  body: z.string().trim().min(1).max(5000),
+  // A post with pictures or files may have no words; one without them needs some (checked below).
+  body: z.string().trim().max(5000).default(''),
+  /** Pictures and files already uploaded (POST /api/uploads); left out on an edit, the post keeps its files. */
+  attachments: z.array(messageAttachment).max(10, 'Attach at most 10 files.').optional(),
   label: z.string().trim().max(80).optional(),
   priority: z.enum(announcementPriorities).default('general'),
 }
@@ -130,6 +133,7 @@ const createPostSchema = z.object({
   eventContact: z.string().trim().max(200).optional(),
   notifyMembers: z.boolean().default(false),
 }).strict().superRefine((post, context) => {
+  if (!post.body && !post.attachments?.length) context.addIssue({ code: 'custom', path: ['body'], message: 'Write something or attach a file.' })
   if (post.kind === 'discussion' && !postLabels.includes(post.label as typeof postLabels[number])) {
     context.addIssue({ code: 'custom', path: ['label'], message: 'Choose a post label.' })
   }
@@ -171,7 +175,7 @@ export const actionPayloads = {
   removeMaterial: z.object({}).strict(),
   uploadLoadSchedule: z.object({ term: z.string().trim().min(1).max(60), startsOn: date, endsOn: date, rows: z.array(z.unknown()).min(1).max(500) }).strict(),
   createPost: createPostSchema,
-  updatePost: z.object(postContent).strict(),
+  updatePost: z.object(postContent).strict().superRefine((post, context) => { if (!post.body && post.attachments?.length === 0) context.addIssue({ code: 'custom', path: ['body'], message: 'Write something or attach a file.' }) }),
   deletePost: z.object({}).strict(),
   comment: z.object({ body: text, anonymous: z.boolean().default(false) }).strict(),
   // A choice of reactions (#86). Without one it is "like", as the single reaction was before.
