@@ -9,14 +9,14 @@ import { createMemoryRepository } from '../src/store.js'
 type Module = { id: string; role: string; name: string; pages: string[] }
 const { modules } = JSON.parse(readFileSync(new URL('./fixtures/doc003-modules.json', import.meta.url), 'utf8')) as { modules: Module[] }
 
-const accounts: Record<string, string> = { student: 'QCU-STU-IT-A', organization: 'QCU-ORG', professor: 'QCU-PROF-IT', staff: 'QCU-STAFF', chair: 'QCU-CHAIR-IT', dean: 'QCU-DEAN', administrator: 'QCU-ADMIN', guidance: 'QCU-GUIDANCE', osas: 'QCU-OSAS', president: 'QCU-PRESIDENT' }
+const accounts: Record<string, string> = { student: 'QCU-STU-IT-A', organization: 'QCU-ORG', professor: 'QCU-PROF-IT', chair: 'QCU-CHAIR-IT', dean: 'QCU-FAC-PAULA-DELACRUZ', administrator: 'ACCS-ADMIN', guidance: 'QCU-GUIDANCE', osas: 'QCU-OSAS' }
 
 describe('DOC003 module inventory', () => {
-  it('has the 58 modules per role group in the inventory', () => {
+  it('has the 55 modules per role group in the inventory (the 58 of DOC003 without the President’s Office and CCS Staff)', () => {
     const counts: Record<string, number> = {}
     for (const m of modules) counts[m.id.split('-')[0]] = (counts[m.id.split('-')[0]] ?? 0) + 1
-    expect(modules).toHaveLength(58)
-    expect(counts).toEqual({ ALL: 5, STU: 12, ORG: 2, PRO: 8, STF: 1, CHR: 7, DEAN: 6, ADM: 6, GUD: 5, OSAS: 4, PRES: 2 })
+    expect(modules).toHaveLength(55)
+    expect(counts).toEqual({ ALL: 5, STU: 12, ORG: 2, PRO: 8, CHR: 7, DEAN: 6, ADM: 6, GUD: 5, OSAS: 4 })
   })
 
   for (const module of modules) {

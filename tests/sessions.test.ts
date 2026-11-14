@@ -1,7 +1,7 @@
 import { ConditionalCheckFailedException, type DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { describe, expect, it } from 'vitest'
 
-import { createDynamoSessionStore, sessionPolicy, sessionState, type Session } from '../src/sessions.js'
+import { createDynamoSessionStore, createMemorySessionStore, sessionPolicy, sessionState, type Session } from '../src/sessions.js'
 
 type Sent = { name: string; input: Record<string, any> }
 
@@ -70,7 +70,7 @@ describe('DynamoDB session store', () => {
     const { client, items } = fakeClient()
     const store = createDynamoSessionStore('accs-dev-ccs_identity', client)
     for (const id of ['a', 'b', 'c']) await store.create(session(id))
-    await store.create(session('z', 'QCU-ADMIN'))
+    await store.create(session('z', 'ACCS-ADMIN'))
     // A role-holder entry under the same user key on GSI2 must not be touched.
     items.set('ROLE#x|META', { PK: { S: 'ROLE#x' }, SK: { S: 'META' }, GSI2PK: { S: 'USER#QCU-STU-IT-A' }, GSI2SK: { S: 'ROLE#x' } })
     await store.revoke('a')
@@ -82,6 +82,15 @@ describe('DynamoDB session store', () => {
     await store.touch('c', '2026-11-01T03:00:00.000Z')
     expect((await store.get('c'))!.lastSeenAt).toBe('2026-11-01T02:00:00.000Z')
     await store.revoke('missing')
+  })
+
+  it("revokes sessions stored under an account's old ID", async () => {
+    const { client } = fakeClient()
+    for (const store of [createMemorySessionStore(), createDynamoSessionStore('accs-dev-ccs_identity', client)]) {
+      await store.create(session('old', 'QCU-DEAN'))
+      await store.revokeUser('CCS-DEAN')
+      expect((await store.get('old'))!.status).toBe('revoked')
+    }
   })
 
   it('treats revoked, idle, and past-expiry sessions as not live', () => {

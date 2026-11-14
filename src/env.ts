@@ -11,8 +11,16 @@ const schema = z.object({
   AUTH_STORE_BUCKET: z.string().optional(),
   AUTH_STORE_KEY: z.string().default('auth-store.json'),
   // Shared sign-in password of the seeded accounts. Deployed stacks set it (stack parameter SeedPassword);
-  // without it, production disables seeded sign-in and local runs use the built-in default in auth.ts.
+  // without it, production disables seeded sign-in, local runs and tests use the built-in default in auth.ts, and
+  // Lambda with any other NODE_ENV fails at startup.
   SEED_PASSWORD: z.string().min(10).optional(),
+  // Sender of password reset emails, a verified Amazon SES identity. Without it, local runs log the code and
+  // production leaves resets to an administrator (src/mail.ts).
+  MAIL_FROM: z.email().optional(),
+  // Address of the ACCS portal, for links in emails. Defaults to the first CORS_ORIGIN.
+  APP_URL: z.url().optional(),
+  // Private S3 bucket for class material files (#44). Without it, materials can only be links.
+  MATERIALS_BUCKET: z.string().min(1).optional(),
   // Comma-separated list: every ACCS site (portal, forums, ...) calls the same API with credentials.
   CORS_ORIGIN: z
     .string()

@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 
-import { env } from './env.js'
+import { env, onLambda } from './env.js'
 import type { User } from './schemas.js'
 
 // Password hashing: scrypt, stored as `scrypt$<salt b64>$<hash b64>`.
@@ -33,10 +33,17 @@ export function passwordProblem(password: string) {
 }
 
 // Every seeded active user signs in with this until they set their own password.
-// Deployed stacks set SEED_PASSWORD; the built-in value is for local runs and tests only. Production without
-// SEED_PASSWORD gets an unguessable random value, which disables seeded sign-in instead of falling back.
-export const defaultPassword =
-  env.SEED_PASSWORD ?? (env.NODE_ENV === 'production' ? randomBytes(32).toString('base64url') : 'Accs@Qcu2026!')
+// Deployed stacks set SEED_PASSWORD. Production without it gets an unguessable random value, which disables seeded
+// sign-in (an empty SeedPassword stack parameter). The built-in value is public, so it is used only for local runs and
+// tests; a deployed stack whose NODE_ENV is not production fails at startup instead of falling back to it.
+export function resolveSeedPassword(options: { seedPassword?: string; nodeEnv: string; onLambda: boolean }) {
+  if (options.seedPassword) return options.seedPassword
+  if (options.nodeEnv === 'production') return randomBytes(32).toString('base64url')
+  if (options.onLambda)
+    throw new Error(`SEED_PASSWORD is not set and NODE_ENV is "${options.nodeEnv}" on Lambda. Set NODE_ENV=production (an empty SEED_PASSWORD then disables seeded sign-in) or set SEED_PASSWORD; the built-in password is for local runs and tests only.`)
+  return 'Accs@Qcu2026!'
+}
+export const defaultPassword = resolveSeedPassword({ seedPassword: env.SEED_PASSWORD, nodeEnv: env.NODE_ENV, onLambda })
 let cachedDefaultHash: string | undefined
 export const defaultHash = () => (cachedDefaultHash ??= hashPassword(defaultPassword))
 
@@ -103,17 +110,37 @@ const statusOf = (error: unknown) => (error as { $metadata?: { httpStatusCode?: 
 // A write that loses the ETag race reloads and runs `mutate` again, up to this many times in all.
 const writeAttempts = 5
 
+/** Every write attempt lost the race to other writers. The app answers 409 so the client can try again. */
+export class AuthStoreConflict extends Error {
+  constructor(options?: ErrorOptions) {
+    super('Someone else changed this at the same time. Try again.', options)
+    this.name = 'AuthStoreConflict'
+  }
+}
+
 export function createS3AuthStore(bucket: string, key: string, s3 = new S3Client({})): AuthStore {
   let cache = { etag: undefined as string | undefined, data: empty(), checkedAt: 0 }
+  // Requests that arrive while the cached copy is being refreshed wait for that one GET instead of sending their own.
+  let refreshing: Promise<typeof cache> | undefined
+  // Counts this instance's own saves. A GET that was already under way when one landed carries an older copy, so it is dropped.
+  let saves = 0
+
+  function fetch(force: boolean) {
+    if (force) return refresh()
+    if (Date.now() - cache.checkedAt < 2000) return Promise.resolve(cache)
+    return (refreshing ??= refresh().finally(() => { refreshing = undefined }))
+  }
 
   // Conditional GET: a 304 keeps the cached copy; a missing object is an empty store.
-  async function fetch(force: boolean) {
-    if (!force && Date.now() - cache.checkedAt < 2000) return cache
+  async function refresh() {
+    const savesBefore = saves
     try {
       const response = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key, IfNoneMatch: cache.etag }))
-      cache = { etag: response.ETag, data: parse(await response.Body!.transformToString()), checkedAt: Date.now() }
+      const data = parse(await response.Body!.transformToString())
+      if (saves === savesBefore) cache = { etag: response.ETag, data, checkedAt: Date.now() }
     } catch (error) {
       const status = statusOf(error)
+      if (saves !== savesBefore && (status === 304 || status === 404)) return cache
       if (status === 304) cache = { ...cache, checkedAt: Date.now() }
       else if (status === 404) cache = { etag: undefined, data: empty(), checkedAt: Date.now() }
       else throw error
@@ -138,14 +165,17 @@ export function createS3AuthStore(bucket: string, key: string, s3 = new S3Client
             ContentType: 'application/json',
             ...(etag ? { IfMatch: etag } : { IfNoneMatch: '*' }),
           }))
+          saves++
           cache = { etag: response.ETag, data: next, checkedAt: Date.now() }
           return
         } catch (error) {
           // Someone else wrote first: reload and run `mutate` on their version, after a short random pause.
-          if (attempt + 1 < writeAttempts && (statusOf(error) === 412 || statusOf(error) === 409)) {
+          const lostRace = statusOf(error) === 412 || statusOf(error) === 409
+          if (lostRace && attempt + 1 < writeAttempts) {
             await new Promise((resolve) => setTimeout(resolve, 20 * (attempt + 1) + Math.random() * 60))
             continue
           }
+          if (lostRace) throw new AuthStoreConflict({ cause: error })
           throw error
         }
       }

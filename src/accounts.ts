@@ -7,14 +7,16 @@ import { hashPassword, passwordProblem, type AuthData, type AuthStore } from './
 import { env } from './env.js'
 import { send } from './http.js'
 import { ulid } from './ids.js'
+import { renameAccountIds, renamedAccountIds } from './renames.js'
 import {
-  accountIdParamsSchema, accountListResponseSchema, accountsQuerySchema, accountTypesResponseSchema, actionResponseSchema, activateSecretarySchema,
+  accountIdParamsSchema, accountListResponseSchema, accountsQuerySchema, accountTypesResponseSchema, actionResponseSchema, activateSecretarySchema, setupDeanSchema,
   advisorsResponseSchema, createFacultySchema, facultyListResponseSchema, facultyQuerySchema, facultyRowSchema, importStudentsSchema, programParamsSchema,
-  setActiveSchema, setAdvisorsSchema, setChairSchema, studentRowSchema, yearLevelParamsSchema, type Role, type User,
+  roles, setActiveSchema, setAdvisorsSchema, setChairSchema, studentRowSchema, yearLevelParamsSchema, type Role, type User,
 } from './schemas.js'
 import { ApiError, deny, unavailable, type AccountChange, type ProfileChange } from './services.js'
 import type { SessionStore } from './sessions.js'
-import { demoUserIds, newUser, type Database, type Repository } from './store.js'
+import { mainCampus } from './sections.js'
+import { demoUserIds, newUser, seed, type Database, type Repository, formerSeedEmails, seedEmail } from './store.js'
 
 // Account provisioning. The Dean activates the secretary; the secretary creates faculty and students, assigns advisers
 // and program chairs, and switches accounts on and off. All account state lives in the auth store (S3), which every
@@ -22,13 +24,14 @@ import { demoUserIds, newUser, type Database, type Repository } from './store.js
 // once and only their hash is stored. Nothing here writes a username or password to the audit trail or to a log.
 
 const secretaryId = 'QCU-SECRETARY'
+const deanId = 'CCS-DEAN'
 // The accounts the secretary may switch on and off. The Dean, administrators, and the offices are not theirs.
 const secretaryScope: Role[] = ['student', 'professor', 'chair']
 
 // --- invites ---------------------------------------------------------------------------------------------------------
 
 export type Invite = { accountId: string; to: string; name: string; signInUrl: string; username: string; temporaryPassword: string }
-/** Delivers an invite. SES will implement this; until then nothing is sent and the UI shows a copyable invite. */
+/** Delivers an invite: by email through SES when MAIL_FROM is set (src/mail.ts, #36); otherwise nothing is sent and the UI shows a copyable invite. */
 export interface InviteMailer { send(invite: Invite): Promise<{ sent: boolean }> }
 export const unsentMailer: InviteMailer = {
   async send(invite) {
@@ -37,7 +40,21 @@ export const unsentMailer: InviteMailer = {
     return { sent: false }
   },
 }
-export const sendInvite = (invite: Invite, mailer: InviteMailer = unsentMailer) => mailer.send(invite)
+// The sample accounts carry made-up addresses (secretary@example.invalid, ...@access-ccs.com, and before #69
+// ...@qcu.edu.ph), so an invite to one of them is never emailed: it would bounce, or reach whoever owns that mailbox.
+const sampleAddresses = new Set(seed().users.flatMap((user) => [user.email.toLowerCase(), ...formerSeedEmails(user.id)]))
+/** Sends an invite. A failed or skipped send returns `sent: false` so the UI shows the invite once; credentials are never logged. */
+export async function sendInvite(invite: Invite, mailer: InviteMailer = unsentMailer) {
+  if (sampleAddresses.has(invite.to.toLowerCase())) {
+    console.log(`[accs] invite for ${invite.accountId} not sent: the address is a sample one`)
+    return { sent: false }
+  }
+  try { return await mailer.send(invite) }
+  catch (error) {
+    console.error(JSON.stringify({ level: 'error', message: 'Invite email not sent', accountId: invite.accountId, error: error instanceof Error ? error.name : 'Unknown' }))
+    return { sent: false }
+  }
+}
 
 // --- temporary credentials -------------------------------------------------------------------------------------------
 
@@ -78,7 +95,8 @@ export function temporaryUsername(name: string, taken: ReadonlySet<string>) {
 
 /** What a person can sign in with. Each must belong to one account, or a sign-in could reach the wrong one. */
 const identifiersOf = (account: User) => [account.id, account.email, account.studentId, account.username].filter((value): value is string => !!value).map((value) => value.toLowerCase())
-export const takenBy = (accounts: Iterable<User>, exceptId?: string) => new Set([...accounts].filter((account) => account.id !== exceptId).flatMap(identifiersOf))
+// Old account IDs (QCU-DEAN) still sign in as the renamed account, so nobody else may take them as a username.
+export const takenBy = (accounts: Iterable<User>, exceptId?: string) => new Set([...[...accounts].filter((account) => account.id !== exceptId).flatMap(identifiersOf), ...Object.keys(renamedAccountIds).map((id) => id.toLowerCase())])
 /** The repository's accounts with the auth store's records on top. */
 export const merged = (users: User[], data: AuthData) => new Map([...users, ...data.users].map((account) => [account.id, account] as const))
 
@@ -101,7 +119,14 @@ function edit(data: AuthData, accounts: Map<string, User>, id: string) {
 export function applyAccounts(db: Database, accounts: User[]) {
   const index = new Map(db.users.map((user, position) => [user.id, position]))
   const members = new Map(db.spaces.map((space) => [space.id, new Set(space.studentIds)]))
-  for (const account of accounts) {
+  for (const original of accounts) {
+    const renamed = renameAccountIds(original)
+    const newAddress = seedEmail(renamed.id)
+    const stored = newAddress && formerSeedEmails(renamed.id).includes(renamed.email.toLowerCase()) ? { ...renamed, email: newAddress } : renamed
+    // A role that no longer exists (the President's Office, removed on 2026-11-10) is dropped; an account left with no
+    // role cannot sign in.
+    const knownRoles = stored.roles.filter((role) => (roles as readonly string[]).includes(role))
+    const account = knownRoles.length === stored.roles.length ? stored : { ...stored, roles: knownRoles, active: stored.active && knownRoles.length > 0 }
     const position = index.get(account.id)
     if (position === undefined) index.set(account.id, db.users.push(structuredClone(account)) - 1)
     // Stored profile text wins; a stored account without any keeps what this instance has.
@@ -188,7 +213,7 @@ export async function recordAudit(repository: Repository, by: User, entries: { a
 export type AccountDeps = { repository: Repository; authStore: AuthStore; sessions: SessionStore; mailer: InviteMailer }
 
 const summary = (account: User) => ({
-  id: account.id, name: account.name, email: account.email, roles: account.roles, program: account.program, section: account.section, year: account.year,
+  id: account.id, name: account.name, email: account.email, roles: account.roles, program: account.program, section: account.section, campus: account.campus, year: account.year,
   studentId: account.studentId, adviserId: account.adviserId, active: account.active, mustChangeCredentials: account.mustChangeCredentials,
 })
 const byName = (a: User, b: User) => a.name.localeCompare(b.name)
@@ -233,6 +258,38 @@ export function accountRouter({ repository, authStore, sessions, mailer }: Accou
         { type: 'student', label: 'Student', ...count(has('student')), canManage: secretary },
       ],
       secretary: secretaryAccount && summary(secretaryAccount),
+    })
+  })
+
+  // The System Administrator sets up the real Dean (decided 12 November 2026): name and email, then temporary credentials
+  // and an invite, as for the secretary. The Dean chooses their own username and password at first sign-in, and the shared
+  // sample password stops working for the account. The name and email live in the auth store, never in the code.
+  router.post('/dean/setup', async (req, res) => {
+    const user = actor(res)
+    need(user, 'account.setupDean')
+    const { name, email } = setupDeanSchema.parse(req.body ?? {})
+    const all = await users()
+    if (!all.some((account) => account.id === deanId)) throw unavailable()
+    const password = temporaryPassword()
+    const hash = hashPassword(password)
+    let account!: User
+    let username = ''
+    await authStore.update((data) => {
+      const accounts = merged(all, data)
+      const taken = takenBy(accounts.values(), deanId)
+      if (taken.has(email)) throw new ApiError(409, 'An account with this email already exists.', 'CONFLICT')
+      account = edit(data, accounts, deanId)
+      username = temporaryUsername(name, taken)
+      Object.assign(account, { name, email, active: true, mustChangeCredentials: true, username })
+      data.credentials[deanId] = hash
+    })
+    // New credentials end any session still open under the sample ones.
+    await sessions.revokeUser(deanId)
+    await audit(user, [{ action: 'Dean account set up', reference: deanId }])
+    const url = signInUrl(req)
+    const { sent } = await sendInvite({ accountId: deanId, to: email, name, signInUrl: url, username, temporaryPassword: password }, mailer)
+    done(res, sent ? 'The Dean account is set up and the sign-in details were emailed to the Dean.' : 'The Dean account is set up. Give the Dean the sign-in details; they are not shown again.', {
+      account: summary(account), credentials: { username, temporaryPassword: password }, invite: { sent, signInUrl: url },
     })
   })
 
@@ -290,11 +347,11 @@ export function accountRouter({ repository, authStore, sessions, mailer }: Accou
 
   /** Creates one account per valid row and answers with a result per row, in the order sent. */
   async function create(req: Request, res: Response, kind: 'faculty' | 'student', rows: unknown[]) {
-    type Row = { name: string; email: string; program: string; studentId?: string; section?: string; year?: number }
+    type Row = { name: string; email: string; program: string; studentId?: string; section?: string; year?: number; campus?: string }
     type Failure = { index: number; status: 'error'; code: string; error: string; fields?: { path: string; message: string }[] }
     const student = kind === 'student'
     const schema: ZodType<Row> = student ? studentRowSchema : facultyRowSchema
-    const { all, spaces } = await repository.view((unit) => ({ all: unit.read().users, spaces: unit.read().spaces.map(({ id, program, section }) => ({ id, program, section })) }), [])
+    const { all, spaces } = await repository.view((unit) => ({ all: unit.read().users, spaces: unit.read().spaces.map(({ id, program, section, campus, year }) => ({ id, program, section, campus, year })) }), [])
     // Marks the row's email and student ID as used, or says which one already is.
     const claim = (row: Row, taken: Set<string>) => {
       const code = taken.has(row.email) ? 'DUPLICATE_EMAIL' : row.studentId && taken.has(row.studentId.toLowerCase()) ? 'DUPLICATE_ID' : undefined
@@ -339,7 +396,9 @@ export function accountRouter({ repository, authStore, sessions, mailer }: Accou
           taken.add(username)
           const account = newUser(`USR-${ulid()}`, row.name, [student ? 'student' : 'professor'], {
             email: row.email, program: row.program, active: true, username, mustChangeCredentials: true,
-            ...(student ? { section: row.section, year: row.year, studentId: row.studentId, spaceIds: spaces.filter((space) => space.program === row.program && space.section === row.section).map((space) => space.id) } : {}),
+            // A student joins the spaces of their section: same campus, program, year and letter (#46). A space stored without
+            // a campus or year is at San Bartolome and open to any year, as before.
+            ...(student ? { section: row.section, year: row.year, campus: row.campus, studentId: row.studentId, spaceIds: spaces.filter((space) => space.program === row.program && space.section === row.section && (space.campus ?? mainCampus) === row.campus && (space.year === undefined || space.year === row.year)).map((space) => space.id) } : {}),
           })
           const adviserId = student ? resolveAdviser(account, data.advisorAssignments, accounts) : undefined
           if (adviserId) account.adviserId = adviserId

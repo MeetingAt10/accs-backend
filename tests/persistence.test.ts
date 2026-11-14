@@ -168,7 +168,7 @@ describe('the record repository', () => {
   it('keeps what a transaction changes, returns a detached result, and leaves per-instance data on the instance', async () => {
     const { store, repo } = fresh()
     const entry = await repo.transact((unit) => {
-      const added = { id: unit.nextId('AUDIT'), at, actorId: 'QCU-ADMIN', action: 'Checked', module: 'identity', reference: 'x', result: 'Recorded' }
+      const added = { id: unit.nextId('AUDIT'), at, actorId: 'ACCS-ADMIN', action: 'Checked', module: 'identity', reference: 'x', result: 'Recorded' }
       unit.read().audit.push(added)
       unit.read().spaces[0]!.title = 'Stays on this instance'
       return added
@@ -231,7 +231,7 @@ describe('the record repository', () => {
       db.slots[0]!.state = 'unavailable'
       db.threads[0]!.title = 'Renamed'
       db.notifications[0]!.read = true
-      db.audit.push({ id: unit.nextId('AUDIT'), at, actorId: 'QCU-ADMIN', action: 'Checked', module: 'identity', reference: 'x', result: 'Recorded' })
+      db.audit.push({ id: unit.nextId('AUDIT'), at, actorId: 'ACCS-ADMIN', action: 'Checked', module: 'identity', reference: 'x', result: 'Recorded' })
     })
     expect(store.all().map((item) => `${item.table}/${item.collection}`).sort()).toEqual([
       'ccs_audit/audit', 'ccs_grievance/reports', 'ccs_messaging/threads', 'ccs_notification/notifications', 'ccs_scheduling/consultations', 'ccs_scheduling/slots',
@@ -254,7 +254,7 @@ describe('the record repository', () => {
     await expect(repo.transact((unit) => { unit.read().audit[0]!.action = 'Edited' })).rejects.toThrow('add-only')
     await expect(repo.transact((unit) => { unit.read().audit = [] })).rejects.toThrow('add-only')
     expect(store.all()).toEqual([])
-    const added = await repo.transact((unit) => { const entry = { id: unit.nextId('AUDIT'), at, actorId: 'QCU-ADMIN', action: 'Checked', module: 'identity', reference: 'x', result: 'Recorded' }; unit.read().audit.push(entry); return entry })
+    const added = await repo.transact((unit) => { const entry = { id: unit.nextId('AUDIT'), at, actorId: 'ACCS-ADMIN', action: 'Checked', module: 'identity', reference: 'x', result: 'Recorded' }; unit.read().audit.push(entry); return entry })
     await expect(repo.transact((unit) => { unit.read().audit.find((entry) => entry.id === added.id)!.result = 'Edited' })).rejects.toThrow('add-only')
     expect(store.all()).toMatchObject([{ id: added.id, version: 1 }])
   })
@@ -312,14 +312,14 @@ describe('the record repository', () => {
     await expect(repo.view((unit) => unit.read().reports, ['audit'])).rejects.toThrow('reports collection was not loaded')
     await expect(repo.transact((unit) => unit.read().slots, [])).rejects.toThrow('slots collection was not loaded')
     await repo.view((unit) => unit.read().reports)
-    expect(spy.lists.slice(-21).sort()).toEqual(Object.entries(persisted).map(([name, table]) => `${table}/${name}`).sort())
+    expect(spy.lists.slice(-Object.keys(persisted).length).sort()).toEqual(Object.entries(persisted).map(([name, table]) => `${table}/${name}`).sort())
   })
 
   it('takes turns when transactions arrive together, so none of them is lost', async () => {
     const store = createMemoryRecordStore()
     const slow: RecordStore = { list: async (...args) => { await tick(); const records = await store.list(...args); await tick(); return records }, write: async (writes) => { await tick(); await store.write(writes) } }
     const repo = createRecordRepository(slow)
-    await Promise.all([1, 2, 3, 4, 5].map((n) => repo.transact((unit) => { unit.read().todos.push({ id: `MINE-${n}`, ownerId: 'QCU-STU-CS', title: `To-do ${n}`, date: '2026-11-05', done: false }); unit.read().audit.push({ id: unit.nextId('AUDIT'), at, actorId: 'QCU-ADMIN', action: `Check ${n}`, module: 'identity', reference: 'x', result: 'Recorded' }) })))
+    await Promise.all([1, 2, 3, 4, 5].map((n) => repo.transact((unit) => { unit.read().todos.push({ id: `MINE-${n}`, ownerId: 'QCU-STU-CS', title: `To-do ${n}`, date: '2026-11-05', done: false }); unit.read().audit.push({ id: unit.nextId('AUDIT'), at, actorId: 'ACCS-ADMIN', action: `Check ${n}`, module: 'identity', reference: 'x', result: 'Recorded' }) })))
     expect(await repo.view((unit) => unit.read().todos.filter((todo) => todo.id.startsWith('MINE-')).length)).toBe(5)
     expect(await repo.view((unit) => unit.read().audit.length)).toBe(1 + 5)
   })
@@ -418,7 +418,7 @@ describe('two app instances sharing a record store', () => {
 
   it('commits the audit entry written while a student record is read', async () => {
     const { store, instance } = instances()
-    const { agent: dean } = await signIn(instance(), 'QCU-DEAN')
+    const { agent: dean } = await signIn(instance(), 'QCU-FAC-PAULA-DELACRUZ')
     expect((await dean.get('/api/pages/P34?id=QCU-STU-RESTRICTED&purpose=Case%20handling')).status).toBe(200)
     expect(store.all().filter((item) => item.collection === 'audit').map((item) => JSON.parse(item.data!).action)).toEqual(['Record opened'])
   })
@@ -427,7 +427,7 @@ describe('two app instances sharing a record store', () => {
     const store = createMemoryRecordStore()
     const repo = createRecordRepository(store)
     const app = createApp(repo, { authStore: createMemoryAuthStore() })
-    const { agent: admin } = await signIn(app, 'QCU-ADMIN')
+    const { agent: admin } = await signIn(app, 'ACCS-ADMIN')
     // The flagged comment's post is gone, so the action fails after it has already changed the moderation item.
     await repo.transact((unit) => { unit.read().posts = unit.read().posts.filter((post) => post.id !== 'POST-0102') })
     const response = await admin.post('/api/pages/P50/actions').send({ action: 'moderate', recordId: 'MOD-0101', reason: 'Off topic', payload: { decision: 'remove', notifyAuthor: false } })

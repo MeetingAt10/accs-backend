@@ -267,15 +267,6 @@
    ]
   },
   {
-   "id": "STF-01",
-   "role": "staff",
-   "name": "Staff workspace",
-   "pages": [
-    "P03",
-    "P04"
-   ]
-  },
-  {
    "id": "CHR-01",
    "role": "chair",
    "name": "Program dashboard",
@@ -553,24 +544,7 @@
     "P12",
     "P13"
    ]
-  },
-  {
-   "id": "PRES-01",
-   "role": "president",
-   "name": "Executive case intake",
-   "pages": [
-    "P03",
-    "P21",
-    "P22"
-   ]
-  },
-  {
-   "id": "PRES-02",
-   "role": "president",
-   "name": "Executive case action",
-   "pages": [
-    "P22"
-   ]
   }
- ]
+ ],
+ "note": "PRES-01 and PRES-02 removed on 2026-11-10: the President's Office is no longer part of ACCS."
 }

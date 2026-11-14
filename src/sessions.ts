@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
+import { formerAccountIds } from './renames.js'
 import {
   ConditionalCheckFailedException,
   DynamoDBClient,
@@ -29,7 +30,7 @@ export type Session = {
   status: SessionStatus
 }
 
-// TBD(D-08): retention and timeout values are not approved yet. These are provisional defaults.
+// Session timeouts approved under DOC003 D-08 on 2026-11-10.
 export const sessionPolicy = {
   normal: { idleMs: 30 * 60 * 1000, absoluteMs: 12 * 60 * 60 * 1000 },
   remember: { idleMs: 7 * 24 * 60 * 60 * 1000, absoluteMs: 30 * 24 * 60 * 60 * 1000 },
@@ -78,7 +79,8 @@ export function createMemorySessionStore(): SessionStore {
       if (found) found.status = 'revoked'
     },
     async revokeUser(userId, keepSessionId) {
-      for (const session of sessions.values()) if (session.userId === userId && session.sessionId !== keepSessionId) session.status = 'revoked'
+      const ids = [userId, ...formerAccountIds(userId)]
+      for (const session of sessions.values()) if (ids.includes(session.userId) && session.sessionId !== keepSessionId) session.status = 'revoked'
     },
   }
 }
@@ -166,6 +168,8 @@ export function createDynamoSessionStore(tableName: string, client = new DynamoD
     },
     revoke: markRevoked,
     async revokeUser(userId, keepSessionId) {
+      // Sessions started before an account rename are stored under the old ID and still sign in (renames.ts).
+      for (const id of [userId, ...formerAccountIds(userId)]) {
       let ExclusiveStartKey: Record<string, AttributeValue> | undefined
       do {
         const page = await client.send(new QueryCommand({
@@ -173,7 +177,7 @@ export function createDynamoSessionStore(tableName: string, client = new DynamoD
           IndexName: 'GSI2',
           // GSI2 also lists role holders under ROLE#…, so the SESSION# prefix keeps this to sessions.
           KeyConditionExpression: 'GSI2PK = :user AND begins_with(GSI2SK, :prefix)',
-          ExpressionAttributeValues: { ':user': s(`USER#${userId}`), ':prefix': s('SESSION#') },
+          ExpressionAttributeValues: { ':user': s(`USER#${id}`), ':prefix': s('SESSION#') },
           ExclusiveStartKey,
         }))
         for (const item of page.Items ?? []) {
@@ -182,6 +186,7 @@ export function createDynamoSessionStore(tableName: string, client = new DynamoD
         }
         ExclusiveStartKey = page.LastEvaluatedKey
       } while (ExclusiveStartKey)
+      }
     },
   }
 }

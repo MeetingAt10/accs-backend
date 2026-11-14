@@ -6,6 +6,7 @@ import { roleSchema, type User } from './schemas.js'
 import { conflict, unavailable } from './services.js'
 import type { SessionStore } from './sessions.js'
 import type { Repository } from './store.js'
+import { rosterFor, route } from './escalation/engine.js'
 
 // The dev toolbox: testers on the development stack change to another account without signing out. The session cookie
 // is httpOnly, so the API does the swap. Anyone signed in on a stack that has these routes can become any active account,
@@ -18,6 +19,7 @@ export const devToolboxEnabled = ({ tablePrefix, nodeEnv }: Stack) => (tablePref
 export const isDevToolboxCall = (method: string, path: string) => (method === 'GET' && path === '/dev/users') || (method === 'POST' && path === '/dev/switch-user')
 
 const devUsersResponseSchema = z.object({ users: z.array(z.object({ id: z.string(), name: z.string(), roles: z.array(roleSchema), active: z.boolean(), username: z.string().optional() })) })
+const tryEscalationSchema = z.object({ reporterId: z.string().trim().min(1).max(64), narrative: z.string().trim().min(1).max(4000), aboutAdvisor: z.boolean().default(false) }).strict()
 const switchUserSchema = z.object({ userId: z.string().trim().min(1).max(64) }).strict()
 
 export type DevDeps = {
@@ -52,6 +54,22 @@ export function devRouter({ repository, sessions, start, out }: DevDeps) {
     await sessions.revoke(res.locals.sessionId as string)
     await start(req, res, target)
     await out(res, target)
+  })
+
+  // Escalation lab: where a report would go for a given student, with the full trace. Nothing is stored or sent.
+  router.post('/escalation/try', async (req, res) => {
+    const { reporterId, narrative, aboutAdvisor } = tryEscalationSchema.parse(req.body)
+    const result = await repository.view((unit) => {
+      const db = unit.read()
+      const reporter = db.users.find((u) => u.id === reporterId && u.roles.includes('student'))
+      if (!reporter) throw unavailable()
+      const adviser = db.users.find((u) => u.id === reporter.adviserId && u.active && u.roles.includes('professor'))
+      const people = rosterFor({ ...reporter, adviserId: adviser?.id }, db.users, db.spaces)
+      const chairIds = db.users.filter((u) => u.active && u.roles.includes('chair') && u.program === reporter.program).map((u) => u.id)
+      const decision = route(narrative, people, { aboutAdvisor, conflictedAdviser: false, involvedUserIds: [] }, chairIds)
+      return { decision, roster: people.map(({ id, name, role, aliases }) => ({ id, name, role, aliases: aliases.map((a) => a.tokens.join(' ').replace(/^hon /, 'sir/ma\'am ')) })) }
+    }, [])
+    res.json(result)
   })
 
   return router

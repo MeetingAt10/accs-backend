@@ -28,16 +28,18 @@ describe('where each collection is stored', () => {
   it('follows the DOC006 table mapping', () => {
     expect(persisted).toEqual({
       reports: 'ccs_grievance', clusters: 'ccs_grievance',
-      consultations: 'ccs_scheduling', slots: 'ccs_scheduling', events: 'ccs_scheduling', todos: 'ccs_scheduling',
+      consultations: 'ccs_scheduling', slots: 'ccs_scheduling', events: 'ccs_scheduling', todos: 'ccs_scheduling', loadSchedules: 'ccs_scheduling',
       threads: 'ccs_messaging',
+      materials: 'ccs_academic',
       notifications: 'ccs_notification', settings: 'ccs_notification',
       audit: 'ccs_audit',
       posts: 'ccs_community',
       moderation: 'ccs_moderation',
       cycles: 'ccs_evaluation', assignments: 'ccs_evaluation', followUps: 'ccs_evaluation',
-      restrictions: 'ccs_discipline', referrals: 'ccs_discipline', goodMoral: 'ccs_discipline',
+      restrictions: 'ccs_discipline', referrals: 'ccs_discipline', strikes: 'ccs_discipline', strikeSettlements: 'ccs_discipline', goodMoral: 'ccs_discipline',
       drafts: 'ccs_assistant', telemetry: 'ccs_assistant',
       permissionOverrides: 'ccs_identity',
+      photos: 'ccs_identity',
     })
   })
 })
@@ -47,19 +49,19 @@ describe('collections that are not plain rows', () => {
     const { store, cold } = stack()
     await cold().transact((unit) => {
       const db = unit.read()
-      db.permissionOverrides['staff:post.create'] = false
-      db.permissionOverrides['staff:post.comment'] = true
+      db.permissionOverrides['organization:post.create'] = false
+      db.permissionOverrides['organization:post.comment'] = true
       db.drafts['QCU-STU-CS'] = { narrative: 'Unfinished' }
       db.settings['QCU-STU-CS'] = { theme: 'dark', density: 'compact', priorities: {} }
     })
     expect(store.all().map((item) => [item.table, item.collection, item.id]).sort()).toEqual([
       ['ccs_assistant', 'drafts', 'QCU-STU-CS'],
-      ['ccs_identity', 'permissionOverrides', 'staff:post.comment'],
-      ['ccs_identity', 'permissionOverrides', 'staff:post.create'],
+      ['ccs_identity', 'permissionOverrides', 'organization:post.comment'],
+      ['ccs_identity', 'permissionOverrides', 'organization:post.create'],
       ['ccs_notification', 'settings', 'QCU-STU-CS'],
     ])
     const db = await cold().view((unit) => unit.read())
-    expect(db.permissionOverrides).toEqual({ 'staff:post.create': false, 'staff:post.comment': true })
+    expect(db.permissionOverrides).toEqual({ 'organization:post.create': false, 'organization:post.comment': true })
     expect(db.drafts['QCU-STU-CS']).toEqual({ narrative: 'Unfinished' })
     expect(db.settings['QCU-STU-CS']?.theme).toBe('dark')
   })
@@ -107,16 +109,16 @@ const writes: { collection: string; table: string; step: Step }[] = [
   { collection: 'posts', table: 'ccs_community', step: { as: 'QCU-STU-IT-A', page: 'P05', action: 'createPost', payload: post } },
   { collection: 'moderation', table: 'ccs_moderation', step: { as: 'QCU-STU-IT-A', page: 'P06', action: 'flag', recordId: 'POST-0101', payload: { reason: 'Off topic' } } },
   { collection: 'todos', table: 'ccs_scheduling', step: { as: 'QCU-STU-IT-A', page: 'P13', action: 'createTodo', payload: { title: 'Stored', date: '2026-11-05' } } },
-  { collection: 'cycles', table: 'ccs_evaluation', step: { as: 'QCU-DEAN', page: 'P30', action: 'createCycle', payload: { title: 'Stored cycle', term: 'Term', opens: '2027-01-01', closes: '2027-03-01' } } },
+  { collection: 'cycles', table: 'ccs_evaluation', step: { as: 'QCU-FAC-PAULA-DELACRUZ', page: 'P30', action: 'createCycle', payload: { title: 'Stored cycle', term: 'Term', opens: '2027-01-01', closes: '2027-03-01' } } },
   { collection: 'followUps', table: 'ccs_evaluation', step: { as: 'QCU-CHAIR-IT', page: 'P29', action: 'saveFollowUp', recordId: 'QCU-PROF-IT', payload: { note: 'Discussed' } } },
-  { collection: 'restrictions', table: 'ccs_discipline', step: { as: 'QCU-ADMIN', page: 'P35', action: 'applyRestriction', reason: 'Approved', payload: { studentId: 'QCU-STU-IT-A', features: ['post.create'], basis: 'Approved review', decisionReference: 'QCU-DEC-002', until: '2099-01-01' } } },
+  { collection: 'restrictions', table: 'ccs_discipline', step: { as: 'ACCS-ADMIN', page: 'P35', action: 'applyRestriction', reason: 'Approved', payload: { studentId: 'QCU-STU-IT-A', features: ['post.create'], basis: 'Approved review', decisionReference: 'QCU-DEC-002', until: '2099-01-01' } } },
   { collection: 'referrals', table: 'ccs_discipline', step: { as: 'QCU-GUIDANCE', page: 'P35', action: 'referRestriction', reason: 'Review the status', payload: { studentId: 'QCU-STU-IT-A', change: 'Review' } } },
   { collection: 'goodMoral', table: 'ccs_discipline', step: { as: 'QCU-GUIDANCE', page: 'P34', action: 'reviewGoodMoral', recordId: 'QCU-STU-RESTRICTED', payload: { status: 'Prerequisites reviewed', decisionSource: 'Office' } } },
   { collection: 'clusters', table: 'ccs_grievance', step: { as: 'QCU-CHAIR-IT', page: 'P24', action: 'reviewCluster', recordId: 'CLUSTER-0101', reason: 'Reviewed', payload: { decision: 'confirmed' } } },
   { collection: 'settings', table: 'ccs_notification', step: { as: 'QCU-STU-IT-A', page: 'P43', action: 'saveSettings', payload: { theme: 'dark', density: 'compact' } } },
   { collection: 'drafts', table: 'ccs_assistant', step: { as: 'QCU-STU-IT-A', page: 'P19', action: 'saveDraft', payload: { narrative: 'Unfinished concern' } } },
   { collection: 'telemetry', table: 'ccs_assistant', step: { as: 'QCU-STU-IT-A', page: 'P41', action: 'assistantAsk', payload: { question: 'Show my schedule' } } },
-  { collection: 'permissionOverrides', table: 'ccs_identity', step: { as: 'QCU-ADMIN', page: 'P48', action: 'updatePermission', reason: 'Proposal', payload: { role: 'staff', permission: 'post.create', allowed: false } } },
+  { collection: 'permissionOverrides', table: 'ccs_identity', step: { as: 'ACCS-ADMIN', page: 'P48', action: 'updatePermission', reason: 'Proposal', payload: { role: 'organization', permission: 'post.create', allowed: false } } },
 ]
 
 describe('a route writes through one instance', () => {
@@ -136,7 +138,7 @@ describe('a route writes through one instance', () => {
 
   it('stores an announcement event in ccs_scheduling', async () => {
     const { store, cold, instance } = stack()
-    const { agent } = await signIn(instance(), 'QCU-DEAN')
+    const { agent } = await signIn(instance(), 'QCU-FAC-PAULA-DELACRUZ')
     const response = await agent.post('/api/pages/P05/actions').send({ action: 'createPost', payload: { title: 'Open house', body: 'Details.', audience: 'college', kind: 'announcement', eventDate: '2027-01-15', eventTime: '09:00', eventPlace: 'IC 301' } })
     expect(response.status, JSON.stringify(response.body)).toBe(200)
     expect(store.all().filter((item) => item.collection === 'events').map((item) => item.table)).toEqual(['ccs_scheduling'])
@@ -145,11 +147,11 @@ describe('a route writes through one instance', () => {
 
   it('stores generated assignments in ccs_evaluation when a cycle moves to review', async () => {
     const { store, instance } = stack()
-    const { agent: dean } = await signIn(instance(), 'QCU-DEAN')
+    const { agent: dean } = await signIn(instance(), 'QCU-FAC-PAULA-DELACRUZ')
     const dates = { opens: '2027-01-01', closes: '2027-03-01' }
     const created = await dean.post('/api/pages/P30/actions').send({ action: 'createCycle', payload: { title: 'Stored cycle', term: 'Term', ...dates } })
     const id = created.body.record.id as string
-    const saved = await dean.post('/api/pages/P31/actions').send({ action: 'saveCycle', recordId: id, payload: { title: 'Stored cycle', instructions: 'Answer honestly.', ...dates, questions: [{ id: 'Q1', criterion: 'Teaching', text: 'Is the class clear?', type: 'rating', required: true }], forms: ['peer'] } })
+    const saved = await dean.post('/api/pages/P31/actions').send({ action: 'saveCycle', recordId: id, payload: { title: 'Stored cycle', instructions: 'Answer honestly.', ...dates, questions: [{ id: 'Q1', criterion: 'Teaching', text: 'Is the class clear?', type: 'rating', required: true }], forms: ['student'] } })
     expect(saved.status, JSON.stringify(saved.body)).toBe(200)
     const moved = await dean.post('/api/pages/P31/actions').send({ action: 'cycleAction', recordId: id, payload: { status: 'In review' } })
     expect(moved.status, JSON.stringify(moved.body)).toBe(200)
@@ -167,7 +169,8 @@ describe('a route writes through one instance', () => {
     expect(store.all().filter((item) => item.collection === 'posts').map((item) => [item.id, item.version])).toEqual([['POST-0101', 2]])
     const stored = JSON.parse(store.all().find((item) => item.collection === 'posts')!.data!)
     expect(stored.comments.map((entry: { body: string }) => entry.body)).toContain('Stored comment')
-    expect(stored.reactions).toContain('QCU-STU-CS')
+    // Each person's reaction is kept by user ID (#86).
+    expect(stored.reactionsBy).toMatchObject({ 'QCU-STU-CS': 'like' })
     const { agent: second } = await signIn(instance(), 'QCU-STU-IT-B')
     expect(JSON.stringify((await second.get('/api/pages/P06?id=POST-0101')).body)).toContain('Stored comment')
   })
@@ -177,7 +180,7 @@ describe('a route writes through one instance', () => {
     const [first, second] = [instance(), instance()]
     const { agent: student } = await signIn(second, 'QCU-STU-IT-A')
     expect((await student.get('/api/pages/P05')).status).toBe(200)
-    const { agent: admin } = await signIn(first, 'QCU-ADMIN')
+    const { agent: admin } = await signIn(first, 'ACCS-ADMIN')
     const applied = await admin.post('/api/pages/P35/actions').send({ action: 'applyRestriction', reason: 'Approved', payload: { studentId: 'QCU-STU-IT-A', features: ['post.create'], basis: 'Approved review', decisionReference: 'QCU-DEC-002', until: '2099-01-01' } })
     expect(applied.status).toBe(200)
     expect((await student.get('/api/pages/P05')).status).toBe(403)
@@ -208,11 +211,11 @@ describe('accounts across a restart', () => {
 
   it('keeps P46/P47 role grants after a restart', async () => {
     const { instance } = stack()
-    const { agent: admin } = await signIn(instance(), 'QCU-ADMIN')
-    const granted = await admin.post('/api/pages/P47/actions').send({ action: 'updateRoles', recordId: 'QCU-STAFF', reason: 'New duties', payload: { roles: ['staff', 'guidance'] } })
+    const { agent: admin } = await signIn(instance(), 'ACCS-ADMIN')
+    const granted = await admin.post('/api/pages/P47/actions').send({ action: 'updateRoles', recordId: 'QCU-ORG', reason: 'New duties', payload: { roles: ['organization', 'guidance'] } })
     expect(granted.status, JSON.stringify(granted.body)).toBe(200)
-    const { agent: restarted } = await signIn(instance(), 'QCU-STAFF')
-    expect((await restarted.get('/api/session')).body.user.roles).toEqual(['staff', 'guidance'])
+    const { agent: restarted } = await signIn(instance(), 'QCU-ORG')
+    expect((await restarted.get('/api/session')).body.user.roles).toEqual(['organization', 'guidance'])
   })
 })
 
@@ -220,7 +223,7 @@ describe('the record repository behaves like memory', () => {
   beforeAll(() => { vi.spyOn(console, 'log').mockImplementation(() => {}) })
   afterAll(() => vi.restoreAllMocks())
 
-  const accounts = ['QCU-STU-IT-A', 'QCU-ORG', 'QCU-PROF-IT', 'QCU-STAFF', 'QCU-CHAIR-IT', 'QCU-DEAN', 'QCU-ADMIN', 'QCU-GUIDANCE', 'QCU-OSAS', 'QCU-PRESIDENT']
+  const accounts = ['QCU-STU-IT-A', 'QCU-ORG', 'QCU-PROF-IT', 'QCU-CHAIR-IT', 'QCU-FAC-PAULA-DELACRUZ', 'ACCS-ADMIN', 'QCU-GUIDANCE', 'QCU-OSAS']
   const pageIds = Array.from({ length: 50 }, (_, n) => `P${String(n + 3).padStart(2, '0')}`)
 
   it.each(accounts)('%s gets the same status on every page', async (id) => {
@@ -245,7 +248,7 @@ describe('the record repository behaves like memory', () => {
     expect(created.status, JSON.stringify(created.body)).toBe(200)
     expect(created.body.record.created).toBe(1)
     expect((await secretary.post('/api/auth/change-password').send({ currentPassword: secretaryPassword, password: 'Sec#Passw0rd-2027' })).status).toBe(200)
-    const { agent: admin } = await signIn(app, 'QCU-ADMIN')
+    const { agent: admin } = await signIn(app, 'ACCS-ADMIN')
     expect((await admin.post('/api/admin/accounts/QCU-STU-CS/reset-code').send({})).status).toBe(200)
     expect((await admin.post('/api/auth/sign-out').send({})).status).toBe(200)
     expect((await admin.get('/api/session')).status).toBe(401)

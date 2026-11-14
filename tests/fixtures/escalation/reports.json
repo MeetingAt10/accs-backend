@@ -1,0 +1,304 @@
+{
+ "note": "Synthetic labeled reports for the escalation engine. Names are invented. Roster: adviser Juan Dela Cruz; subject professor Maria Santos (IT302 Networking); Program Chair Andrea Reyes; Dean Ramon Villanueva. Expected values use the default switches (higher-office bypass off, critical-to-Guidance on). conflict lists the roles at or above the bypass score.",
+ "cases": [
+  {
+   "text": "si sir jdc laging absent, buong section namin hindi naturuan",
+   "conflict": [
+    "adviser"
+   ],
+   "route": "chair"
+  },
+  {
+   "text": "si sir delacrus late lagi",
+   "conflict": [
+    "adviser"
+   ],
+   "route": "chair"
+  },
+  {
+   "text": "tinulungan ako ni sir jdc, pero yung registrar hindi nagrereply sa email ko",
+   "conflict": [],
+   "route": "adviser"
+  },
+  {
+   "text": "Prof. Dela Cruz is always late and never told us about the quiz",
+   "conflict": [
+    "adviser"
+   ],
+   "route": "chair"
+  },
+  {
+   "text": "adviser namin hindi pumapasok tuwing Friday",
+   "conflict": [
+    "adviser"
+   ],
+   "route": "chair"
+  },
+  {
+   "text": "our adviser yelled at a classmate in front of everyone",
+   "conflict": [
+    "adviser"
+   ],
+   "route": "chair"
+  },
+  {
+   "text": "sinigawan kami ni sir juan kahapon sa lab",
+   "conflict": [
+    "adviser"
+   ],
+   "route": "chair"
+  },
+  {
+   "text": "si maam santos hindi nagtuturo sa IT302, puro self study",
+   "conflict": [
+    "subject"
+   ],
+   "route": "chair"
+  },
+  {
+   "text": "yung prof sa networking laging absent",
+   "conflict": [
+    "subject"
+   ],
+   "route": "chair"
+  },
+  {
+   "text": "Ms. Santos is unfair in grading our networking lab",
+   "conflict": [
+    "subject"
+   ],
+   "route": "chair"
+  },
+  {
+   "text": "networking prof namin binagsak lahat kahit pumasa sa exam",
+   "conflict": [
+    "subject"
+   ],
+   "route": "chair"
+  },
+  {
+   "text": "The lab timetable changed on Monday and our group missed an activity.",
+   "conflict": [],
+   "route": "adviser"
+  },
+  {
+   "text": "sira yung aircon sa room 304, sobrang init",
+   "conflict": [],
+   "route": "adviser"
+  },
+  {
+   "text": "Pakicheck po yung wifi sa library, palaging down",
+   "conflict": [],
+   "route": "adviser"
+  },
+  {
+   "text": "buong BSIT hindi pa nakakatanggap ng schedule ng enrollment",
+   "conflict": [],
+   "route": "chair"
+  },
+  {
+   "text": "the whole college has no water in the comfort rooms since Monday",
+   "conflict": [],
+   "route": "chair"
+  },
+  {
+   "text": "lahat ng BSCS walang access sa portal for grades",
+   "conflict": [],
+   "route": "chair"
+  },
+  {
+   "text": "Sir Dela Cruz helped us file the request. Thank you po.",
+   "conflict": [],
+   "route": "adviser"
+  },
+  {
+   "text": "nagpasalamat kami kay sir jdc sa extra consultation",
+   "conflict": [],
+   "route": "adviser"
+  },
+  {
+   "text": "sinabi ni sir juan na i-report ko dito, yung canteen kasi madumi",
+   "conflict": [],
+   "route": "adviser"
+  },
+  {
+   "text": "Program chair namin hindi nagrereply sa request namin for petition",
+   "conflict": [
+    "chair"
+   ],
+   "route": "adviser"
+  },
+  {
+   "text": "Dr. Reyes is biased against our section during defense",
+   "conflict": [
+    "chair"
+   ],
+   "route": "adviser"
+  },
+  {
+   "text": "Dean Villanueva cancelled our event without notice",
+   "conflict": [
+    "dean"
+   ],
+   "route": "adviser"
+  },
+  {
+   "text": "si maam reyes laging late sa meeting with officers",
+   "conflict": [
+    "chair"
+   ],
+   "route": "adviser"
+  },
+  {
+   "text": "sir jdc sinabihan kami na wag na mag report, tapos siya mismo hindi pumapasok",
+   "conflict": [
+    "adviser"
+   ],
+   "route": "chair"
+  },
+  {
+   "text": "si sir dela cruz ay mabait, pero ang labo ng instructions sa group project ng ibang subject",
+   "conflict": [],
+   "route": "adviser"
+  },
+  {
+   "text": "Sir Juan Dela Cruz did not tell us about the change in the deadline",
+   "conflict": [
+    "adviser"
+   ],
+   "route": "chair"
+  },
+  {
+   "text": "hinipuan ako ng isang estudyante sa hallway",
+   "conflict": [],
+   "route": "guidance",
+   "critical": true
+  },
+  {
+   "text": "may nagbanta sa akin na papatayin daw ako sa group chat",
+   "conflict": [],
+   "route": "guidance",
+   "critical": true
+  },
+  {
+   "text": "Hinipuan ako ni sir sa faculty room.",
+   "conflict": [],
+   "route": "guidance",
+   "critical": true,
+   "note": "critical report where the faculty member is only called sir"
+  },
+  {
+   "text": "laging absent si sir dlc at walang feedback sa projects namin",
+   "conflict": [
+    "adviser"
+   ],
+   "route": "chair"
+  },
+  {
+   "text": "si sir dela cruz tumulong sa amin sa thesis. Ang problema ay yung library na laging sarado.",
+   "conflict": [],
+   "route": "adviser"
+  },
+  {
+   "text": "bastos makipag usap si maam maria sa amin",
+   "conflict": [
+    "subject"
+   ],
+   "route": "chair"
+  },
+  {
+   "text": "walang feedback sa IT302 hanggang ngayon, si maam santos kasi busy daw",
+   "conflict": [
+    "subject"
+   ],
+   "route": "chair"
+  },
+  {
+   "text": "yung sched ng finals nag overlap sa ibang subject",
+   "conflict": [],
+   "route": "adviser"
+  },
+  {
+   "text": "my adviser ignores our messages about the OJT papers",
+   "conflict": [
+    "adviser"
+   ],
+   "route": "chair"
+  },
+  {
+   "text": "Sir Delacruz, our adviser, approved our request quickly",
+   "conflict": [],
+   "route": "adviser"
+  },
+  {
+   "text": "late ako ulit sa klase ni sir dela cruz kasi traffic, sorry po",
+   "conflict": [],
+   "route": "adviser",
+   "note": "student's own lateness"
+  },
+  {
+   "text": "absent ako kahapon sa IT302 ni maam santos kasi may sakit ako, paano po ang quiz",
+   "conflict": [],
+   "route": "adviser",
+   "note": "student's own absence"
+  },
+  {
+   "text": "broke na yung projector sa room 210",
+   "conflict": [],
+   "route": "adviser",
+   "note": "fuzzy collision broke/brook-like"
+  },
+  {
+   "text": "yung classmate kong si Paolo Santos laging late sa group meetings",
+   "conflict": [],
+   "route": "adviser",
+   "note": "classmate with the same surname"
+  },
+  {
+   "text": "Dela Cruz Hall laging walang tubig",
+   "conflict": [],
+   "route": "adviser",
+   "note": "building with the same name"
+  },
+  {
+   "text": "ang reyes ng canteen ay laging sarado tuwing lunch",
+   "conflict": [],
+   "route": "adviser",
+   "note": "surname-like word"
+  },
+  {
+   "text": "may JDC na org na laging late mag-announce",
+   "conflict": [],
+   "route": "adviser",
+   "note": "initials used for something else"
+  },
+  {
+   "text": "ng dean's list hindi pa nirerelease, laging late ang posting",
+   "conflict": [],
+   "route": "adviser",
+   "note": "dean as part of dean's list"
+  },
+  {
+   "text": "Yung adviser ko hindi nagrereply sa messages ko.",
+   "conflict": [
+    "adviser"
+   ],
+   "route": "chair",
+   "note": "role phrase ending in ko is not the student's own lateness"
+  },
+  {
+   "text": "Yung adviser namin hindi nagtuturo",
+   "conflict": [
+    "adviser"
+   ],
+   "route": "chair"
+  },
+  {
+   "text": "My adviser ignores my messages",
+   "conflict": [
+    "adviser"
+   ],
+   "route": "chair"
+  }
+ ]
+}

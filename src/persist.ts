@@ -1,6 +1,7 @@
 import type { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 
 import { ulid } from './ids.js'
+import { renameAccountIds, renamedAccountIds } from './renames.js'
 import type { DomainTable } from './env.js'
 import { createDynamoRecordStore, RecordConflict, writeLimit, type RecordStore, type RecordWrite, type StoredRecord } from './records.js'
 import { ApiError } from './services.js'
@@ -14,6 +15,8 @@ export const persisted: Record<Collection, DomainTable> = {
   slots: 'ccs_scheduling',
   events: 'ccs_scheduling',
   todos: 'ccs_scheduling',
+  materials: 'ccs_academic',
+  loadSchedules: 'ccs_scheduling',
   threads: 'ccs_messaging',
   notifications: 'ccs_notification',
   settings: 'ccs_notification',
@@ -25,22 +28,38 @@ export const persisted: Record<Collection, DomainTable> = {
   followUps: 'ccs_evaluation',
   restrictions: 'ccs_discipline',
   referrals: 'ccs_discipline',
+  strikes: 'ccs_discipline',
+  strikeSettlements: 'ccs_discipline',
   goodMoral: 'ccs_discipline',
   // Report drafts hold concern narratives, so they stay out of the forum table.
   drafts: 'ccs_assistant',
   telemetry: 'ccs_assistant',
   permissionOverrides: 'ccs_identity',
+  // Profile photos (#85): one small image per person, kept apart from the auth store that every request loads.
+  photos: 'ccs_identity',
 }
 const stored = Object.keys(persisted) as Collection[]
 // A unit of work that loses a version race runs again on fresh data, up to this many times in all.
 const attempts = 3
 
 type Row = Record<string, unknown>
+
+// The President's Office stage was removed on 2026-11-10. A report stored at that stage, or with it in its history or
+// disclosures, is read as being with OSAS, now the last stage; it is written back that way only when it next changes.
+function upgrade(name: Collection, stored: Row): Row {
+  // Renamed accounts (QCU-DEAN is now CCS-DEAN): every field that holds the old ID is read with the new one.
+  const row = renameAccountIds(stored)
+  if (name !== 'reports') return row
+  const stage = (value: unknown) => (value === 'executive' ? 'osas' : value)
+  const history = Array.isArray(row.history) ? row.history.map((entry: Row) => ({ ...entry, stage: stage(entry.stage) })) : row.history
+  const disclosedTo = Array.isArray(row.disclosedTo) ? [...new Set(row.disclosedTo.map(stage))] : row.disclosedTo
+  return { ...row, stage: stage(row.stage), history, disclosedTo }
+}
 type Loaded = Partial<Record<Collection, StoredRecord[]>>
 const addOnly = () => new Error('Audit entries are add-only.')
 
 // Domain rules see these as objects. Each key is stored as its own record, wrapped so a value can be a plain boolean.
-const objectCollections: ReadonlySet<Collection> = new Set(['drafts', 'settings', 'permissionOverrides'])
+const objectCollections: ReadonlySet<Collection> = new Set(['drafts', 'settings', 'permissionOverrides', 'photos'])
 const toRows = (name: Collection, value: unknown): Row[] => (objectCollections.has(name) ? Object.entries(value as Row).map(([id, entry]) => ({ id, value: entry })) : (value as Row[]))
 const fromRows = (name: Collection, rows: Row[]): unknown => (objectCollections.has(name) ? Object.fromEntries(rows.map((row) => [row.id, row.value])) : rows)
 // Good Moral has one row per student and no ID of its own.
@@ -76,21 +95,23 @@ export function createRecordRepository(store: RecordStore): Repository {
     const baseline = new Map<Collection, Map<string, string>>()
     const versions = new Map<Collection, Map<string, number>>()
     for (const name of stored) {
-      const records = loaded[name]
+      let records = loaded[name]
       if (!records) {
         Object.defineProperty(db, name, { enumerable: true, configurable: true, get: () => { throw new Error(`The ${name} collection was not loaded for this unit of work.`) } })
         continue
       }
-      const byId = new Map(records.map((record) => [record.id, record]))
+      const ids = new Set(records.map((record) => record.id))
+      records = records.filter((record) => !(record.id in renamedAccountIds && ids.has(renamedAccountIds[record.id]!)))
+      const byId = new Map(records.map((record) => [renamedAccountIds[record.id] ?? record.id, record]))
       const seedRows = toRows(name, collections[name])
       const seeded = new Set(seedRows.map((row) => keyOf(name, row)))
       const merged: Row[] = []
       for (const row of seedRows) {
         const record = byId.get(keyOf(name, row))
         if (!record) merged.push(row)
-        else if (record.data !== undefined) merged.push(JSON.parse(record.data))
+        else if (record.data !== undefined) merged.push(upgrade(name, JSON.parse(record.data)))
       }
-      for (const record of records) if (!seeded.has(record.id) && record.data !== undefined) merged.push(JSON.parse(record.data))
+      for (const record of records) if (!seeded.has(renamedAccountIds[record.id] ?? record.id) && record.data !== undefined) merged.push(upgrade(name, JSON.parse(record.data)))
       collections[name] = fromRows(name, merged)
       baseline.set(name, new Map(merged.map((row) => [keyOf(name, row), JSON.stringify(row)])))
       versions.set(name, new Map(records.map((record) => [record.id, record.version])))
