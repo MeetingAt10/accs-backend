@@ -59,6 +59,21 @@ describe('the confidential mark (issue #31)', () => {
     expect(await view(dean!, id)).toMatchObject({ narrative: statement.narrative, allowChair: false, allowDean: true })
   })
 
+  it('keeps a report stored before consent was recorded to the old answers', async () => {
+    const [student, dean] = await Promise.all(['QCU-STU-CS', 'QCU-FAC-PAULA-DELACRUZ'].map(login))
+    const id = await file(student!)
+    Object.assign(report(id), { consent: undefined, allowChair: false, allowDean: false })
+    expect(JSON.stringify((await dean!.get(`/api/pages/P22?id=${id}`)).body)).not.toContain(statement.narrative)
+  })
+
+  it('keeps the words of a confidential report out of a cluster review answer too', async () => {
+    const chair = await login('QCU-CHAIR-IT')
+    report('RPT-0241').confidential = true
+    const reviewed = await chair.post('/api/pages/P24/actions').send({ action: 'reviewCluster', recordId: 'CLUSTER-0101', reason: 'Checked', payload: { decision: 'confirmed' } })
+    expect(reviewed.status, JSON.stringify(reviewed.body)).toBe(200)
+    expect(JSON.stringify(reviewed.body)).not.toContain('Lab schedule')
+  })
+
   it('keeps the words of a confidential report out of its similar-report group', async () => {
     const chair = await login('QCU-CHAIR-IT')
     const before = (await chair.get('/api/pages/P23')).body.data.clusters.find((c: { id: string }) => c.id === 'CLUSTER-0101')

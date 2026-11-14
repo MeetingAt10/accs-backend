@@ -79,7 +79,8 @@ export function isConflicted(user: User, report: Report) { return report.involve
 // Baseline of 10 November 2026: the Program Chair has access to every concern of their program and the Dean to every concern of
 // the college, without the student's permission. A report filed under an earlier consent wording keeps what the student agreed
 // to then: its allowChair / allowDean answers still decide, as before (a concern about the adviser always reaches the Chair).
-export const earlierConsent = (report: Report) => !!report.consent && report.consent.version < consentWording.version
+// A student's report stored before consent was recorded counts as earlier consent too; a faculty report has none to keep.
+export const earlierConsent = (report: Report) => report.source !== 'faculty' && (!report.consent || report.consent.version < consentWording.version)
 const chairMay = (user: User, report: Report) => hasRole(user,'chair') && user.program === report.program && (!earlierConsent(report) || report.allowChair === true || report.aboutAdvisor === true)
 const deanMay = (user: User, report: Report) => hasRole(user,'dean') && (!earlierConsent(report) || report.allowDean === true)
 /** The Program Chair (own program) and the Dean oversee every concern in scope, whatever stage it is at. */

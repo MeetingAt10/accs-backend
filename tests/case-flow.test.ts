@@ -47,6 +47,13 @@ describe('fixed case order (issue #29)', () => {
     expect(report('RPT-0242').stage).toBe('guidance')
   })
 
+  it('refuses an escalation when no office further on can take the report', async () => {
+    const offices = repo.read().users.filter((u) => u.roles.some((r) => ['dean', 'guidance', 'osas'].includes(r))).map((u) => u.id)
+    report('RPT-0242').involvedUserIds.push(...offices)
+    const refused = await act(await login('QCU-CHAIR-IT'), 'RPT-0242', 'escalate')
+    expect([refused.status, report('RPT-0242').stage]).toEqual([409, 'chair'])
+  })
+
   it('lets OSAS resolve and then close a case', async () => {
     const osas = await login('QCU-OSAS')
     expect((await act(osas, 'RPT-0246', 'resolve')).status).toBe(200)
