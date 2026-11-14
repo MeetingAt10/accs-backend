@@ -38,6 +38,15 @@ describe('fixed case order (issue #29)', () => {
     }
   })
 
+  it('passes over an office whose every member is involved in the report', async () => {
+    // RPT-0242 is with the BSIT Program Chair; it is about the Dean, so escalating it skips the Dean.
+    const deans = repo.read().users.filter((u) => u.roles.includes('dean')).map((u) => u.id)
+    report('RPT-0242').involvedUserIds.push(...deans)
+    const sent = await act(await login('QCU-CHAIR-IT'), 'RPT-0242', 'escalate')
+    expect(sent.status, JSON.stringify(sent.body)).toBe(200)
+    expect(report('RPT-0242').stage).toBe('guidance')
+  })
+
   it('lets OSAS resolve and then close a case', async () => {
     const osas = await login('QCU-OSAS')
     expect((await act(osas, 'RPT-0246', 'resolve')).status).toBe(200)

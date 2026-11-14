@@ -59,6 +59,14 @@ describe('booking an appointment', () => {
     }
   })
 
+  it('refuses a time opened before the faculty load and now during a class', async () => {
+    const slot = repo.read().slots.find((s) => s.id === openSlot())!
+    const day = (['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const)[new Date(`${slot.date}T00:00:00Z`).getUTCDay()]!
+    repo.read().loadSchedules.push({ id: 'LOAD-TEST', facultyId: slot.facultyId, term: 'Test', startsOn: slot.date, endsOn: slot.date, day: day as never, start: slot.start, end: slot.end, subject: 'CC 104', uploadedBy: 'QCU-SECRETARY', at: slot.date })
+    const refused = await book(await login('QCU-STU-IT-A'), { purpose: 'Advising' })
+    expect([refused.status, refused.body.error]).toEqual([409, 'The faculty member has a class at that time. Pick another time.'])
+  })
+
   it('stores what the appointment is for, and the professor sees it with the request', async () => {
     const student = await login('QCU-STU-IT-A')
     const booked = await book(student, { category: 'Class or subject', subcategory: 'Exam or quiz review', details: 'Midterm in CC 104' })
