@@ -59,6 +59,16 @@ describe('the confidential mark (issue #31)', () => {
     expect(await view(dean!, id)).toMatchObject({ narrative: statement.narrative, allowChair: false, allowDean: true })
   })
 
+  it('keeps the words of a confidential report out of its similar-report group', async () => {
+    const chair = await login('QCU-CHAIR-IT')
+    const before = (await chair.get('/api/pages/P23')).body.data.clusters.find((c: { id: string }) => c.id === 'CLUSTER-0101')
+    expect(before.title).toBe('Lab schedule changes')
+    report('RPT-0241').confidential = true
+    const cluster = (await chair.get('/api/pages/P23')).body.data.clusters.find((c: { id: string }) => c.id === 'CLUSTER-0101')
+    expect(cluster).toMatchObject({ title: 'Similar reports', phrases: [], dissenting: '' })
+    expect(JSON.stringify((await chair.get('/api/pages/P24?id=CLUSTER-0101')).body.data.record)).not.toContain('Lab schedule')
+  })
+
   it('still counts a confidential concern in the chair’s and the Dean’s lists and analytics', async () => {
     const [student, adviser, chair] = await Promise.all(['QCU-STU-CS', 'QCU-PROF-CS', 'QCU-CHAIR-CS'].map(login))
     const id = await file(student!)

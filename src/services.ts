@@ -612,7 +612,11 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
     case'P20':{const r=pick(ownReports,reportIdOf(db,query.id));if(r)data.record=reportView(db,r,user,true);data.consentWording=consentWording;break}
     case'P21':if(hasPermission(user,'student.report'))Object.assign(data,{canReportStudent:true,categoryOptions:concernCategories,reportableStudents:db.users.filter(u=>u.active&&hasRole(u,'student')&&db.spaces.some(sp=>sp.professorIds.includes(user.id)&&sp.studentIds.includes(u.id))).map(u=>({id:u.id,name:u.name,studentId:u.studentId,program:u.program,section:u.section}))});data.cases=cases.filter(r=>(!query.q||r.id.toLowerCase().includes(query.q.toLowerCase()))&&(!query.status||r.status===query.status)&&(!query.category||r.category===query.category)&&(!query.severity||r.severity===query.severity)).map(r=>reportView(db,r,user));break
     case'P22':{const r=pick(cases,reportIdOf(db,query.id));if(r)data.record=reportView(db,r,user);break}
-    case'P23':case'P24':{const clusters=db.clusters.filter(c=>c.program===user.program);data.clusters=clusters.map(c=>({...c,reportIds:undefined,reportCount:db.reports.filter(r=>c.reportIds.includes(r.id)&&canViewCase(user,r)).length}));data.threshold=Math.round(escalationConfig.similarityThreshold*100);if(pageId==='P24'){const c=pick(clusters,query.id);if(c){data.record={...c,reportIds:undefined};data.reports=db.reports.filter(r=>c.reportIds.includes(r.id)&&canViewCase(user,r)).map(r=>reportView(db,r,user))}}break}
+    case'P23':case'P24':{
+      // A cluster's title and phrases come from its reports' words. They show only when the viewer may read every one of
+      // them: a report marked confidential, or one the viewer is involved in, keeps its words out (#31).
+      const clusterView=(c:Database['clusters'][number])=>{const readable=db.reports.filter(r=>c.reportIds.includes(r.id)).every(r=>canActCase(user,r)||canReadCase(user,r));return {...c,reportIds:undefined,...(readable?{}:{title:'Similar reports',phrases:[],supporting:`${c.reportIds.length} reports share some terms.`,dissenting:''})}}
+      const clusters=db.clusters.filter(c=>c.program===user.program);data.clusters=clusters.map(c=>({...clusterView(c),reportCount:db.reports.filter(r=>c.reportIds.includes(r.id)&&canViewCase(user,r)).length}));data.threshold=Math.round(escalationConfig.similarityThreshold*100);if(pageId==='P24'){const c=pick(clusters,query.id);if(c){data.record=clusterView(c);data.reports=db.reports.filter(r=>c.reportIds.includes(r.id)&&canViewCase(user,r)).map(r=>reportView(db,r,user))}}break}
     case 'P25': {
       if (query.program && hasRole(user, 'chair') && query.program !== user.program) {
         throw unavailable()
@@ -784,7 +788,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
         students:rows.filter(r=>(!statuses.length||r.evaluation&&statuses.includes(r.evaluation.status))&&(!query.clearance||r.clearance.status===query.clearance)),
         clearanceSummary:{clear:rows.filter(r=>r.clearance.status==='clear').length,onHold:rows.filter(r=>r.clearance.status==='on_hold').length},
         summary:cycle?Object.fromEntries((['submitted','pending','missing','none'] as const).map(s=>[s,rows.filter(r=>r.evaluation?.status===s).length])):undefined,
-        filters:{programs:[...new Set(clearanceStudents(db,user).map(u=>u.program).filter(Boolean))].sort(),scope:hasRole(user,'secretary','dean','osas')?'College of Computer Studies':`${user.program} program`}})
+        filters:{programs:[...new Set(clearanceStudents(db,user).map(u=>u.program).filter(Boolean))].sort(),sections:[...new Set(clearanceStudents(db,user).map(u=>u.section).filter(Boolean))].sort(),scope:hasRole(user,'secretary','dean','osas')?'College of Computer Studies':`${user.program} program`}})
       break
     }
     case'P33':data.students=db.users.filter(u=>canStudentRecord(db,user,u)&&match(`${u.name} ${u.studentId}`)).map(u=>person(refreshRestrictions(db,u)));break
