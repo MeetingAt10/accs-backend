@@ -77,8 +77,19 @@ export function aliasesFor(name: string, role: Role, subjects: string[] = []): A
 /** The reporter's own faculty: adviser, the professors of their class spaces, their Program Chair and the Dean. */
 export function rosterFor(reporter: User, users: User[], spaces: Space[]): Person[] {
   const people = new Map<string, Person>()
+  const subjectsOf = new Map<string, string[]>()
   const add = (u: User | undefined, role: Role, subjects: string[] = []) => {
-    if (!u || u.id === reporter.id || people.has(u.id)) return
+    if (!u || u.id === reporter.id) return
+    const known = people.get(u.id)
+    // A professor of several of the reporter's subjects is known by all of them, whatever order the spaces come in.
+    if (known) {
+      if (known.role !== 'subject' || role !== 'subject') return
+      const all = [...new Set([...(subjectsOf.get(u.id) ?? []), ...subjects])]
+      subjectsOf.set(u.id, all)
+      known.aliases = aliasesFor(u.name, 'subject', all)
+      return
+    }
+    subjectsOf.set(u.id, subjects)
     people.set(u.id, { id: u.id, name: u.name, role, aliases: aliasesFor(u.name, role, subjects) })
   }
   add(users.find((u) => u.id === reporter.adviserId), 'adviser')

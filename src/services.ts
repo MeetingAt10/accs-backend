@@ -1540,13 +1540,19 @@ async function checkMessageFiles(repo:Repository,user:User,request:ActionRequest
   }
   const post=request.action==='createPost'||request.action==='updatePost'
   const kept=request.action==='updatePost'?await repo.view(unit=>unit.read().posts.find(p=>p.id===request.recordId)?.attachments?.map(a=>a.id)??[]):[]
-  for(const f of parsed.filter(file=>!kept.includes(file.id))){
-    const key=`materials/${post?'posts':'sent'}/${ulid()}/${safeFileName(f.fileName)}`
-    await storage.copy(messageFileKey(user.id,f.id,f.fileName),key)
-    // Checked again on the copy: the upload could have changed between the check above and the copy.
-    const copied=await storage.head(key)
-    if(!copied||copied.size!==f.size||copied.contentType!==undefined&&copied.contentType!==f.contentType){await storage.remove(key);throw conflict(`${f.fileName} does not match what was uploaded. Choose it again.`)}
-    keys.set(f.id,key)
+  try {
+    for(const f of parsed.filter(file=>!kept.includes(file.id))){
+      const key=`materials/${post?'posts':'sent'}/${ulid()}/${safeFileName(f.fileName)}`
+      keys.set(f.id,key)
+      await storage.copy(messageFileKey(user.id,f.id,f.fileName),key)
+      // Checked again on the copy: the upload could have changed between the check above and the copy.
+      const copied=await storage.head(key)
+      if(!copied||copied.size!==f.size||copied.contentType!==undefined&&copied.contentType!==f.contentType)throw conflict(`${f.fileName} does not match what was uploaded. Choose it again.`)
+    }
+  } catch(error) {
+    // Copies made for this request before the failure are removed, so retries leave nothing behind.
+    await Promise.all([...keys.values()].map(key=>storage.remove(key).catch(()=>undefined)))
+    throw error
   }
   return keys
 }

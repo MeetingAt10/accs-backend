@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 import { createApp } from '../src/app.js'
 import { createMemoryAuthStore } from '../src/auth.js'
-import { aliasesFor, jaroWinkler, normalize, route, type Person } from '../src/escalation/engine.js'
+import { aliasesFor, jaroWinkler, normalize, rosterFor, route, type Person } from '../src/escalation/engine.js'
 import { escalationConfig } from '../src/escalation/lexicon.js'
 import { assign, cosine, vectorize } from '../src/escalation/similarity.js'
 import { createRecordRepository } from '../src/persist.js'
@@ -24,6 +24,16 @@ const decide = (text: string, signals = none, config = escalationConfig) => rout
 const conflicted = (text: string): string[] => decide(text).trace.mentions.filter((m) => m.conflict >= escalationConfig.conflictBypass).map((m) => m.role)
 
 describe('escalation engine', () => {
+  it('knows a professor by every subject they teach the reporter, whatever the space order', () => {
+    const db = createMemoryRepository().read()
+    const reporter = { ...db.users.find((u) => u.id === 'QCU-STU-IT-A')!, spaceIds: ['SPACE-NET', 'SUBJECT-IT-DS'] }
+    const spaces = [{ id: 'SPACE-NET', title: 'Networks, BSIT 3A', program: 'BSIT', section: 'A', subject: 'IT 302 Networks', professorIds: ['QCU-CHAIR-IT'], studentIds: [reporter.id] }, ...db.spaces]
+    const chair = rosterFor(reporter, db.users, spaces).find((p) => p.id === 'QCU-CHAIR-IT')!
+    const subjects = chair.aliases.filter((a) => a.kind === 'subject').map((a) => a.tokens.join(' '))
+    expect(subjects.some((t) => t.includes('networks'))).toBe(true)
+    expect(subjects.some((t) => t.includes('structures'))).toBe(true)
+  })
+
   it('normalizes honorifics, clause words, repeated letters and apostrophes', () => {
     expect(normalize("Ma'am Santos, grabeee! Pero ok")).toEqual(['hon', 'santos', 'grabee', '|', '|', 'ok'])
     expect(jaroWinkler('delacrus', 'delacruz')).toBeGreaterThan(0.9)

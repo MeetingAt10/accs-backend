@@ -67,6 +67,18 @@ describe('files on posts', () => {
     expect((await secretary.get(`/api/posts/${id}/files/${file.id}?format=json`)).status).toBe(200)
   })
 
+  it('removes the copies already made when a later file fails', async () => {
+    const student = await login('QCU-STU-IT-A')
+    const files = [await upload(student, 'QCU-STU-IT-A', photo), await upload(student, 'QCU-STU-IT-A', pdf)]
+    const before = storage.objects.size
+    const copy = storage.copy
+    let calls = 0
+    storage.copy = async (from, to) => { if (++calls === 2) throw new Error('S3 unavailable'); return copy(from, to) }
+    expect((await create(student, { body: 'Two files', attachments: files })).status).toBe(500)
+    storage.copy = copy
+    expect(storage.objects.size).toBe(before)
+  })
+
   it('leaves no copy of a file behind when the post is refused', async () => {
     const student = await login('QCU-STU-IT-A')
     const picture = await upload(student, 'QCU-STU-IT-A', photo)
