@@ -1,5 +1,5 @@
 {
- "note": "Synthetic labeled reports for the escalation engine. Names are invented. Roster: adviser Juan Dela Cruz; subject professor Maria Santos (IT302 Networking); Program Chair Andrea Reyes; Dean Ramon Villanueva. Expected values use the default switches (higher-office bypass and critical-to-Guidance off). conflict lists the roles at or above the bypass score.",
+ "note": "Synthetic labeled reports for the escalation engine. Names are invented. Roster: adviser Juan Dela Cruz; subject professor Maria Santos (IT302 Networking); Program Chair Andrea Reyes; Dean Ramon Villanueva. Expected values use the default switches (higher-office bypass off, critical-to-Guidance on). conflict lists the roles at or above the bypass score.",
  "cases": [
   {
    "text": "si sir jdc laging absent, buong section namin hindi naturuan",
@@ -171,14 +171,21 @@
   {
    "text": "hinipuan ako ng isang estudyante sa hallway",
    "conflict": [],
-   "route": "adviser",
+   "route": "guidance",
    "critical": true
   },
   {
    "text": "may nagbanta sa akin na papatayin daw ako sa group chat",
    "conflict": [],
-   "route": "adviser",
+   "route": "guidance",
    "critical": true
+  },
+  {
+   "text": "Hinipuan ako ni sir sa faculty room.",
+   "conflict": [],
+   "route": "guidance",
+   "critical": true,
+   "note": "critical report where the faculty member is only called sir"
   },
   {
    "text": "laging absent si sir dlc at walang feedback sa projects namin",
@@ -270,6 +277,28 @@
    "conflict": [],
    "route": "adviser",
    "note": "dean as part of dean's list"
+  },
+  {
+   "text": "Yung adviser ko hindi nagrereply sa messages ko.",
+   "conflict": [
+    "adviser"
+   ],
+   "route": "chair",
+   "note": "role phrase ending in ko is not the student's own lateness"
+  },
+  {
+   "text": "Yung adviser namin hindi nagtuturo",
+   "conflict": [
+    "adviser"
+   ],
+   "route": "chair"
+  },
+  {
+   "text": "My adviser ignores my messages",
+   "conflict": [
+    "adviser"
+   ],
+   "route": "chair"
   }
  ]
 }

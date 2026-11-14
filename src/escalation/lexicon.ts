@@ -3,10 +3,10 @@
 // routing decision stores the version it used. Entries are written plainly; they go through the same normalize()
 // as report text, so "ma'am" and "maam" are the same entry.
 
-export const ENGINE_VERSION = 'escalation-0.1.0'
+export const ENGINE_VERSION = 'escalation-0.2.0'
 export const LEXICON_VERSION = 'lexicon-2026-11-11'
 
-/** Thresholds and switches. The two higher-office switches stay off until escalation authority is approved. */
+/** Thresholds and switches. The higher-office bypass stays off until escalation authority is approved. */
 export const escalationConfig = {
   conflictBypass: 0.6,
   conflictTriage: 0.3,
@@ -15,8 +15,8 @@ export const escalationConfig = {
   similarityThreshold: 0.8,
   // A Program Chair conflict sends the concern to the Dean; a Dean conflict keeps the Dean out of the report.
   higherBypass: process.env.ESCALATION_HIGHER_BYPASS === 'true',
-  // A critical concern (harassment, threat, self-harm) starts at the Guidance Office.
-  criticalToGuidance: process.env.ESCALATION_CRITICAL_TO_GUIDANCE === 'true',
+  // A critical concern (harassment, threat, self-harm) starts at the Guidance Office. On unless ESCALATION_CRITICAL_TO_GUIDANCE=false.
+  criticalToGuidance: process.env.ESCALATION_CRITICAL_TO_GUIDANCE !== 'false',
 }
 
 export const honorifics = ['sir', 'maam', 'mam', 'miss', 'ms', 'mr', 'mrs', 'prof', 'professor', 'propesor', 'dr', 'doc', 'teacher', 'titser']

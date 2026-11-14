@@ -9,16 +9,18 @@ The student files the report on P19. While the request runs, the API picks the *
 
 | First match wins | First office | Kept out (`involvedUserIds`) |
 |---|---|---|
-| Critical words, with `ESCALATION_CRITICAL_TO_GUIDANCE=true` | Guidance Office | — |
+| Critical words (on by default; `ESCALATION_CRITICAL_TO_GUIDANCE=false` turns it off) | Guidance Office | — |
 | Student ticked "about my adviser", sent `conflictedAdviser`, listed the adviser, or wrote the adviser's full name | Program Chair | adviser |
 | Adviser conflict score ≥ 0.60 | Program Chair | adviser |
 | Subject professor conflict ≥ 0.60 | Program Chair | that professor |
 | Adviser or subject professor score between 0.30 and 0.60 | Program Chair, flagged "check for conflict" | — |
 | Scope is the whole program or college | Program Chair | — |
 | Otherwise | Adviser | — |
-| Program Chair conflict ≥ 0.60 (a chair who also teaches the student counts as the chair), with `ESCALATION_HIGHER_BYPASS=true` | Dean | chair |
+| Program Chair conflict ≥ 0.60 (a chair who also teaches the student counts as the chair), with `ESCALATION_HIGHER_BYPASS=true` (off by default) | Dean | chair |
 
-When a switch is off, the row falls through and the handler gets a note instead ("The Program Chair may be involved", "Consider referring this concern to the Guidance Office"). Both switches stay off until the escalation authority decision is approved. With a switch on, only the routing decision is tested (`route()` in unit tests). The full flow is not tested yet: a report that starts at Guidance has no case file, so the queue hides it.
+When a switch is off, the row falls through and the handler gets a note instead ("The Program Chair may be involved", "Consider referring this concern to the Guidance Office"). The critical-word switch is on by default. The higher-office bypass stays off until the escalation authority decision is approved. A report that starts at Guidance has no case file, so the queue hides it.
+
+If no active Guidance user can receive a critical report, it goes to the Program Chair instead, never the adviser, and the history records the reason. If the chair cannot receive it either, the request is refused with 409.
 
 `bypassed` now means "the report went around the adviser" for every Program Chair row, including whole-program and possible-conflict reports. Those reports also lock the adviser out, and they count in the "Adviser bypassed" tag, the chair's Bypassed tab and the analytics figure. `aboutAdvisor` is set only when the adviser is the concern.
 
@@ -54,7 +56,7 @@ Code:
 The stored trace looks like this (handlers only; the owner's view leaves it out):
 
 ```json
-{ "engineVersion": "escalation-0.1.0", "lexiconVersion": "lexicon-2026-11-11", "rule": "adviser-conflict", "scope": "section",
+{ "engineVersion": "escalation-0.2.0", "lexiconVersion": "lexicon-2026-11-11", "rule": "adviser-conflict", "scope": "section",
   "mentions": [{ "personId": "QCU-PROF-CS", "name": "Prof. Sena Brook", "role": "adviser", "alias": "brook", "aliasKind": "surname",
                  "matchScore": 1, "term": "laging absent", "distance": 0, "proximity": 1, "conflict": 1 }],
   "heldBack": [], "thresholds": { "bypass": 0.6, "triage": 0.3 } }
@@ -70,14 +72,14 @@ The stored trace looks like this (handlers only; the owner's view leaves it out)
 | `03-student-view.png` | The student's report page shows the destination only |
 | `04-chair-case-routing.png` | The Program Chair's case page shows the reason, the matched alias, the complaint word and the score |
 
-Labeled set `backend/tests/fixtures/escalation/reports.json`: 44 synthetic Taglish and English reports with invented names. It includes 8 hard negatives: the student's own lateness, a classmate with the same surname, a building named after the person, initials used for something else, and "dean's list". **Treat these numbers as a smoke check, not an evaluation.** The set was written alongside the lexicon by the same author. Results from `tests/escalation.test.ts`:
+Labeled set `backend/tests/fixtures/escalation/reports.json`: 48 synthetic Taglish and English reports with invented names. It includes 8 hard negatives: the student's own lateness, a classmate with the same surname, a building named after the person, initials used for something else, and "dean's list". **Treat these numbers as a smoke check, not an evaluation.** The set was written alongside the lexicon by the same author. Results from `tests/escalation.test.ts`:
 
 | Measure | Result | Delta target |
 |---|---|---|
-| Conflict precision | 0.94 | ≥ 0.85 |
-| Conflict recall | 0.85 | ≥ 0.95 (**not met**) |
-| Routing accuracy | 0.95 | ≥ 0.90 |
-| Critical-word hint | 44 of 44 | — |
+| Conflict precision | 0.95 | ≥ 0.85 |
+| Conflict recall | 0.87 | ≥ 0.95 (**not met**) |
+| Routing accuracy | 0.96 | ≥ 0.90 |
+| Critical-word hint | 48 of 48 | — |
 
 The test asserts floors (precision 0.85, recall 0.80, routing 0.90) so that regressions fail. Known misses:
 
@@ -87,6 +89,8 @@ The test asserts floors (precision 0.85, recall 0.80, routing 0.90) so that regr
 - A classmate who shares a faculty member's surname ("si Paolo Santos laging late") is read as the professor. This is a false bypass to the chair, which is the safe direction.
 
 Collision guards: initials always need "sir/ma'am"; a surname of 3 letters or fewer, or one that is a stopword, also needs the honorific; a near-miss spelling counts only right after "sir/ma'am" or "si/ni/kay", and only from 5 letters. "Dr." and "Prof." do not end a clause.
+
+Self-reference: a complaint term next to "ako", "ko", "i" or "im" is the student describing themselves ("late ako", "I was late") and is not a complaint. The exception is "ko" right after a person word (adviser, advisor, chair, chairperson, dean, or an honorific such as sir, ma'am, prof, teacher, dr), where it means "my". "Yung adviser ko hindi nagrereply" goes to the Program Chair as an adviser conflict.
 
 API tests also cover these cases: a student-listed chair stays locked out; a complaint about a chair who teaches the student is accepted (it stays with the adviser, with a note); the trace and a new group survive a reload from the record store.
 
@@ -99,7 +103,7 @@ cd accs-system/backend-escalation && NODE_ENV=development PORT=3100 CORS_ORIGIN=
 cd accs-system/frontend-escalation && ACCS_DEV_API_TARGET=http://localhost:3100 npx vite --port 5273
 ```
 
-Sign in as `QCU-STU-CS` and open the dev toolbox (bottom right), then choose **Escalation lab**. To test the routes held back by the switches, start the API with `ESCALATION_HIGHER_BYPASS=true` or `ESCALATION_CRITICAL_TO_GUIDANCE=true`.
+Sign in as `QCU-STU-CS` and open the dev toolbox (bottom right), then choose **Escalation lab**. To test the Dean route, start the API with `ESCALATION_HIGHER_BYPASS=true`. To test routing without the Guidance route, start it with `ESCALATION_CRITICAL_TO_GUIDANCE=false`.
 
 ## Not built yet
 

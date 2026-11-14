@@ -58,14 +58,35 @@ describe('escalation engine', () => {
     expect(decide('yung prof sa networking laging absent')).toMatchObject({ stage: 'chair', aboutAdvisor: false, involvedUserIds: ['F-SUB'], trace: { rule: 'subject-professor-conflict' } })
   })
 
-  it('holds back the higher-office rows until they are switched on', () => {
+  it('holds back the higher-office bypass until it is switched on', () => {
     const off = decide('si maam reyes laging late sa meeting')
     expect(off).toMatchObject({ stage: 'adviser', possibleConflict: true, involvedUserIds: [] })
     expect(off.trace.heldBack[0]).toMatch(/Program Chair may be involved/)
     const on = decide('si maam reyes laging late sa meeting', none, { ...escalationConfig, higherBypass: true })
     expect(on).toMatchObject({ stage: 'dean', involvedUserIds: ['F-CHR'], trace: { rule: 'chair-conflict' } })
-    const critical = decide('hinipuan ako sa hallway', none, { ...escalationConfig, criticalToGuidance: true })
-    expect(critical).toMatchObject({ stage: 'guidance', trace: { rule: 'critical', severityHint: 'critical' } })
+  })
+
+  it('sends a critical concern to Guidance by default, and only notes it when the switch is turned off', () => {
+    expect(escalationConfig.criticalToGuidance).toBe(true)
+    expect(decide('hinipuan ako sa hallway')).toMatchObject({ stage: 'guidance', bypassed: true, trace: { rule: 'critical', severityHint: 'critical' } })
+    expect(decide('Hinipuan ako ni sir sa faculty room.')).toMatchObject({ stage: 'guidance', trace: { rule: 'critical' } })
+    const off = decide('hinipuan ako sa hallway', none, { ...escalationConfig, criticalToGuidance: false })
+    expect(off).toMatchObject({ stage: 'adviser', possibleConflict: true, trace: { rule: 'default', severityHint: 'critical' } })
+    expect(off.trace.heldBack).toEqual(['Consider referring this concern to the Guidance Office.'])
+  })
+
+  it('keeps the adviser out of a critical concern that names the adviser, even though it goes to Guidance', () => {
+    expect(decide('Hinipuan ako ni Sir Dela Cruz sa faculty room.')).toMatchObject({ stage: 'guidance', aboutAdvisor: true, involvedUserIds: ['F-ADV'], trace: { rule: 'critical' } })
+  })
+
+  it('keeps the complaint when "ko" ends a role phrase or follows a person, and still drops the student\'s own lateness', () => {
+    for (const text of ['Yung adviser ko hindi nagrereply sa messages ko.', 'Yung advisor ko hindi nagrereply sa messages ko.', 'Yung adviser namin hindi nagtuturo', 'My adviser ignores my messages', 'Si sir Dela Cruz, teacher ko, hindi nagtuturo']) {
+      expect(decide(text), text).toMatchObject({ stage: 'chair', aboutAdvisor: true, involvedUserIds: ['F-ADV'], trace: { rule: 'adviser-conflict' } })
+      expect(conflicted(text), text).toEqual(['adviser'])
+    }
+    for (const text of ['late ako sa klase ni sir dela cruz', 'I was late sa klase ni sir dela cruz', 'Im late sa klase ni sir dela cruz', 'Sabi ng adviser ko late ako']) {
+      expect(decide(text), text).toMatchObject({ stage: 'adviser', aboutAdvisor: false, trace: { rule: 'default' } })
+    }
   })
 
   it('reaches the targets on the labeled set and prints the metrics', () => {
@@ -124,6 +145,26 @@ describe('escalation through the API', () => {
     expect((await adviser.get(`/api/pages/P22?id=${stored.id}`)).status).toBe(404)
   })
 
+  it('stores a critical concern at Guidance, which can list it, is told about it and can open a Case File; the adviser never sees it', async () => {
+    const { repo, app } = setup()
+    const { agent: student } = await signIn(app, 'QCU-STU-CS')
+    const filed = await file(student, 'Hinipuan ako ni sir sa faculty room.')
+    expect(filed.status).toBe(200)
+    expect(filed.body.record).toMatchObject({ stage: 'guidance', office: 'Guidance Office', status: 'With Guidance Office', severity: 'low' })
+    const id = filed.body.record.id as string
+    expect(repo.read().reports.find((r) => r.id === id)).toMatchObject({ stage: 'guidance', bypassed: true, routing: { rule: 'critical', severityHint: 'critical' } })
+    const { agent: guidance } = await signIn(app, 'QCU-GUIDANCE')
+    expect(repo.read().notifications.some((n) => n.recipientId === 'QCU-GUIDANCE' && n.recordId === id)).toBe(true)
+    expect((await guidance.get('/api/pages/P21')).body.data.cases.map((c: { id: string }) => c.id)).toContain(id)
+    const opened = await guidance.get(`/api/pages/P22?id=${id}`)
+    expect(opened.body.data.record).toMatchObject({ stage: 'guidance', readOnly: false, allowedActions: ['convert'], routing: { rule: 'critical' } })
+    const converted = await guidance.post('/api/pages/P22/actions').send({ action: 'caseAction', recordId: id, reason: 'Reviewed the report', payload: { type: 'convert', update: 'Case File opened.' } })
+    expect(converted.status).toBe(200)
+    expect(repo.read().reports.find((r) => r.id === id)!.caseFileId).toMatch(/^CF-/)
+    const { agent: adviser } = await signIn(app, 'QCU-PROF-CS')
+    expect((await adviser.get(`/api/pages/P22?id=${id}`)).status).toBe(404)
+  })
+
   it('groups two similar reports of a program and shows the computed similarity to the chair', async () => {
     const { repo, app } = setup()
     const { agent: student } = await signIn(app, 'QCU-STU-CS')
@@ -160,6 +201,44 @@ describe('escalation edge cases through the API', () => {
     expect(filed.status).toBe(200)
     const stored = repo.read().reports.find((r) => r.id === filed.body.record.id)!
     expect(stored).toMatchObject({ stage: 'adviser', routing: { heldBack: ['The Program Chair may be involved.'] } })
+  })
+
+  it('sends a critical concern to the Program Chair when no Guidance officer can receive it, never to the adviser, and refuses only when the chair cannot either', async () => {
+    const repo = createMemoryRepository()
+    const app = createApp(repo, { authStore: createMemoryAuthStore() })
+    const user = (id: string) => repo.read().users.find((u) => u.id === id)!
+    user('QCU-GUIDANCE').active = false
+    const { agent } = await signIn(app, 'QCU-STU-CS')
+    const filed = await file(agent, 'Hinipuan ako ni sir sa faculty room.')
+    expect(filed.status).toBe(200)
+    expect(filed.body.record).toMatchObject({ stage: 'chair', office: 'Program Chair', status: 'With Program Chair' })
+    const id = filed.body.record.id as string
+    const stored = repo.read().reports.find((r) => r.id === id)!
+    expect(stored).toMatchObject({ stage: 'chair', bypassed: true, routing: { rule: 'critical-no-guidance', severityHint: 'critical' } })
+    expect(stored.routing!.heldBack).toContain('Consider referring this concern to the Guidance Office.')
+    expect(stored.history[0]).toMatchObject({ stage: 'chair', reason: 'No Guidance officer can receive this yet. Sent to the Program Chair.' })
+    expect(repo.read().notifications.some((n) => n.recipientId === 'QCU-CHAIR-CS' && n.recordId === id)).toBe(true)
+    const { agent: chair } = await signIn(app, 'QCU-CHAIR-CS')
+    expect((await chair.get(`/api/pages/P22?id=${id}`)).body.data.record).toMatchObject({ stage: 'chair', readOnly: false })
+    const { agent: adviser } = await signIn(app, 'QCU-PROF-CS')
+    expect((await adviser.get(`/api/pages/P22?id=${id}`)).status).toBe(404)
+    expect(repo.read().notifications.some((n) => n.recipientId === 'QCU-PROF-CS' && n.recordId === id)).toBe(false)
+    // Only when the chair cannot receive it either is the concern refused, and nothing is stored.
+    const before = repo.read().reports.length
+    user('QCU-CHAIR-CS').active = false
+    const refused = await file(agent, 'Hinipuan ako ni sir sa faculty room.')
+    expect([refused.status, refused.body.code]).toEqual([409, 'CONFLICT'])
+    expect(refused.body.error).toContain('Program Chair')
+    expect(repo.read().reports.length).toBe(before)
+  })
+
+  it('also falls back to the Program Chair when the only Guidance officer is listed as involved in the concern', async () => {
+    const repo = createMemoryRepository()
+    const app = createApp(repo, { authStore: createMemoryAuthStore() })
+    const { agent } = await signIn(app, 'QCU-STU-CS')
+    const filed = await file(agent, 'Hinipuan ako ni sir sa faculty room.', { involvedUserIds: ['QCU-GUIDANCE'] })
+    expect(filed.status).toBe(200)
+    expect(repo.read().reports.find((r) => r.id === filed.body.record.id)).toMatchObject({ stage: 'chair', involvedUserIds: ['QCU-GUIDANCE'], routing: { rule: 'critical-no-guidance' } })
   })
 
   it('keeps the routing trace and a new group after a reload from the record store', async () => {

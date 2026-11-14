@@ -1032,7 +1032,8 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       const adviser = db.users.find(u => u.id === user.adviserId && u.active && hasRole(u, 'professor'))
       // Context-aware routing: the report text read together with the reporter's own faculty (src/escalation, no external service).
       const chairIds = db.users.filter(u => u.active && hasRole(u, 'chair') && u.program === user.program).map(u => u.id)
-      const decision = route(p.narrative, rosterFor({ ...user, adviserId: adviser?.id }, db.users, db.spaces), p, chairIds)
+      const roster = rosterFor({ ...user, adviserId: adviser?.id }, db.users, db.spaces)
+      const decision = route(p.narrative, roster, p, chairIds)
       if (!adviser && decision.stage === 'adviser') throw conflict('You do not have an active adviser, so this concern cannot be sent. Ask the CCS office to set your adviser, then try again.')
       const { stage, bypassed } = decision
       if (p.sourcePostId) {
@@ -1070,8 +1071,17 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
         notes: [],
         messages: [],
       }
+      // A critical concern is never refused because Guidance has no one to receive it. The normal rules pick the stage again, but never the
+      // adviser: the Program Chair is the lowest it falls back to. aboutAdvisor and involvedUserIds do not depend on the switch, so they stay as set.
+      if (stage === 'guidance' && !handlerIds(db, r).length) {
+        const fallback = route(p.narrative, roster, p, chairIds, { ...escalationConfig, criticalToGuidance: false })
+        r.stage = fallback.stage === 'adviser' ? 'chair' : fallback.stage
+        r.bypassed = true
+        r.routing = { ...fallback.trace, rule: 'critical-no-guidance' }
+        Object.assign(r.history[0]!, { stage: r.stage, reason: `No Guidance officer can receive this yet. Sent to the ${offices[r.stage]}.` })
+      }
       // Nothing is stored or sent when no one can receive it.
-      if (!handlerIds(db, r).length) throw conflict(stage === 'dean' ? 'Your concern goes to the Dean, and no Dean can receive it yet. Ask the CCS office, then try again.' : bypassed ? 'Your concern goes to your Program Chair, and your program does not have a Program Chair who can receive it yet. Ask the CCS office to set one, then try again.' : 'Your adviser cannot receive concerns right now. Ask the CCS office to check your adviser, then try again.')
+      if (!handlerIds(db, r).length) throw conflict(r.stage === 'dean' ? 'Your concern goes to the Dean, and no Dean can receive it yet. Ask the CCS office, then try again.' : r.stage === 'guidance' ? 'Your concern goes to the Guidance Office, and no Guidance officer can receive it yet. Ask the CCS office, then try again.' : r.bypassed ? 'Your concern goes to your Program Chair, and your program does not have a Program Chair who can receive it yet. Ask the CCS office to set one, then try again.' : 'Your adviser cannot receive concerns right now. Ask the CCS office to check your adviser, then try again.')
       db.reports.push(r)
       groupSimilar(repo, db, r)
       delete db.drafts[user.id]

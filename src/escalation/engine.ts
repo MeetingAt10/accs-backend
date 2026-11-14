@@ -126,8 +126,11 @@ const complaintTerms = lexicon(complaint), criticalTerms = lexicon(critical)
 const scopeTerms = Object.entries(scopeWords).map(([level, words]) => [level, lexicon(words)] as const)
 const termHits = (tokens: string[], terms: string[][]) => terms.flatMap((t) => findExact(tokens, t))
 // "late ako", "absent ako kahapon", "I was late": the student describing their own lateness is not a complaint.
+// But "ko" right after a person means "my" ("adviser ko hindi nagrereply", "prof ko laging absent"): that complaint stays.
 const selfWords = new Set(['ako', 'ko', 'i', 'im'])
-const complaintsIn = (tokens: string[]) => termHits(tokens, complaintTerms).filter((h) => !selfWords.has(tokens[h.end + 1] ?? '') && !selfWords.has(tokens[h.start - 1] ?? '') && !(tokens[h.start - 1] === 'was' && tokens[h.start - 2] === 'i'))
+const personWords = new Set(['hon', 'adviser', 'advisor', 'chair', 'chairperson', 'dean'])
+const selfBefore = (tokens: string[], i: number) => selfWords.has(tokens[i] ?? '') && !(tokens[i] === 'ko' && personWords.has(tokens[i - 1] ?? ''))
+const complaintsIn = (tokens: string[]) => termHits(tokens, complaintTerms).filter((h) => !selfWords.has(tokens[h.end + 1] ?? '') && !selfBefore(tokens, h.start - 1) && !(tokens[h.start - 1] === 'was' && tokens[h.start - 2] === 'i'))
 
 export type Mention = { personId: string; name: string; role: Role; alias: string; aliasKind: Alias['kind']; matchScore: number; term?: string; distance?: number; proximity: number; conflict: number }
 
