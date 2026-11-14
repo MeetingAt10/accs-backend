@@ -1585,13 +1585,15 @@ export async function completeMaterialUpload(repo:Repository,user:User,id:string
   const stored=await storage.head(pending.key!)
   if(!stored)throw conflict('The file has not been uploaded yet. Upload it, then try again.')
   if(stored.size!==pending.size||stored.size>materialMaxBytes||stored.contentType!==undefined&&stored.contentType!==pending.contentType){await storage.remove(pending.key!);throw conflict('The uploaded file does not match what was declared. Upload it again.')}
-  // The confirmed file is a copy the upload URL cannot reach, checked again; the upload itself is removed.
+  // The confirmed file is a copy the upload URL cannot reach, checked again; the upload is removed after the save.
   const frozen=`materials/classes/${ulid()}/${safeFileName(pending.fileName!)}`
   await storage.copy(pending.key!,frozen)
   const copied=await storage.head(frozen)
   if(!copied||copied.size!==pending.size||copied.contentType!==undefined&&copied.contentType!==pending.contentType){await storage.remove(frozen);throw conflict('The uploaded file does not match what was declared. Upload it again.')}
-  await storage.remove(pending.key!)
-  return repo.transact(unit=>{const m=find(unit.read().materials,id);m.key=frozen;m.status='ready';m.updatedAt=now();audit(unit,user,'Class material added','academic',m.id);const {key:_k,...shown}=m;return shown})
+  const shown=await repo.transact(unit=>{const m=find(unit.read().materials,id);m.key=frozen;m.status='ready';m.updatedAt=now();audit(unit,user,'Class material added','academic',m.id);const {key:_k,...shown}=m;return shown})
+  // Removed only once the confirmation is saved, so a failed save can be retried from the upload.
+  await storage.remove(pending.key!).catch(error=>console.error(JSON.stringify({level:'error',message:'Upload cleanup failed',materialId:id,error:error instanceof Error?error.name:String(error)})))
+  return shown
 }
 /** A short-lived download link for a confirmed file, for the subject's professors and students only. */
 export async function materialDownloadUrl(repo:Repository,user:User,id:string,storage?:MaterialStorage){
