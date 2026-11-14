@@ -1,5 +1,6 @@
 import type { Role, User } from './schemas.js'
 import type { Database, Report, Space, Thread } from './store.js'
+import { consentWording } from './consent.js'
 
 export const permissionRoles: Record<string, Role[]> = {
   'feed.read': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'],
@@ -76,9 +77,11 @@ export function canThread(db: Database, user: User, thread: Thread) {
 // A concern about the adviser never reaches the adviser, whatever stage it is at.
 export function isConflicted(user: User, report: Report) { return report.involvedUserIds.includes(user.id) || (report.bypassed || report.aboutAdvisor) && report.adviserId === user.id }
 // Baseline of 10 November 2026: the Program Chair has access to every concern of their program and the Dean to every concern of
-// the college, without the student's permission. The student's old allowChair / allowDean answers no longer decide anything.
-const chairMay = (user: User, report: Report) => hasRole(user,'chair') && user.program === report.program
-const deanMay = (user: User, report: Report) => hasRole(user,'dean')
+// the college, without the student's permission. A report filed under an earlier consent wording keeps what the student agreed
+// to then: its allowChair / allowDean answers still decide, as before (a concern about the adviser always reaches the Chair).
+export const earlierConsent = (report: Report) => !!report.consent && report.consent.version < consentWording.version
+const chairMay = (user: User, report: Report) => hasRole(user,'chair') && user.program === report.program && (!earlierConsent(report) || report.allowChair === true || report.aboutAdvisor === true)
+const deanMay = (user: User, report: Report) => hasRole(user,'dean') && (!earlierConsent(report) || report.allowDean === true)
 /** The Program Chair (own program) and the Dean oversee every concern in scope, whatever stage it is at. */
 export function overseesCase(user: User, report: Report) { return report.ownerId !== user.id && !isConflicted(user,report) && (chairMay(user,report) || deanMay(user,report)) }
 /** Overseers read the full concern unless the adviser marked it confidential; then they see its status only. */

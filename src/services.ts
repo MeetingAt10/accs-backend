@@ -6,7 +6,7 @@ import { materialFileTypes, materialMaxBytes, messageFileMaxBytes, messageFileTy
 import { ulid } from './ids.js'
 import { appointmentCategories, appointmentProblem, concernFollowUp, purposeOf, type AppointmentChoice } from './appointments.js'
 import { reactionKinds, type ReactionKind, loadRowSchema, materialUploadSchema, messageUploadSchema, actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
-import { allowedPages, canActCase, canAudience, canReadCase, isEarlierHandler, overseesCase, canCountCase, canFacultyResult, canPage, canPublish, canReach, canSpace, canStudentRecord, canThread, canViewCase, hasPermission, hasRole, isOrganizationMember, pageTitles, permissionRoles, permissions, scopeLabel } from './access.js'
+import { allowedPages, canActCase, earlierConsent, canAudience, canReadCase, isEarlierHandler, overseesCase, canCountCase, canFacultyResult, canPage, canPublish, canReach, canSpace, canStudentRecord, canThread, canViewCase, hasPermission, hasRole, isOrganizationMember, pageTitles, permissionRoles, permissions, scopeLabel } from './access.js'
 import { consentWording } from './consent.js'
 import { route, rosterFor } from './escalation/engine.js'
 import { escalationConfig } from './escalation/lexicon.js'
@@ -91,7 +91,7 @@ function threadTitle(db:Database,thread:Thread,user:User){
 }
 /** The last line shown in the conversation list: the words, or the file when only a file was sent. */
 const messagePreview=(message?:Message)=>!message?'':message.body||(message.attachments?.length?`Sent ${message.attachments.length===1?message.attachments[0]!.fileName:`${message.attachments.length} files`}`:'')
-function messageView(db:Database,message:Message,report?:Report) { return {id:message.id,body:message.body,at:message.at,...(message.attachments?.length?{attachments:message.attachments.map(attachmentView)}:{}),author:author(db,message.authorId,!!report&&message.authorId===report.ownerId&&report.identity==='anonymous'&&!report.disclosedTo.includes(report.stage),report?.alias)} }
+function messageView(db:Database,message:Message,report?:Report,viewerStage=report?.stage) { return {id:message.id,body:message.body,at:message.at,...(message.attachments?.length?{attachments:message.attachments.map(attachmentView)}:{}),author:author(db,message.authorId,!!report&&message.authorId===report.ownerId&&report.identity==='anonymous'&&!report.disclosedTo.includes(viewerStage!),report?.alias)} }
 /** Everyone's reaction to a post or comment: the old single reaction counts as "like" (#86). */
 function reactionsOf(item: { reactions?: string[]; reactionsBy?: Record<string, ReactionKind> }): Record<string, ReactionKind> {
   return { ...Object.fromEntries((item.reactions ?? []).map(id => [id, 'like' as ReactionKind])), ...(item.reactionsBy ?? {}) }
@@ -164,10 +164,10 @@ function reportView(db:Database,report:Report,user:User,owner=false) {
   // A reader who is not the current handler sees the name only if the student shared it with the reader's own office.
   const viewerStage=current?report.stage:hasRole(user,'dean')?'dean':'chair'
   const showName=report.identity==='named'||!owner&&report.disclosedTo.includes(viewerStage)
-  return {id:report.id,caseFileId:report.caseFileId,type:report.caseFileId?'Case File':'Report',category:report.category,subcategory:report.subcategory,categoryDetail:report.categoryDetail,severity:report.severity,status:statusFor(report),stage:report.stage,office:offices[report.stage],program:report.program,narrative:report.narrative,identity:report.identity,alias:report.alias,reporter:showName?author(db,report.ownerId):{name:report.alias,roles:['student'],anonymous:true},createdAt:report.createdAt,updatedAt:report.updatedAt,sourcePostId:report.sourcePostId,location:report.location,occurredOn:report.occurredOn,disclosedTo:owner?report.disclosedTo:undefined,bypassed:owner?undefined:report.bypassed,consent:report.consent&&{readStatement:true,at:report.consent.at,version:report.consent.version,wording:report.consent.wording},allowChair:true,allowDean:true,confidential:report.confidential===true,readOnly:!owner&&!current,aboutAdvisor:report.aboutAdvisor===true,talk:report.talk,history:report.history.filter(h=>!owner||h.public).map(h=>owner?{id:h.id,at:h.at,action:h.action,update:h.update,stage:h.stage,office:offices[h.stage],state:h.stage===report.stage?'current':'done'}:{...h,actorId:h.actorId===report.ownerId&&!showName?undefined:h.actorId,actor:author(db,h.actorId,h.actorId===report.ownerId&&!showName,report.alias)}),messages:report.messages.map(m=>messageView(db,m,report)),notes:owner?undefined:report.notes.map(m=>messageView(db,m)),allowedActions:owner?[]:caseActions(user,report),routing:owner?undefined:report.routing,...(report.source==='faculty'?{source:'faculty',reportedStudent:report.reportedStudentId?person(find(db.users,report.reportedStudentId)):undefined}:{}),...(!owner&&hasRole(user,'dean','osas')?{strikes:db.strikes.filter(s=>s.reportId===report.id).map(s=>strikeView(db,s)),canRecommendStrike:current&&report.stage==='dean'&&hasPermission(user,'strike.recommend'),strikeCandidates:current&&report.stage==='dean'&&hasPermission(user,'strike.recommend')?strikeCandidates(db,report):[],canDecideStrike:current&&report.stage==='osas'&&hasPermission(user,'strike.record')}:{})}
+  return {id:report.id,caseFileId:report.caseFileId,type:report.caseFileId?'Case File':'Report',category:report.category,subcategory:report.subcategory,categoryDetail:report.categoryDetail,severity:report.severity,status:statusFor(report),stage:report.stage,office:offices[report.stage],program:report.program,narrative:report.narrative,identity:report.identity,alias:report.alias,reporter:showName?author(db,report.ownerId):{name:report.alias,roles:['student'],anonymous:true},createdAt:report.createdAt,updatedAt:report.updatedAt,sourcePostId:report.sourcePostId,location:report.location,occurredOn:report.occurredOn,disclosedTo:owner?report.disclosedTo:undefined,bypassed:owner?undefined:report.bypassed,consent:report.consent&&{readStatement:true,at:report.consent.at,version:report.consent.version,wording:report.consent.wording},allowChair:!earlierConsent(report)||report.allowChair===true,allowDean:!earlierConsent(report)||report.allowDean===true,confidential:report.confidential===true,readOnly:!owner&&!current,aboutAdvisor:report.aboutAdvisor===true,talk:report.talk,history:report.history.filter(h=>!owner||h.public).map(h=>owner?{id:h.id,at:h.at,action:h.action,update:h.update,stage:h.stage,office:offices[h.stage],state:h.stage===report.stage?'current':'done'}:{...h,actorId:h.actorId===report.ownerId&&!showName?undefined:h.actorId,actor:author(db,h.actorId,h.actorId===report.ownerId&&!showName,report.alias)}),messages:report.messages.map(m=>messageView(db,m,report,owner?report.stage:viewerStage)),notes:owner?undefined:report.notes.map(m=>messageView(db,m)),allowedActions:owner?[]:caseActions(user,report),routing:owner?undefined:report.routing,...(report.source==='faculty'?{source:'faculty',reportedStudent:report.reportedStudentId?person(find(db.users,report.reportedStudentId)):undefined}:{}),...(!owner&&hasRole(user,'dean','osas')?{strikes:db.strikes.filter(s=>s.reportId===report.id).map(s=>strikeView(db,s)),canRecommendStrike:current&&report.stage==='dean'&&hasPermission(user,'strike.recommend'),strikeCandidates:current&&report.stage==='dean'&&hasPermission(user,'strike.recommend')?strikeCandidates(db,report):[],canDecideStrike:current&&report.stage==='osas'&&hasPermission(user,'strike.record')}:{})}
 }
 function caseActions(user:User,r:Report) { if(!canActCase(user,r))return[]; if(r.status==='Closed')return[]; if(r.status==='Resolved')return['close'];if(r.stage==='guidance'&&!r.caseFileId)return['convert'];return ['respond','recordAction',...(['guidance','osas'].includes(r.stage)?['milestone']:[]),'resolve',...(r.stage==='adviser'||r.stage==='chair'?['escalate']:r.stage==='dean'||r.stage==='guidance'?['transfer']:[])] }
-function consultationView(db:Database,c:Database['consultations'][number]) { return {...c,student:person(find(db.users,c.studentId)),faculty:person(find(db.users,c.facultyId)),slot:find(db.slots,c.slotId)} }
+function consultationView(db:Database,c:Database['consultations'][number],user:User) { return {...c,student:person(find(db.users,c.studentId)),faculty:person(find(db.users,c.facultyId)),slot:slotView(user,find(db.slots,c.slotId))} }
 function assignmentView(db:Database,a:Assignment,receipt=false) { const cycle=find(db.cycles,a.cycleId); return {id:a.id,faculty:person(find(db.users,a.facultyId)),cycleId:a.cycleId,cycleTitle:cycle.title,relation:a.relation,subject:a.subject,due:cycle.closes,status:a.submittedAt?'Submitted':'Not started',submittedAt:a.submittedAt,questions:receipt?cycle.questions:undefined,instructions:receipt?cycle.instructions:undefined,cycleStatus:cycle.status,answers:receipt?a.answers:undefined,comment:receipt?a.comment:undefined} }
 function resultViews(db:Database,user:User,cycleId?:string) { return db.users.filter(u=>hasRole(u,'professor','chair','dean')&&canFacultyResult(user,u)).map(faculty=>{const entries=db.assignments.filter(a=>a.facultyId===faculty.id&&a.submittedAt&&(!cycleId||a.cycleId===cycleId)&&find(db.cycles,a.cycleId).resultsPublished);const ratings=entries.flatMap(a=>Object.values(a.answers??{}).filter((v):v is number=>typeof v==='number'));const criteria=['Q1','Q2','Q3'].map((id,index)=>{const values=entries.map(a=>a.answers?.[id]).filter((v):v is number=>typeof v==='number');return {label:['Clarity','Support','Fairness'][index],value:values.length?Number((values.reduce((s,n)=>s+n,0)/values.length).toFixed(2)):0}});return {id:faculty.id,faculty:person(faculty),responses:entries.length,average:ratings.length?Number((ratings.reduce((s,n)=>s+n,0)/ratings.length).toFixed(2)):0,completion:entries.length?100:0,criteria,themes:entries.length?[{title:'Clear guidance',count:entries.length,summary:'Students describe the requirements as clear and say they get help when they ask.'}]:[]}}) }
 /** Every evaluation assigned to the program's faculty in the published cycles in scope, submitted or not. */
@@ -178,7 +178,8 @@ function programAssignments(db:Database,program?:string,cycleId?:string) {
   return db.assignments.filter(assignment =>
     facultyIds.includes(assignment.facultyId)
     && (!cycleId || assignment.cycleId === cycleId)
-    && find(db.cycles,assignment.cycleId).resultsPublished,
+    && find(db.cycles,assignment.cycleId).resultsPublished
+    && (isStudentForm(assignment) || !!assignment.submittedAt),
   )
 }
 // D-08 (approved 2026-11-10): evaluation is mandatory for clearance, so a program average is released only when every
@@ -243,15 +244,15 @@ function notify(repo:UnitOfWork,recipientId:string,kind:string,pageId:string,rec
   })
 }
 /** What a message notification says: who wrote, where (for a group), and the start of the message. */
-function messageNotice(sender:User,thread:Thread,body:string) {
-  const words=body.replace(/\s+/g,' ').trim()
+function messageNotice(sender:User,thread:Thread,body:string,held=false) {
+  const words=held?'':body.replace(/\s+/g,' ').trim()
   const preview=words.length>100?`${words.slice(0,99)}…`:words
   const who=thread.spaceId?`${sender.name} in ${thread.title}`:sender.name
-  return preview?`${who}: ${preview}`:`${who} sent a file.`
+  return preview?`${who}: ${preview}`:held?`${who} sent a message.`:`${who} sent a file.`
 }
-function unreadMessages(thread:Thread,userId:string) {
-  const readCount = Math.min(thread.messages.length, thread.readMessageCounts[userId] ?? 0)
-  return thread.messages.slice(readCount).filter(message => message.authorId !== userId).length
+function unreadMessages(db:Database,thread:Thread,user:User) {
+  const readCount = Math.min(thread.messages.length, thread.readMessageCounts[user.id] ?? 0)
+  return thread.messages.slice(readCount).filter(message => message.authorId !== user.id && canSeeItem(db, user, 'message', message.id, message.authorId)).length
 }
 /** Puts a new report in a similar-report group of its program, or opens a group of two. Confidential and finished reports stay out. */
 function groupSimilar(repo:UnitOfWork,db:Database,r:Report) {
@@ -267,7 +268,7 @@ function groupSimilar(repo:UnitOfWork,db:Database,r:Report) {
 function handlerIds(db:Database,r:Report) { return db.users.filter(u=>u.active&&canActCase(u,r)).map(u=>u.id) }
 /** Offices the case has moved past; they are told about every later step (#30). */
 function earlierHandlerIds(db:Database,r:Report) { return db.users.filter(u=>u.active&&isEarlierHandler(u,r)).map(u=>u.id) }
-const faq=[{id:'FAQ-1',question:'How do I book an appointment?',answer:'Open Appointments, pick one of your professors, choose what the appointment is for, and request an open time. The professor confirms or declines.',href:'/consultations',roles:['student']},{id:'FAQ-2',question:'What does anonymous reporting mean?',answer:'Your report stays linked to your verified account. Handlers see an alias until you choose to share your name with their office.',href:'/reports/new',roles:['student']},{id:'FAQ-3',question:'How are reports routed?',answer:'A report goes to the student\'s adviser first. If the report involves that adviser, it goes to the program chair instead. The program chair and the Dean can read a report only if the student allowed it. Each office decides the next step.',href:'/cases',roles:['professor','chair','dean','guidance','osas']},{id:'FAQ-4',question:'What can the assistant do?',answer:'It explains ACCS pages, your schedule, and the milestones on your own reports. It cannot decide cases or restrictions. Staff do that.',href:'/assistant',roles:roles as readonly string[]},{id:'FAQ-5',question:'Where do I find official contact details?',answer:'The directory lists faculty and staff offices and their QCU email addresses.',href:'/directory',roles:roles as readonly string[]},{id:'FAQ-6',question:'What still works when features are paused?',answer:'You can still read announcements and class information, use the assistant, and message your professors.',href:'/standing',roles:['student']},{id:'FAQ-7',question:'What does a moderation flag mean?',answer:'A flag asks a moderator to read the post in context. It does not mean anyone did something wrong, and it does not restrict anyone.',href:'/admin/moderation',roles:['administrator']}]
+const faq=[{id:'FAQ-1',question:'How do I book an appointment?',answer:'Open Appointments, pick one of your professors, choose what the appointment is for, and request an open time. The professor confirms or declines.',href:'/consultations',roles:['student']},{id:'FAQ-2',question:'What does anonymous reporting mean?',answer:'Your report stays linked to your verified account. Handlers see an alias until you choose to share your name with their office.',href:'/reports/new',roles:['student']},{id:'FAQ-3',question:'How are reports routed?',answer:'A report goes to the student\'s adviser first. If the report involves that adviser, it goes to the program chair instead. The program chair and the Dean can read every report in their scope, unless the adviser marks it confidential; then they see only its status. Each office decides the next step.',href:'/cases',roles:['professor','chair','dean','guidance','osas']},{id:'FAQ-4',question:'What can the assistant do?',answer:'It explains ACCS pages, your schedule, and the milestones on your own reports. It cannot decide cases or restrictions. Staff do that.',href:'/assistant',roles:roles as readonly string[]},{id:'FAQ-5',question:'Where do I find official contact details?',answer:'The directory lists faculty and staff offices and their QCU email addresses.',href:'/directory',roles:roles as readonly string[]},{id:'FAQ-6',question:'What still works when features are paused?',answer:'You can still read announcements and class information, use the assistant, and message your professors.',href:'/standing',roles:['student']},{id:'FAQ-7',question:'What does a moderation flag mean?',answer:'A flag asks a moderator to read the post in context. It does not mean anyone did something wrong, and it does not restrict anyone.',href:'/admin/moderation',roles:['administrator']}]
 function notificationCategories(user:User){return ['announcement',...(hasRole(user,'student')?['class']:[]),...(hasPermission(user,'message.send')?['message']:[]),...(hasRole(user,'student','professor')?['consultation']:[]),...(hasRole(user,'student','professor','chair','dean','guidance','osas')?['report','case']:[]),...(hasPermission(user,'evaluation.fill')||hasPermission(user,'evaluation.configure')?['evaluation']:[]),...(hasRole(user,'administrator')||hasPermission(user,'moderation.referral')?['moderation']:[])]}
 function filteredFaq(user:User){return faq.filter(entry=>entry.roles.some(role=>user.roles.includes(role as User['roles'][number])))}
 // Three unsettled strikes hold a student's clearance until OSAS records the settlement (#34). Settled strikes stay on the
@@ -475,7 +476,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
       if(hasRole(user,'administrator'))data.redirect='/admin'
       const consultations=visibleConsultations(db,user);const assignments=db.assignments.filter(a=>a.evaluatorId===user.id&&['Published','Closed'].includes(find(db.cycles,a.cycleId).status))
       data.stats=[{label:hasRole(user,'student')?'Active reports':'Reports in your queue',value:(hasRole(user,'student')?ownReports:cases).filter(r=>!['Resolved','Closed'].includes(r.status)).length,note:'Reports you can see'},{label:'Appointments',value:consultations.filter(c=>!['Completed','Declined','Cancelled'].includes(c.status)).length,note:'Requests and booked times'},{label:'Evaluations due',value:assignments.filter(a=>!a.submittedAt).length,note:'Forms assigned to you'},{label:'Unread updates',value:db.notifications.filter(n=>n.recipientId===user.id&&!n.read).length,note:'In your notifications'}]
-      Object.assign(data,{announcements:posts.filter(p=>p.kind==='announcement').slice(0,3).map(p=>postView(db,p,user)),posts:posts.slice(0,3).map(p=>postView(db,p,user)),events:visibleEvents(db,user), reports:hasRole(user,'student')?ownReports.slice(0,4).map(r=>reportView(db,r,user,true)):[],cases:cases.slice(0,4).map(r=>reportView(db,r,user)),consultations:consultations.map(c=>consultationView(db,c)),assignments:assignments.map(a=>assignmentView(db,a)),todos:db.todos.filter(t=>t.ownerId===user.id),notifications:db.notifications.filter(n=>n.recipientId===user.id).slice(0,5),sections:spaces.map(s=>({id:s.id,title:s.title,program:s.program,subject:s.subject})),roleSections:internalRole?[]:user.roles.map(role=>({role,title:roleLabels[role],description:scopeLabel({...user,roles:[role]}),...readPage(repo,{...user,roles:[role]},'P03',{},true).data}))});break}
+      Object.assign(data,{announcements:posts.filter(p=>p.kind==='announcement').slice(0,3).map(p=>postView(db,p,user)),posts:posts.slice(0,3).map(p=>postView(db,p,user)),events:visibleEvents(db,user), reports:hasRole(user,'student')?ownReports.slice(0,4).map(r=>reportView(db,r,user,true)):[],cases:cases.slice(0,4).map(r=>reportView(db,r,user)),consultations:consultations.map(c=>consultationView(db,c,user)),assignments:assignments.map(a=>assignmentView(db,a)),todos:db.todos.filter(t=>t.ownerId===user.id),notifications:db.notifications.filter(n=>n.recipientId===user.id).slice(0,5),sections:spaces.map(s=>({id:s.id,title:s.title,program:s.program,subject:s.subject})),roleSections:internalRole?[]:user.roles.map(role=>({role,title:roleLabels[role],description:scopeLabel({...user,roles:[role]}),...readPage(repo,{...user,roles:[role]},'P03',{},true).data}))});break}
     case'P04':Object.assign(data,{posts:posts.map(p=>postView(db,p,user)),spaces:spaces.map(s=>({id:s.id,title:s.title})),canPost:hasPermission(user,'post.create')});break
     case 'P05':
       Object.assign(data, {
@@ -565,7 +566,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
           members: thread.memberIds.map(memberId => person(find(db.users, memberId))),
           lastMessage: messagePreview(thread.messages.filter(message => canSeeItem(db, user, 'message', message.id, message.authorId)).at(-1)),
           updatedAt: thread.messages.at(-1)?.at,
-          unread: unreadMessages(thread, user.id),
+          unread: unreadMessages(db, thread, user),
         }))
       data.recipients = db.users.filter(target => canReach(db, user, target)).map(person)
       if (pageId === 'P12') {
@@ -577,17 +578,17 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
             members: thread.memberIds.map(memberId => person(find(db.users, memberId))),
             messages: thread.messages.filter(message => canSeeItem(db, user, 'message', message.id, message.authorId)).map(message => ({ ...messageView(db, message), ...(heldItem(db, 'message', message.id) ? { underReview: true } : {}) })),
             muted: thread.mutedBy.includes(user.id),
-            unread: unreadMessages(thread, user.id),
+            unread: unreadMessages(db, thread, user),
             kind: thread.spaceId ? 'group' : 'direct',
           }
         }
       }
       break
     }
-    case'P13':Object.assign(data,{events:visibleEvents(db,user).filter(e=>!hasRole(user,'organization')||!e.organizationId||e.organizationId===user.organizationId),slots:hasRole(user,'organization')?[]:visibleSlots(db,user),todos:db.todos.filter(t=>t.ownerId===user.id),consultations:visibleConsultations(db,user).map(c=>consultationView(db,c))});break
-    case'P14':Object.assign(data,{appointmentCategories:appointmentCategories.filter(c=>!c.system),consultations:visibleConsultations(db,user).map(c=>consultationView(db,c)),faculty:faculty.filter(u=>match(u.name)).map(u=>({...person(u),nextSlot:db.slots.find(s=>s.facultyId===u.id&&s.state==='open')}))});break
+    case'P13':Object.assign(data,{events:visibleEvents(db,user).filter(e=>!hasRole(user,'organization')||!e.organizationId||e.organizationId===user.organizationId),slots:hasRole(user,'organization')?[]:visibleSlots(db,user),todos:db.todos.filter(t=>t.ownerId===user.id),consultations:visibleConsultations(db,user).map(c=>consultationView(db,c,user))});break
+    case'P14':Object.assign(data,{appointmentCategories:appointmentCategories.filter(c=>!c.system),consultations:visibleConsultations(db,user).map(c=>consultationView(db,c,user)),faculty:faculty.filter(u=>match(u.name)).map(u=>({...person(u),nextSlot:db.slots.find(s=>s.facultyId===u.id&&s.state==='open')}))});break
     case'P15':{data.appointmentCategories=appointmentCategories.filter(c=>!c.system);const f=pick(faculty,query.id);if(f){data.record=person(f);data.slots=slotsFor(user,db.slots.filter(s=>s.facultyId===f.id))}break}
-    case'P16':{const c=pick(visibleConsultations(db,user),query.id);if(c)data.record=consultationView(db,c);break}
+    case'P16':{const c=pick(visibleConsultations(db,user),query.id);if(c)data.record=consultationView(db,c,user);break}
     case'P17':data.slots=db.slots.filter(s=>s.facultyId===user.id);data.load=db.loadSchedules.filter(c=>c.facultyId===user.id);break
     case'P54':{
       const terms=[...new Map(db.loadSchedules.map(c=>[c.term,{term:c.term,startsOn:c.startsOn,endsOn:c.endsOn}])).values()].sort((a,b)=>b.startsOn.localeCompare(a.startsOn))
@@ -933,15 +934,15 @@ export type OutgoingMail = { kind: 'newConcern'; userId: string; to: string; nam
 /** Work done once an action has committed: emails, and stored files to delete (#44). */
 export type AfterCommit = OutgoingMail | { kind: 'deleteFile'; key: string }
 export async function performAction(repo:Repository,user:User,pageId:string,request:ActionRequest,saveAccount?:(change:AccountChange)=>Promise<void>,saveProfile?:(id:string,change:ProfileChange)=>Promise<void>,sendMail?:(work:AfterCommit[])=>Promise<void>,files?:MaterialStorage){
-  if(fileActions.includes(request.action))await checkMessageFiles(user,request,files)
-  const {outbox,...result}=await repo.transact(unit=>runAction(unit,user,pageId,request))
+  const postKeys=fileActions.includes(request.action)?await checkMessageFiles(repo,user,request,files):new Map<string,string>()
+  const {outbox,...result}=await repo.transact(unit=>runAction(unit,user,pageId,request,postKeys))
   // Emails go out only once the change is saved, and never reach the response.
   if(outbox.length)await sendMail?.(outbox)
   if(request.action==='updateRoles')await saveAccount?.(result.record as AccountChange)
   if(request.action==='saveProfile')await saveProfile?.(user.id,actionPayloads.saveProfile.parse(request.payload))
   return result
 }
-function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest){
+function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest,postKeys=new Map<string,string>()){
   if(!canPage(user,pageId)||!actionPages[request.action]?.includes(pageId))throw deny()
   const db=repo.read();attachPhotos(db);const id=request.recordId;let record:unknown;let message='Changes saved.';const outbox:AfterCommit[]=[]
   // The report is named by the record ID, or by `reportId` in the payload for the talk actions.
@@ -956,7 +957,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       const { attachments: postFiles, ...postFields } = payload
       const post: Post = {
         ...postFields,
-        ...(postFiles?.length ? { attachments: storedFiles(user.id, postFiles) } : {}),
+        ...(postFiles?.length ? { attachments: postFiles.map(f => ({ ...f, key: postKeys.get(f.id)! })) } : {}),
         label: payload.kind === 'announcement' ? 'Announcement' : payload.label!,
         id: repo.nextId('POST'),
         authorId: user.id,
@@ -985,7 +986,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       const { attachments: postFiles, ...postFields } = payload
       Object.assign(post, postFields, { label, updatedAt: now() })
       if (postFiles) {
-        if (postFiles.length) post.attachments = storedFiles(post.authorId, postFiles)
+        if (postFiles.length) post.attachments = postFiles.map(f => ({ ...f, key: post.attachments?.find(a => a.id === f.id)?.key ?? postKeys.get(f.id)! }))
         else delete post.attachments
       }
       if (!post.body && !post.attachments?.length) throw new z.ZodError([{ code: 'custom', path: ['body'], message: 'Write something or attach a file.', input: undefined }])
@@ -1017,7 +1018,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       const categoryIssue = categoryProblem(p)
       if (categoryIssue) throw new z.ZodError([{ code: 'custom', path: [categoryIssue.path], message: categoryIssue.message, input: undefined }])
       const student = db.users.find(u => u.id === p.studentId && u.active && hasRole(u, 'student'))
-      if (!student) throw unavailable()
+      if (!student || !db.spaces.some(sp => sp.professorIds.includes(user.id) && sp.studentIds.includes(student.id))) throw unavailable()
       if (student.id === user.id) throw conflict('You cannot report yourself.')
       // The student's Program Chair receives it; a Chair reporting a student of their own program sends it to the Dean.
       const stage: Stage = hasRole(user, 'chair') && user.program === student.program ? 'dean' : 'chair'
@@ -1231,8 +1232,8 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
     case'caseAction':{const p=actionPayloads.caseAction.parse(request.payload);const reason=reasonOf(request);const r=getCase();if(!caseActions(user,r).includes(p.type))throw conflict('That action is not available at this stage.');const previous=r.stage;let action=p.type as string;if(p.type==='convert'){requirePermission(user,'case.convert');r.caseFileId=repo.nextId('CF');r.status='Case File at Guidance';action='Case File opened'}else if(p.type==='resolve'){r.status='Resolved';action='Resolved'}else if(p.type==='close'){r.status='Closed';action='Closed'}else if(['escalate','transfer'].includes(p.type)){/* Fixed order, decided 2026-11-10: Dean to Guidance, Guidance to OSAS. OSAS is the last stage. */const next:Partial<Record<Stage,Stage>>={adviser:'chair',chair:'dean',dean:'guidance',guidance:'osas'};const nextStage=next[r.stage]!;if(p.nextStage&&p.nextStage!==nextStage)throw conflict('This office cannot make that transfer.');if(r.stage==='guidance'&&!r.caseFileId)throw conflict('Open a Case File before transferring.');if(r.confidential)throw conflict('This concern is confidential. Remove the confidential mark before escalating it.');r.stage=nextStage;r.status=`With ${offices[nextStage]}`;action='Transferred'}else if(p.type==='respond'){addMessage(r.messages,p.update);action='Response sent'}else if(p.type==='milestone')action='Milestone added';else action='Action recorded';r.updatedAt=now();r.history.push({id:repo.nextId('HISTORY'),at:r.updatedAt,actorId:user.id,actorRole:stageRoles[previous],action,reason,update:p.update,public:true,stage:r.stage});audit(repo,user,'Case transition','cases',r.caseFileId??r.id);notify(repo,r.ownerId,'case',ownerPage(r),r.id);for(const handlerId of handlerIds(db,r))notify(repo,handlerId,'case','P22',r.id);for(const earlierId of earlierHandlerIds(db,r))if(earlierId!==user.id)notify(repo,earlierId,'case','P22',r.id);record=reportView(db,r,user, false);message=`${action}.`;break}
     case'addNote':{const p=actionPayloads.addNote.parse(request.payload);const r=getCase();const m=addMessage(r.notes,p.body);audit(repo,user,'Internal note recorded','cases',r.caseFileId??r.id);record=messageView(db,m);message='Internal note saved.';break}
     case'reviewCluster':{requirePermission(user,'cluster.review');const p=actionPayloads.reviewCluster.parse(request.payload);const reason=reasonOf(request);const c=find(db.clusters,id);if(c.program!==user.program)throw unavailable();c.status=p.decision==='confirmed'?'Confirmed':'Dismissed';c.history.push({at:now(),actorId:user.id,decision:c.status,reason});audit(repo,user,'Similarity group reviewed','cases',c.id);record={...c,reportIds:undefined};message='Group review recorded.';break}
-    case'createConsultation':{requirePermission(user,'consultation.request');const p=actionPayloads.createConsultation.parse(request.payload);const appointmentIssue=appointmentProblem(p);if(appointmentIssue)throw new z.ZodError([{code:'custom',path:[appointmentIssue.path],message:appointmentIssue.message,input:undefined}]);const slot=find(db.slots,p.slotId);const faculty=find(db.users,slot.facultyId);if(!canReach(db,user,faculty))throw unavailable();const c=reserveSlot(repo,user.id,slot,p);record=consultationView(db,c);message='Request sent.';break}
-    case'decideConsultation':{const p=actionPayloads.decideConsultation.parse(request.payload);const c=find(visibleConsultations(db,user),id);const student=c.studentId===user.id;const valid:Record<string,string[]>={Requested:['Approved','Declined','Cancelled'],Approved:['Booked','Cancelled'],Booked:['Completed','Cancelled'],Completed:[],Declined:[],Cancelled:[]};if(!valid[c.status]?.includes(p.decision)||student&&p.decision!=='Cancelled')throw conflict('That change is not available for this appointment.');if(!student)requirePermission(user,'consultation.decide');if(['Declined','Cancelled'].includes(p.decision)&&!(p.note?.trim()||request.reason?.trim()))throw new ApiError(400,'A reason is required.','VALIDATION_ERROR');const slot=find(db.slots,c.slotId);if(['Approved','Booked'].includes(p.decision)&&db.consultations.some(other=>other.id!==c.id&&other.slotId===slot.id&&['Approved','Booked'].includes(other.status)))throw conflict('This time is already booked.');c.status=p.decision;c.updatedAt=now();c.history.push({at:c.updatedAt,status:c.status,note:p.note??request.reason??'Status updated',actorId:user.id});slot.state=['Declined','Cancelled','Completed'].includes(c.status)?'open':c.status==='Booked'?'booked':'requested';notify(repo,student?c.facultyId:c.studentId,'consultation','P16',c.id);record=consultationView(db,c);message='Appointment updated.';break}
+    case'createConsultation':{requirePermission(user,'consultation.request');const p=actionPayloads.createConsultation.parse(request.payload);const appointmentIssue=appointmentProblem(p);if(appointmentIssue)throw new z.ZodError([{code:'custom',path:[appointmentIssue.path],message:appointmentIssue.message,input:undefined}]);const slot=find(db.slots,p.slotId);const faculty=find(db.users,slot.facultyId);if(!canReach(db,user,faculty))throw unavailable();const c=reserveSlot(repo,user.id,slot,p);record=consultationView(db,c,user);message='Request sent.';break}
+    case'decideConsultation':{const p=actionPayloads.decideConsultation.parse(request.payload);const c=find(visibleConsultations(db,user),id);const student=c.studentId===user.id;const valid:Record<string,string[]>={Requested:['Approved','Declined','Cancelled'],Approved:['Booked','Cancelled'],Booked:['Completed','Cancelled'],Completed:[],Declined:[],Cancelled:[]};if(!valid[c.status]?.includes(p.decision)||student&&p.decision!=='Cancelled')throw conflict('That change is not available for this appointment.');if(!student)requirePermission(user,'consultation.decide');if(['Declined','Cancelled'].includes(p.decision)&&!(p.note?.trim()||request.reason?.trim()))throw new ApiError(400,'A reason is required.','VALIDATION_ERROR');const slot=find(db.slots,c.slotId);if(['Approved','Booked'].includes(p.decision)&&db.consultations.some(other=>other.id!==c.id&&other.slotId===slot.id&&['Approved','Booked'].includes(other.status)))throw conflict('This time is already booked.');c.status=p.decision;c.updatedAt=now();c.history.push({at:c.updatedAt,status:c.status,note:p.note??request.reason??'Status updated',actorId:user.id});slot.state=['Declined','Cancelled','Completed'].includes(c.status)?'open':c.status==='Booked'?'booked':'requested';notify(repo,student?c.facultyId:c.studentId,'consultation','P16',c.id);record=consultationView(db,c,user);message='Appointment updated.';break}
     case'saveAvailability':{requirePermission(user,'consultation.decide');const p=actionPayloads.saveAvailability.parse(request.payload);if(p.end<=p.start)throw new ApiError(400,'The end time must be later than the start time.','VALIDATION_ERROR');if(db.slots.some(s=>s.id!==id&&s.facultyId===user.id&&s.date===p.date&&s.start<p.end&&s.end>p.start))throw conflict('This time overlaps an existing slot.');const lesson=p.state==='open'?classAt(db,user.id,p.date,p.start,p.end):undefined;if(lesson)throw conflict(`This time overlaps your class ${lesson.subject} (${lesson.day} ${lesson.start} to ${lesson.end}). Choose a time outside your load.`);if(id){const s=find(db.slots,id);if(s.facultyId!==user.id)throw unavailable();if(['booked','requested'].includes(s.state))throw conflict('This time has a request. Cancel the appointment first.');delete s.reason;Object.assign(s,p);record=s}else{record={id:repo.nextId('SLOT'),facultyId:user.id,...p};db.slots.push(record as Database['slots'][number])}message='Availability saved.';break}
     case'deleteAvailability':{actionPayloads.deleteAvailability.parse(request.payload);requirePermission(user,'consultation.decide');const s=find(db.slots,id);if(s.facultyId!==user.id)throw unavailable();if(['booked','requested'].includes(s.state))throw conflict('Cancel the appointment before removing this time.');db.slots=db.slots.filter(slot=>slot.id!==s.id);message='Availability removed.';break}
     case'uploadLoadSchedule':{
@@ -1337,9 +1338,10 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       }
       if (!existing) db.threads.push(thread)
       const first = addMessage(thread.messages, payload.body, payload.attachments)
-      if (payload.body) autoFlag(repo, { itemType: 'message', itemId: first.id, parentId: thread.id, authorId: user.id, text: payload.body })
+      const held = !!payload.body && autoFlag(repo, { itemType: 'message', itemId: first.id, parentId: thread.id, authorId: user.id, text: payload.body })
       thread.readMessageCounts[user.id] = thread.messages.length
-      notify(repo, recipient.id, 'message', 'P12', thread.id, { body: messageNotice(user, thread, payload.body) })
+      // A message the word filter holds does not show its words in the notification.
+      notify(repo, recipient.id, 'message', 'P12', thread.id, { body: messageNotice(user, thread, payload.body, held) })
       record = { id: thread.id, title: threadTitle(db, thread, user) }
       message = 'Message sent.'
       break
@@ -1350,10 +1352,10 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       if (!canThread(db, user, thread)) throw unavailable()
       const sent = addMessage(thread.messages, payload.body, payload.attachments)
       thread.readMessageCounts[user.id] = thread.messages.length
+      const held = !!payload.body && autoFlag(repo, { itemType: 'message', itemId: sent.id, parentId: thread.id, authorId: user.id, text: payload.body })
       for (const recipientId of thread.memberIds.filter(memberId => memberId !== user.id)) {
-        notify(repo, recipientId, 'message', 'P12', thread.id, { body: messageNotice(user, thread, payload.body) })
+        notify(repo, recipientId, 'message', 'P12', thread.id, { body: messageNotice(user, thread, payload.body, held) })
       }
-      if (payload.body) autoFlag(repo, { itemType: 'message', itemId: sent.id, parentId: thread.id, authorId: user.id, text: payload.body })
       record = messageView(db, sent)
       message = 'Message sent.'
       break
@@ -1460,7 +1462,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       const secretaries=p.decision==='refer'?db.users.filter(u=>u.active&&hasPermission(u,'moderation.referral')):[]
       if(p.decision==='refer'&&m.source!=='User')throw deny()
       if(p.decision==='refer'&&!secretaries.length)throw conflict('The CCS Secretary account is not active, so this cannot be referred yet.')
-      const wasHeldPost=m.itemType==='post'&&m.source==='Filter'&&m.status==='Pending'&&!db.moderation.some(other=>other!==m&&other.itemType==='post'&&other.itemId===m.itemId&&heldStatuses.includes(other.status));m.status=p.decision==='keep'?'Kept':p.decision==='refer'?referredStatus:p.decision==='warn'?'Removed and warned':'Removed';m.history.push({at:now(),actorId:user.id,decision:p.decision,reason});if(['remove','warn'].includes(p.decision)){if(m.itemType==='post')find(db.posts,m.parentId).removed=true;else if(m.itemType==='comment'){const comment=find(find(db.posts,m.parentId).comments,m.itemId);comment.body='This content was removed after review.'}else{const message=find(find(db.threads,m.parentId).messages,m.itemId);message.body='This content was removed after review.'}}if(p.decision==='keep'&&wasHeldPost){const kept=db.posts.find(post=>post.id===m.itemId);if(kept&&!kept.removed){notifyAnnouncementMembers(repo,kept);notifyClassPost(repo,kept)}}audit(repo,user,'Moderation decision','moderation',m.id);for(const secretary of secretaries)notify(repo,secretary.id,'moderation','P50',m.id);if(p.notifyAuthor)notify(repo,m.authorId,'moderation','P40');record={id:m.id,status:m.status,history:m.history};message='Decision recorded.';break}
+      const wasHeldPost=m.itemType==='post'&&m.source==='Filter'&&m.status==='Pending'&&!db.moderation.some(other=>other!==m&&other.itemType==='post'&&other.itemId===m.itemId&&heldStatuses.includes(other.status));m.status=p.decision==='keep'?'Kept':p.decision==='refer'?referredStatus:p.decision==='warn'?'Removed and warned':'Removed';m.history.push({at:now(),actorId:user.id,decision:p.decision,reason});if(['remove','warn'].includes(p.decision)){if(m.itemType==='post')find(db.posts,m.parentId).removed=true;else if(m.itemType==='comment'){const comment=find(find(db.posts,m.parentId).comments,m.itemId);comment.body='This content was removed after review.'}else{const message=find(find(db.threads,m.parentId).messages,m.itemId);message.body='This content was removed after review.';message.attachments=undefined}}if(p.decision==='keep'&&wasHeldPost){const kept=db.posts.find(post=>post.id===m.itemId);if(kept&&!kept.removed){notifyAnnouncementMembers(repo,kept);notifyClassPost(repo,kept)}}audit(repo,user,'Moderation decision','moderation',m.id);for(const secretary of secretaries)notify(repo,secretary.id,'moderation','P50',m.id);if(p.notifyAuthor)notify(repo,m.authorId,'moderation','P40');record={id:m.id,status:m.status,history:m.history};message='Decision recorded.';break}
     default:throw new ApiError(400,'That action does not exist.','VALIDATION_ERROR')
   }
   return {...JSON.parse(JSON.stringify({ok:true,message,...(record===undefined?{}:{record})})) as {ok:true;message:string;record?:unknown},outbox}
@@ -1468,8 +1470,6 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
 // --- files in Messages -----------------------------------------------------------------------------------------------
 /** Actions that can carry uploaded files: messages and posts. */
 const fileActions=['sendMessage','createThread','createPost','updatePost']
-/** A stored file for files uploaded by `ownerId`. */
-const storedFiles=(ownerId:string,files:{id:string;fileName:string;contentType:string;size:number}[])=>files.map(f=>({...f,key:messageFileKey(ownerId,f.id,f.fileName)}))
 /** A short-lived link to a file on a post, for people who can read the post. Pictures can open in the browser. */
 export async function postFileUrl(repo:Repository,user:User,postId:string,fileId:string,inline:boolean,storage?:MaterialStorage){
   const file=await repo.view(unit=>{
@@ -1484,7 +1484,7 @@ export async function postFileUrl(repo:Repository,user:User,postId:string,fileId
 }
 /** Checks a file for a message or a post and returns a signed upload for exactly that type and size. */
 export async function startMessageUpload(user:User,payload:unknown,storage?:MaterialStorage){
-  requirePermission(user,'message.send')
+  if(!hasPermission(user,'message.send')&&!hasPermission(user,'post.create'))throw deny()
   const p=messageUploadSchema.parse(payload)
   const allowed=messageFileTypes[p.contentType]
   const extension=p.fileName.toLowerCase().split('.').pop()??''
@@ -1496,10 +1496,15 @@ export async function startMessageUpload(user:User,payload:unknown,storage?:Mate
   const url=await storage.uploadUrl(messageFileKey(user.id,id,p.fileName),p.contentType,p.size)
   return {attachment:{id,fileName:p.fileName,contentType:p.contentType,size:p.size},upload:{url,method:'PUT',headers:{'Content-Type':p.contentType,'Content-Length':String(p.size)},expiresInSeconds:uploadUrlSeconds}}
 }
-/** Before a message is saved, each file must be the sender's own upload, stored with the declared size and type. */
-async function checkMessageFiles(user:User,request:ActionRequest,storage?:MaterialStorage){
+/**
+ * Before a message or post is saved, each file must be the sender's own upload, stored with the declared size and type.
+ * A post's new files are copied to a key without the author's ID, because readers of an anonymous post get a signed link
+ * that shows the key. Returns the new key of each copied file.
+ */
+async function checkMessageFiles(repo:Repository,user:User,request:ActionRequest,storage?:MaterialStorage){
+  const keys=new Map<string,string>()
   const files=(request.payload as {attachments?:unknown}|undefined)?.attachments
-  if(!Array.isArray(files)||!files.length)return
+  if(!Array.isArray(files)||!files.length)return keys
   const parsed=((actionPayloads[request.action as keyof typeof actionPayloads] as z.ZodType).parse(request.payload) as {attachments?:{id:string;fileName:string;contentType:string;size:number}[]}).attachments??[]
   if(!storage)throw filesNotSetUp()
   for(const f of parsed){
@@ -1509,6 +1514,14 @@ async function checkMessageFiles(user:User,request:ActionRequest,storage?:Materi
     if(!stored)throw conflict(`${f.fileName} has not finished uploading. Try again.`)
     if(stored.size!==f.size||stored.contentType!==undefined&&stored.contentType!==f.contentType)throw conflict(`${f.fileName} does not match what was uploaded. Choose it again.`)
   }
+  if(request.action!=='createPost'&&request.action!=='updatePost')return keys
+  const kept=request.action==='updatePost'?await repo.view(unit=>unit.read().posts.find(p=>p.id===request.recordId)?.attachments?.map(a=>a.id)??[]):[]
+  for(const f of parsed.filter(file=>!kept.includes(file.id))){
+    const key=`materials/posts/${ulid()}/${safeFileName(f.fileName)}`
+    await storage.copy(messageFileKey(user.id,f.id,f.fileName),key)
+    keys.set(f.id,key)
+  }
+  return keys
 }
 /** A short-lived link to a file in a conversation, for its members only. Pictures can open in the browser. */
 export async function messageFileUrl(repo:Repository,user:User,threadId:string,messageId:string,fileId:string,inline:boolean,storage?:MaterialStorage){

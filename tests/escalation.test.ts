@@ -60,10 +60,17 @@ describe('escalation engine', () => {
 
   it('holds back the higher-office bypass until it is switched on', () => {
     const off = decide('si maam reyes laging late sa meeting')
-    expect(off).toMatchObject({ stage: 'adviser', possibleConflict: true, involvedUserIds: [] })
+    // Held back or not, the Chair the concern is about never reads it.
+    expect(off).toMatchObject({ stage: 'adviser', possibleConflict: true, involvedUserIds: ['F-CHR'] })
     expect(off.trace.heldBack[0]).toMatch(/Program Chair may be involved/)
     const on = decide('si maam reyes laging late sa meeting', none, { ...escalationConfig, higherBypass: true })
     expect(on).toMatchObject({ stage: 'dean', involvedUserIds: ['F-CHR'], trace: { rule: 'chair-conflict' } })
+  })
+
+  it('moves past the chair stage when every chair is involved, even with the higher bypass off', () => {
+    // The adviser is the program's only Chair, and the concern is about the adviser.
+    const onlyChair = route('The lab schedule changed.', people, { ...none, aboutAdvisor: true }, ['F-ADV'])
+    expect(onlyChair).toMatchObject({ stage: 'dean', involvedUserIds: ['F-ADV'], trace: { rule: 'chair-conflict' } })
   })
 
   it('sends a critical concern to Guidance by default, and only notes it when the switch is turned off', () => {

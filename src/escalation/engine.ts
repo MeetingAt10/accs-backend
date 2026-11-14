@@ -202,13 +202,10 @@ export function route(text: string, people: Person[], signals: Signals, chairIds
   let stage: Stage = 'adviser', rule = 'default', reason = 'Sent to the student\'s adviser.'
   let aboutAdvisor = false
 
-  for (const m of subjectConflicts) involved.add(m.personId)
-  if (config.higherBypass) for (const m of chairConflicts) involved.add(m.personId)
+  // A Chair or Dean the concern may be about never reads it, bypass or not: the higher bypass only changes where it goes.
+  for (const m of [...subjectConflicts, ...chairConflicts, ...deanConflicts]) involved.add(m.personId)
   if (adviserConflict || explicit) { aboutAdvisor = true; if (adviser) involved.add(adviser.id) }
-  if (deanConflicts.length) {
-    if (config.higherBypass) for (const m of deanConflicts) involved.add(m.personId)
-    else heldBack.push('The Dean may be involved.')
-  }
+  if (deanConflicts.length && !config.higherBypass) heldBack.push('The Dean may be involved.')
 
   if (criticalHit && config.criticalToGuidance) {
     stage = 'guidance'; rule = 'critical'; reason = 'Critical concern. Sent to the Guidance Office.'
@@ -223,12 +220,16 @@ export function route(text: string, people: Person[], signals: Signals, chairIds
   if (criticalHit && !config.criticalToGuidance) heldBack.push('Consider referring this concern to the Guidance Office.')
 
   // Held-back notes are shown to handlers, so they say what to watch for, not which rule is waiting for approval.
-  // A chair conflict, or a chair stage where every chair is involved, moves past the chair only when the higher bypass is on.
+  // A chair conflict moves past the chair only when the higher bypass is on. A chair stage where every chair is involved
+  // always moves on, or the concern would have no one to receive it.
   const chairsFree = chairIds.filter((id) => !involved.has(id))
-  if (chairConflicts.length && !config.higherBypass) {
+  const noFreeChair = stage === 'chair' && chairIds.length > 0 && !chairsFree.length
+  if (chairConflicts.length && !config.higherBypass && !noFreeChair) {
     heldBack.push('The Program Chair may be involved.')
-  } else if (stage !== 'guidance' && config.higherBypass && (chairConflicts.length || stage === 'chair' && chairIds.length && !chairsFree.length)) {
+  } else if (stage !== 'guidance' && (config.higherBypass && chairConflicts.length || noFreeChair)) {
     stage = 'dean'; rule = 'chair-conflict'; reason = 'The Program Chair may be involved. Sent to the Dean.'
+    // The Dean cannot receive a concern about the Dean either.
+    if (deanConflicts.length) { stage = 'guidance'; rule = 'chair-and-dean-conflict'; reason = 'The Program Chair and the Dean may be involved. Sent to the Guidance Office.' }
   }
 
   return {

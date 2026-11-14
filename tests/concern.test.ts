@@ -192,12 +192,13 @@ describe('the concern flow', () => {
       expect(snapshot()).toBe(before)
     })
 
-    it('does not count an adviser who is also the only chair of the program as someone who can receive it', async () => {
+    it('sends a concern about an adviser who is also the only chair of the program to the Dean', async () => {
       repo.read().users.find((user) => user.id === 'QCU-STU-IT-A')!.adviserId = 'QCU-CHAIR-IT'
-      const before = snapshot()
-      const refused = await file(await login('QCU-STU-IT-A'), { aboutAdvisor: true })
-      expect([refused.status, refused.body.code]).toEqual([409, 'CONFLICT'])
-      expect(snapshot()).toBe(before)
+      const filed = await file(await login('QCU-STU-IT-A'), { aboutAdvisor: true })
+      expect(filed.status, JSON.stringify(filed.body)).toBe(200)
+      const stored = repo.read().reports.find((report) => report.id === filed.body.record.id)!
+      expect(stored).toMatchObject({ stage: 'dean' })
+      expect(stored.involvedUserIds).toContain('QCU-CHAIR-IT')
     })
 
     it('leaves a concern about the viewer out of the similar-report views and the counts', async () => {

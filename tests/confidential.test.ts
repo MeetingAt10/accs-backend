@@ -51,6 +51,14 @@ describe('the confidential mark (issue #31)', () => {
     expect((await student!.get(`/api/pages/P20?id=${id}`)).body.data.record).toMatchObject({ confidential: true })
   })
 
+  it('keeps the student\'s answers on a concern filed under the earlier consent wording', async () => {
+    const [student, chair, dean] = await Promise.all(['QCU-STU-CS', 'QCU-CHAIR-CS', 'QCU-FAC-PAULA-DELACRUZ'].map(login))
+    const id = await file(student!)
+    Object.assign(report(id), { consent: { ...report(id).consent!, version: '2026-11-05' }, allowChair: false, allowDean: true })
+    expect(JSON.stringify((await chair!.get(`/api/pages/P22?id=${id}`)).body)).not.toContain(statement.narrative)
+    expect(await view(dean!, id)).toMatchObject({ narrative: statement.narrative, allowChair: false, allowDean: true })
+  })
+
   it('still counts a confidential concern in the chair’s and the Dean’s lists and analytics', async () => {
     const [student, adviser, chair] = await Promise.all(['QCU-STU-CS', 'QCU-PROF-CS', 'QCU-CHAIR-CS'].map(login))
     const id = await file(student!)

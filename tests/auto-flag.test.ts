@@ -73,4 +73,19 @@ describe('automatic flags (issue #84)', () => {
     expect(created.status, JSON.stringify(created.body)).toBe(200)
     expect(latest()).toMatchObject({ itemType: 'message', parentId: created.body.record.id, source: 'Filter', status: 'Pending' })
   })
+
+  it('keeps a held message out of the notification and the unread count', async () => {
+    const student = await login('QCU-STU-IT-A')
+    const professor = await login('QCU-PROF-IT')
+    const unread = async (id: string) => ((await professor.get('/api/pages/P12')).body.data.threads as { id: string; unread: number }[]).find((t) => t.id === id)?.unread ?? 0
+    const created = await student.post('/api/pages/P11/actions').send({ action: 'createThread', payload: { recipientId: 'QCU-PROF-IT', body: 'bobo ng system' } })
+    expect(created.status, JSON.stringify(created.body)).toBe(200)
+    // The conversation may already exist with unread messages; held ones must not add to them.
+    const before = repo.read().threads.find((t) => t.id === created.body.record.id)!.messages.length - 1
+    expect((await student.post('/api/pages/P12/actions').send({ action: 'sendMessage', recordId: created.body.record.id, payload: { body: 'putangina talaga' } })).status).toBe(200)
+    const notices = repo.read().notifications.filter((n) => n.recipientId === 'QCU-PROF-IT' && n.kind === 'message').slice(-2)
+    expect(notices).toHaveLength(2)
+    for (const notice of notices) expect(notice.body).toMatch(/sent a message\.$/)
+    expect(await unread(created.body.record.id)).toBeLessThanOrEqual(before)
+  })
 })

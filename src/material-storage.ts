@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
 // Class material files (#44, decided 12 November 2026: up to 25 MB; PDF, Word, PowerPoint, Excel, plain text, PNG, JPG).
@@ -34,6 +34,8 @@ export interface MaterialStorage {
   /** The stored object's size and type, or undefined when nothing was uploaded. */
   head(key: string): Promise<{ size: number; contentType?: string } | undefined>
   remove(key: string): Promise<void>
+  /** Copies a stored object to another key in the same bucket, keeping its type. */
+  copy(from: string, to: string): Promise<void>
 }
 
 /** A file name safe for a storage key and a download header: letters, digits, dot, dash and underscore. */
@@ -53,6 +55,7 @@ export function createS3MaterialStorage(bucket: string, s3: S3Client = new S3Cli
       }
     },
     async remove(key) { await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key })) },
+    async copy(from, to) { await s3.send(new CopyObjectCommand({ Bucket: bucket, CopySource: `${bucket}/${from.split('/').map(encodeURIComponent).join('/')}`, Key: to })) },
   }
 }
 
@@ -66,5 +69,6 @@ export function createMemoryMaterialStorage() {
     async downloadUrl(key: string, fileName: string, inline = false) { return `memory://download/${key}?name=${safeFileName(fileName)}${inline ? '&inline=1' : ''}` },
     async head(key: string) { return objects.get(key) },
     async remove(key: string) { objects.delete(key) },
+    async copy(from: string, to: string) { const found = objects.get(from); if (found) objects.set(to, found) },
   } satisfies MaterialStorage & { objects: Map<string, unknown>; put(key: string, size: number, contentType: string): void }
 }

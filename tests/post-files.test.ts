@@ -58,6 +58,17 @@ describe('files on posts', () => {
     expect((await (await login('QCU-STU-CS')).get(`/api/posts/${id}/files/${files[0]!.id}?format=json`)).status).toBe(404)
   })
 
+  it('never shows the author of an anonymous post in a file link', async () => {
+    const student = await login('QCU-STU-IT-A')
+    const picture = await upload(student, 'QCU-STU-IT-A', photo)
+    const created = await create(student, { body: 'Ganito yung room.', audience: 'college', label: 'Rant', anonymous: true, attachments: [picture] })
+    expect(created.status, JSON.stringify(created.body)).toBe(200)
+    const link = await (await login('QCU-STU-IT-B')).get(`/api/posts/${created.body.record.id}/files/${picture.id}?format=json`)
+    expect(link.status).toBe(200)
+    expect(link.body.record.url).toContain('materials/posts/')
+    expect(link.body.record.url).not.toContain('QCU-STU-IT-A')
+  })
+
   it('posts pictures with no words, but not an empty post', async () => {
     const student = await login('QCU-STU-IT-A')
     expect((await create(student, { body: '' })).status).toBe(400)

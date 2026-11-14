@@ -20,8 +20,9 @@ export type TalkConsent = { mode: TalkMode; participate: true; recordCall?: bool
 export type Talk = { mode: TalkMode; consents: TalkConsent[]; slotId?: string; consultationId?: string; preferredAt?: string; scheduledAt?: string; meetingLink?: string; place?: string; updatedAt: string }
 /**
  * `aboutAdvisor` is true when the concern goes around the adviser: the student said so, or the adviser is named in it.
- * Then the adviser never sees it. `allowChair` and `allowDean` are the student's choice; an office they did not allow
- * cannot read the concern. A report stored before these fields existed has none of them, which reads as "not allowed".
+ * Then the adviser never sees it. `allowChair` and `allowDean` are the student's choice under a consent wording older than
+ * 2026-11-11: on such a report an office they did not allow cannot read the concern (access.ts `earlierConsent`). Under the
+ * current wording the Program Chair and the Dean read every concern in scope.
  */
 /**
  * A concern a student filed, or (source 'faculty', decided 12 November 2026) a report a faculty member filed about a student.
