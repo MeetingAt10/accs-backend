@@ -31,6 +31,7 @@ const item = (id: string) => repo.read().moderation.find((m) => m.id === id)!
 
 describe('moderation referrals go to the CCS Secretary (D-04)', () => {
   it('refuses a referral while no CCS Secretary account is active, and leaves the item pending', async () => {
+    repo.read().users.find((u) => u.id === 'QCU-SECRETARY-MARICRIS-FERNANDEZ')!.active = false
     const admin = await login('ACCS-ADMIN')
     const response = await moderate(admin, 'MOD-0101', 'refer')
     expect(response.status).toBe(409)
@@ -47,7 +48,7 @@ describe('moderation referrals go to the CCS Secretary (D-04)', () => {
     const referred = await moderate(admin, 'MOD-0101', 'refer')
     expect(referred.status).toBe(200)
     expect(referred.body.record.status).toBe('Referred to the CCS Secretary')
-    expect(repo.read().notifications.slice(before)).toEqual([expect.objectContaining({ recipientId: 'QCU-SECRETARY', kind: 'moderation', pageId: 'P50', recordId: 'MOD-0101' })])
+    expect(repo.read().notifications.slice(before)).toEqual(['QCU-SECRETARY', 'QCU-SECRETARY-MARICRIS-FERNANDEZ'].map((recipientId) => expect.objectContaining({ recipientId, kind: 'moderation', pageId: 'P50', recordId: 'MOD-0101' })))
 
     // The moderator can no longer decide it or refer it again.
     expect((await moderate(admin, 'MOD-0101', 'remove')).status).toBe(409)

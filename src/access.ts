@@ -2,12 +2,12 @@ import type { Role, User } from './schemas.js'
 import type { Database, Report, Space, Thread } from './store.js'
 
 export const permissionRoles: Record<string, Role[]> = {
-  'feed.read': ['student','organization','professor','chair','dean','administrator','guidance','osas','secretary'],
+  'feed.read': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'],
   'post.create': ['student','organization','professor','chair','dean','guidance','osas'], 'post.anonymous': ['student'], 'announcement.publish': ['organization','professor','chair','dean'],
   'message.send': ['student','professor','chair','dean','guidance','osas'], 'roster.view': ['student','organization','professor','chair','dean'], 'calendar.view': ['student','organization','professor','chair','dean','guidance','osas'], 'todo.manage': ['student'], 'consultation.request': ['student'], 'consultation.decide': ['professor'],
   'report.create': ['student'], 'report.viewOwn': ['student'], 'case.view': ['professor','chair','dean','guidance','osas'], 'case.act': ['professor','chair','dean','guidance','osas'], 'case.convert': ['guidance'], 'cluster.review': ['chair'], 'analytics.view': ['chair','dean'],
   'evaluation.fill': ['student','professor'], 'evaluation.review': ['professor'], 'evaluation.configure': ['dean'], 'evaluation.results': ['professor','chair','dean'], 'offense.view': ['chair','dean','guidance','osas'], 'goodmoral.review': ['guidance','osas'], 'restriction.manage': ['administrator','guidance','osas'], 'strike.recommend': ['dean'], 'student.report': ['professor','chair'], 'clearance.view': ['secretary','chair','dean','osas'], 'load.manage': ['secretary'], 'strike.record': ['osas'], 'standing.viewOwn': ['student'], 'moderation.review': ['administrator'], 'moderation.referral': ['secretary'], 'role.manage': ['administrator'], 'audit.view': ['administrator'],
-  'directory.view': ['student','organization','professor','chair','dean','administrator','guidance','osas','secretary'], 'self.manage': ['student','organization','professor','chair','dean','administrator','guidance','osas','secretary'], 'assistant.use': ['student','organization','professor','chair','dean','administrator','guidance','osas','secretary'],
+  'directory.view': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'], 'self.manage': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'], 'assistant.use': ['student','organization','professor','chair','dean','administrator','guidance','osas','secretary'],
   // Account provisioning has no page; it is the /api/accounts routes. The Dean activates the secretary, who creates every other account.
   'account.activateSecretary': ['dean'], 'account.setupDean': ['administrator'], 'account.provision': ['secretary'],
 }
