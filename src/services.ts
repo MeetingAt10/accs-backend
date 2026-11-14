@@ -1496,7 +1496,9 @@ const fileActions=['sendMessage','createThread','createPost','updatePost']
 export async function postFileUrl(repo:Repository,user:User,postId:string,fileId:string,inline:boolean,storage?:MaterialStorage){
   const file=await repo.view(unit=>{
     const db=unit.read()
-    const post=visiblePosts(db,user).find(p=>p.id===postId)
+    // A reviewer of this post's moderation item (a moderator, or the Secretary once it is referred) may open its files.
+    const reviewing=db.moderation.some(m=>m.itemType==='post'&&m.itemId===postId&&canSeeModeration(user,m))
+    const post=reviewing?db.posts.find(p=>p.id===postId):visiblePosts(db,user).find(p=>p.id===postId)
     const file=post&&!post.removed?post.attachments?.find(a=>a.id===fileId):undefined
     if(!file)throw unavailable()
     return file

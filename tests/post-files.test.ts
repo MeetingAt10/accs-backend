@@ -7,7 +7,7 @@ import { createApp } from '../src/app.js'
 import { createMemoryAuthStore } from '../src/auth.js'
 import { createMemoryMaterialStorage } from '../src/material-storage.js'
 import { createMemoryRepository } from '../src/store.js'
-import { seedPassword } from './helpers.js'
+import { secretarySession, seedPassword } from './helpers.js'
 
 let repo: ReturnType<typeof createMemoryRepository>
 let app: ReturnType<typeof createApp>
@@ -56,6 +56,15 @@ describe('files on posts', () => {
     expect(download.headers.location).toContain('name=Week_6.pdf')
     // A student of another program cannot read the class post, so cannot open its files.
     expect((await (await login('QCU-STU-CS')).get(`/api/posts/${id}/files/${files[0]!.id}?format=json`)).status).toBe(404)
+  })
+
+  it('lets the Secretary open the files of a post referred to them', async () => {
+    const professor = await login('QCU-PROF-IT')
+    const file = await upload(professor, 'QCU-PROF-IT', pdf)
+    const id = (await create(professor, { body: 'See the file.', attachments: [file] })).body.record.id as string
+    repo.read().moderation.push({ id: 'MOD-TEST', itemType: 'post', itemId: id, parentId: id, authorId: 'QCU-PROF-IT', reporterId: 'QCU-STU-IT-A', source: 'User', reason: 'Check', excerpt: '', status: 'Referred to the CCS Secretary', at: '2026-11-14T00:00:00.000Z', history: [{ at: '2026-11-14T00:00:00.000Z', actorId: 'ACCS-ADMIN', decision: 'refer', reason: 'Yours' }] } as never)
+    const secretary = await secretarySession(app)
+    expect((await secretary.get(`/api/posts/${id}/files/${file.id}?format=json`)).status).toBe(200)
   })
 
   it('leaves no copy of a file behind when the post is refused', async () => {
