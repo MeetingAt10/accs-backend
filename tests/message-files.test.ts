@@ -90,6 +90,25 @@ describe('files in messages', () => {
     expect((await (await login('QCU-STU-CS')).get(`${base}/${files[0]!.id}?format=json`)).status).toBe(404)
   })
 
+  it('lets the moderator reviewing a flagged message open its files, and hides its words from notifications', async () => {
+    const student = await login('QCU-STU-IT-A')
+    const file = await upload(student, 'QCU-STU-IT-A', pdf)
+    const sent = await send(student, 'THREAD-DIRECT-1', { body: 'Here is the rubric for Friday.', attachments: [file] })
+    expect(sent.status, JSON.stringify(sent.body)).toBe(200)
+    const messageId = sent.body.record.id as string
+    const notice = () => repo.read().notifications.filter((n) => n.itemId === messageId)
+    expect(notice()[0]!.body).toContain('rubric for Friday')
+    const professor = await login('QCU-PROF-IT')
+    expect((await professor.post('/api/pages/P12/actions').send({ action: 'flag', recordId: 'THREAD-DIRECT-1', payload: { itemType: 'message', itemId: messageId, reason: 'Not appropriate' } })).status).toBe(200)
+    expect(notice().every((n) => !n.body.includes('rubric'))).toBe(true)
+    const moderator = await login('ACCS-ADMIN')
+    const base = `/api/threads/THREAD-DIRECT-1/messages`
+    expect((await moderator.get(`${base}/${messageId}/files/${file.id}?format=json`)).status).toBe(200)
+    // Only that message: the rest of the conversation stays closed to the moderator.
+    const other = repo.read().threads.find((t) => t.id === 'THREAD-DIRECT-1')!.messages.find((m) => m.id !== messageId)!
+    expect((await moderator.get(`${base}/${other.id}/files/x?format=json`)).status).toBe(404)
+  })
+
   it('sends a file with no words, and shows it in the conversation list', async () => {
     const student = await login('QCU-STU-IT-A')
     const file = await upload(student, 'QCU-STU-IT-A', pdf)

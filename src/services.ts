@@ -211,7 +211,7 @@ function audit(repo:UnitOfWork,user:User,action:string,module:string,reference:s
 export const requiredNotificationCategories: readonly string[] = ['report', 'case', 'evaluation']
 const requiredCategoryLabels: Record<string,string> = { report: 'Report updates', case: 'Case updates', evaluation: 'Evaluation updates' }
 /** `urgent` (an urgent announcement) reaches the recipient even if they muted its category. */
-function notify(repo:UnitOfWork,recipientId:string,kind:string,pageId:string,recordId?:string,options:{urgent?:boolean;body?:string}={}) {
+function notify(repo:UnitOfWork,recipientId:string,kind:string,pageId:string,recordId?:string,options:{urgent?:boolean;body?:string;itemId?:string}={}) {
   const db = repo.read()
   const stored = db.settings[recipientId]?.priorities[kind]
   // A mute saved before a category became required is ignored, not obeyed.
@@ -241,7 +241,12 @@ function notify(repo:UnitOfWork,recipientId:string,kind:string,pageId:string,rec
     recordId,
     at: now(),
     read: false,
+    ...(options.itemId ? { itemId: options.itemId } : {}),
   })
+}
+/** A message held or removed by moderation stops showing its words in the notifications that previewed it. */
+function redactNotices(db:Database,messageId:string) {
+  for (const n of db.notifications) if (n.itemId === messageId) n.body = 'Open this update to see the details.'
 }
 /** What a message notification says: who wrote, where (for a group), and the start of the message. */
 function messageNotice(sender:User,thread:Thread,body:string,held=false) {
@@ -1021,7 +1026,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
     case'comment':{if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();if(user.restrictions.includes('post.comment'))throw deny();const p=actionPayloads.comment.parse(request.payload);const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'comment'))throw deny();if(p.anonymous&&!hasRole(user,'student'))throw deny();const added={...addMessage([],p.body),anonymous:p.anonymous};post.comments.push(added);autoFlag(repo,{itemType:'comment',itemId:added.id,parentId:post.id,authorId:user.id,text:p.body});record=postView(db,post,user);message='Comment added.';break}
     case'react':{const p=actionPayloads.react.parse(request.payload);if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'react'))throw deny();toggleReaction(post,user.id,p.reaction);record=postView(db,post,user);message='Reaction updated.';break}
     case'reactComment':{const p=actionPayloads.reactComment.parse(request.payload);if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'react'))throw deny();const comment=post.comments.find(c=>c.id===p.commentId);if(!comment||!canSeeItem(db,user,'comment',comment.id,comment.authorId))throw unavailable();toggleReaction(comment,user.id,p.reaction);record=postView(db,post,user);message='Reaction updated.';break}
-    case'flag':{const p=actionPayloads.flag.parse(request.payload);let authorId:string,body:string,parentId:string,itemId:string;if(p.itemType==='message'){const thread=find(db.threads,id);if(!canThread(db,user,thread))throw unavailable();const m=find(thread.messages,p.itemId);authorId=m.authorId;body=m.body;parentId=thread.id;itemId=m.id}else{const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private))throw unavailable();const item=p.itemType==='comment'?find(post.comments,p.itemId):post;authorId=item.authorId;body=item.body;parentId=post.id;itemId=item.id}const mod={id:repo.nextId('MOD'),itemType:p.itemType,itemId,parentId,authorId,reporterId:user.id,source:'User' as const,reason:p.reason,excerpt:body.slice(0,160),status:'Pending',at:now(),history:[]};db.moderation.push(mod);audit(repo,user,'Content reported','moderation',mod.id);record={id:mod.id,status:mod.status};message='Sent to a moderator.';break}
+    case'flag':{const p=actionPayloads.flag.parse(request.payload);let authorId:string,body:string,parentId:string,itemId:string;if(p.itemType==='message'){const thread=find(db.threads,id);if(!canThread(db,user,thread))throw unavailable();const m=find(thread.messages,p.itemId);authorId=m.authorId;body=m.body;parentId=thread.id;itemId=m.id}else{const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private))throw unavailable();const item=p.itemType==='comment'?find(post.comments,p.itemId):post;authorId=item.authorId;body=item.body;parentId=post.id;itemId=item.id}const mod={id:repo.nextId('MOD'),itemType:p.itemType,itemId,parentId,authorId,reporterId:user.id,source:'User' as const,reason:p.reason,excerpt:body.slice(0,160),status:'Pending',at:now(),history:[]};db.moderation.push(mod);if(p.itemType==='message')redactNotices(db,itemId);audit(repo,user,'Content reported','moderation',mod.id);record={id:mod.id,status:mod.status};message='Sent to a moderator.';break}
     case 'reportStudent': {
       requirePermission(user, 'student.report')
       const p = actionPayloads.reportStudent.parse(request.payload)
@@ -1351,7 +1356,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       const held = !!payload.body && autoFlag(repo, { itemType: 'message', itemId: first.id, parentId: thread.id, authorId: user.id, text: payload.body })
       thread.readMessageCounts[user.id] = thread.messages.length
       // A message the word filter holds does not show its words in the notification.
-      notify(repo, recipient.id, 'message', 'P12', thread.id, { body: messageNotice(user, thread, payload.body, held) })
+      notify(repo, recipient.id, 'message', 'P12', thread.id, { body: messageNotice(user, thread, payload.body, held), itemId: first.id })
       record = { id: thread.id, title: threadTitle(db, thread, user) }
       message = 'Message sent.'
       break
@@ -1364,7 +1369,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       thread.readMessageCounts[user.id] = thread.messages.length
       const held = !!payload.body && autoFlag(repo, { itemType: 'message', itemId: sent.id, parentId: thread.id, authorId: user.id, text: payload.body })
       for (const recipientId of thread.memberIds.filter(memberId => memberId !== user.id)) {
-        notify(repo, recipientId, 'message', 'P12', thread.id, { body: messageNotice(user, thread, payload.body, held) })
+        notify(repo, recipientId, 'message', 'P12', thread.id, { body: messageNotice(user, thread, payload.body, held), itemId: sent.id })
       }
       record = messageView(db, sent)
       message = 'Message sent.'
@@ -1474,7 +1479,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       const secretaries=p.decision==='refer'?db.users.filter(u=>u.active&&hasPermission(u,'moderation.referral')):[]
       if(p.decision==='refer'&&m.source!=='User')throw deny()
       if(p.decision==='refer'&&!secretaries.length)throw conflict('The CCS Secretary account is not active, so this cannot be referred yet.')
-      const wasHeldPost=m.itemType==='post'&&m.source==='Filter'&&m.status==='Pending'&&!db.moderation.some(other=>other!==m&&other.itemType==='post'&&other.itemId===m.itemId&&heldStatuses.includes(other.status));m.status=p.decision==='keep'?'Kept':p.decision==='refer'?referredStatus:p.decision==='warn'?'Removed and warned':'Removed';m.history.push({at:now(),actorId:user.id,decision:p.decision,reason});if(['remove','warn'].includes(p.decision)){if(m.itemType==='post')find(db.posts,m.parentId).removed=true;else if(m.itemType==='comment'){const comment=find(find(db.posts,m.parentId).comments,m.itemId);comment.body='This content was removed after review.'}else{const message=find(find(db.threads,m.parentId).messages,m.itemId);message.body='This content was removed after review.';message.attachments=undefined}}if(p.decision==='keep'&&wasHeldPost){const kept=db.posts.find(post=>post.id===m.itemId);if(kept&&!kept.removed){notifyAnnouncementMembers(repo,kept);notifyClassPost(repo,kept)}}audit(repo,user,'Moderation decision','moderation',m.id);for(const secretary of secretaries)notify(repo,secretary.id,'moderation','P50',m.id);if(p.notifyAuthor)notify(repo,m.authorId,'moderation','P40');record={id:m.id,status:m.status,history:m.history};message='Decision recorded.';break}
+      const wasHeldPost=m.itemType==='post'&&m.source==='Filter'&&m.status==='Pending'&&!db.moderation.some(other=>other!==m&&other.itemType==='post'&&other.itemId===m.itemId&&heldStatuses.includes(other.status));m.status=p.decision==='keep'?'Kept':p.decision==='refer'?referredStatus:p.decision==='warn'?'Removed and warned':'Removed';m.history.push({at:now(),actorId:user.id,decision:p.decision,reason});if(['remove','warn'].includes(p.decision)){if(m.itemType==='post')find(db.posts,m.parentId).removed=true;else if(m.itemType==='comment'){const comment=find(find(db.posts,m.parentId).comments,m.itemId);comment.body='This content was removed after review.'}else{const message=find(find(db.threads,m.parentId).messages,m.itemId);message.body='This content was removed after review.';message.attachments=undefined;redactNotices(db,message.id)}}if(p.decision==='keep'&&wasHeldPost){const kept=db.posts.find(post=>post.id===m.itemId);if(kept&&!kept.removed){notifyAnnouncementMembers(repo,kept);notifyClassPost(repo,kept)}}audit(repo,user,'Moderation decision','moderation',m.id);for(const secretary of secretaries)notify(repo,secretary.id,'moderation','P50',m.id);if(p.notifyAuthor)notify(repo,m.authorId,'moderation','P40');record={id:m.id,status:m.status,history:m.history};message='Decision recorded.';break}
     default:throw new ApiError(400,'That action does not exist.','VALIDATION_ERROR')
   }
   return {...JSON.parse(JSON.stringify({ok:true,message,...(record===undefined?{}:{record})})) as {ok:true;message:string;record?:unknown},outbox}
@@ -1543,9 +1548,11 @@ export async function messageFileUrl(repo:Repository,user:User,threadId:string,m
   const file=await repo.view(unit=>{
     const db=unit.read()
     const thread=find(db.threads,threadId)
-    if(!canThread(db,user,thread))throw unavailable()
     const message=thread.messages.find(m=>m.id===messageId)
-    if(!message||!canSeeItem(db,user,'message',message.id,message.authorId))throw unavailable()
+    // A reviewer of this message's moderation item may open its files, and nothing else in the conversation.
+    const reviewing=!!message&&db.moderation.some(m=>m.itemType==='message'&&m.itemId===message.id&&m.parentId===thread.id&&canSeeModeration(user,m))
+    if(!reviewing&&!canThread(db,user,thread))throw unavailable()
+    if(!message||!reviewing&&!canSeeItem(db,user,'message',message.id,message.authorId))throw unavailable()
     const file=message.attachments?.find(a=>a.id===fileId)
     if(!file)throw unavailable()
     return file

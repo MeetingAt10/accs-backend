@@ -104,7 +104,7 @@ export type StrikeStatus = 'recommended' | 'confirmed' | 'rejected'
 export type Strike = { id: string; studentId: string; reportId: string; kind: 'report' | 'no-show'; note: string; actorId: string; at: string; status?: StrikeStatus; decidedBy?: string; decidedAt?: string; decisionNote?: string }
 /** OSAS settles a clearance hold with a letter or reprimand. The strikes it covers stay on the record; only the hold lifts. */
 export type StrikeSettlement = { id: string; studentId: string; kind: 'letter' | 'reprimand'; reference: string; note: string; strikeIds: string[]; actorId: string; at: string }
-export type Notification = { id: string; recipientId: string; kind: string; title: string; body: string; priority: string; pageId: string; recordId?: string; at: string; read: boolean }
+export type Notification = { id: string; recipientId: string; kind: string; title: string; body: string; priority: string; pageId: string; recordId?: string; at: string; read: boolean; /** The message a message notification previews. */ itemId?: string }
 export type Audit = { id: string; at: string; actorId: string; action: string; module: string; reference: string; result: string; purpose?: string; reason?: string }
 export type Moderation = { id: string; itemType: 'post' | 'comment' | 'message'; itemId: string; parentId: string; authorId: string; reporterId?: string; source: 'Filter' | 'User'; reason: string; excerpt: string; status: string; at: string; history: { at: string; actorId: string; decision: string; reason: string }[] }
 export type Database = {
