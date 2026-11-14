@@ -39,7 +39,7 @@ describe('the System Administrator (issue #40)', () => {
   it('alone holds the audit logs, monitoring and system tools; the Dean holds none of them', async () => {
     for (const permission of ['audit.view', 'role.manage', 'moderation.review']) expect(permissionRoles[permission], permission).toEqual(['administrator'])
     expect(permissionRoles['restriction.manage']).not.toContain('dean')
-    const { agent: dean } = await login('CCS-DEAN')
+    const { agent: dean } = await login('QCU-FAC-PAULA-DELACRUZ')
     const { agent: admin } = await login('ACCS-ADMIN')
     for (const page of ['P45', 'P46', 'P48', 'P51', 'P52']) {
       expect([page, (await dean.get(`/api/pages/${page}`)).status]).toEqual([page, 403])

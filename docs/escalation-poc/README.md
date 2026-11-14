@@ -57,7 +57,7 @@ The stored trace looks like this (handlers only; the owner's view leaves it out)
 
 ```json
 { "engineVersion": "escalation-0.2.0", "lexiconVersion": "lexicon-2026-11-11", "rule": "adviser-conflict", "scope": "section",
-  "mentions": [{ "personId": "QCU-PROF-CS", "name": "Prof. Sena Brook", "role": "adviser", "alias": "brook", "aliasKind": "surname",
+  "mentions": [{ "personId": "QCU-PROF-CS", "name": "Demo Professor Echo", "role": "adviser", "alias": "echo", "aliasKind": "surname",
                  "matchScore": 1, "term": "laging absent", "distance": 0, "proximity": 1, "conflict": 1 }],
   "heldBack": [], "thresholds": { "bypass": 0.6, "triage": 0.3 } }
 ```
@@ -66,8 +66,8 @@ The stored trace looks like this (handlers only; the owner's view leaves it out)
 
 | Screenshot | Shows |
 |---|---|
-| `01-lab-adviser-conflict.png` | "Si sir Brook laging absent…" filed as Noa Vale goes to the Program Chair, and Prof. Sena Brook is kept out |
-| `02-lab-helper-mention.png` | "Tinulungan ako ni sir Brook, pero yung registrar…" stays with the adviser. The score is 0.2 because the complaint is in another clause |
+| `01-lab-adviser-conflict.png` | "Si sir Echo laging absent…" filed as Demo Student Hotel goes to the Program Chair, and Demo Professor Echo is kept out |
+| `02-lab-helper-mention.png` | "Tinulungan ako ni sir Echo, pero yung registrar…" stays with the adviser. The score is 0.2 because the complaint is in another clause |
 | `lab-results.json` | Full engine output for seven samples from the running app: a typo too short for fuzzy matching ("brok"), a fuzzy look-alike ("broke"), a chair conflict held back, a program-wide concern and a critical word |
 | `03-student-view.png` | The student's report page shows the destination only |
 | `04-chair-case-routing.png` | The Program Chair's case page shows the reason, the matched alias, the complaint word and the score |

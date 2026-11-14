@@ -54,7 +54,7 @@ describe('the Dean recommends a strike and OSAS confirms it', () => {
   it('lists the students the concern names for the Dean to pick from, never the student who filed it', async () => {
     // The reporter named in their own concern is still left out.
     await repo.transact((unit) => { const r = unit.read().reports.find((x) => x.id === 'RPT-0243')!; r.involvedUserIds = [...r.involvedUserIds, r.ownerId, 'QCU-PROF-IT'] })
-    const [dean, osas] = [await login('CCS-DEAN'), await login('QCU-OSAS')]
+    const [dean, osas] = [await login('QCU-FAC-PAULA-DELACRUZ'), await login('QCU-OSAS')]
     const seen = (await dean.get('/api/pages/P22?id=RPT-0243')).body.data.record
     expect(seen.strikeCandidates.map((p: { id: string }) => p.id)).toEqual(['QCU-STU-CS'])
     await moveTo('RPT-0243', 'osas')
@@ -62,11 +62,11 @@ describe('the Dean recommends a strike and OSAS confirms it', () => {
   })
 
   it("counts a strike only once OSAS confirms the Dean's recommendation", async () => {
-    const [dean, osas] = [await login('CCS-DEAN'), await login('QCU-OSAS')]
+    const [dean, osas] = [await login('QCU-FAC-PAULA-DELACRUZ'), await login('QCU-OSAS')]
     const recommended = await recommend(dean)
     expect(recommended.status).toBe(200)
     expect(recommended.body.message).toBe('Strike recommended. OSAS confirms it when the case reaches them.')
-    expect(recommended.body.record).toMatchObject({ status: 'recommended', kind: 'report', recommendedBy: expect.objectContaining({ id: 'CCS-DEAN' }) })
+    expect(recommended.body.record).toMatchObject({ status: 'recommended', kind: 'report', recommendedBy: expect.objectContaining({ id: 'QCU-FAC-PAULA-DELACRUZ' }) })
     expect((await dean.get('/api/pages/P22?id=RPT-0243')).body.data.record).toMatchObject({ canRecommendStrike: true, canDecideStrike: false })
     expect((await record(dean)).clearance).toEqual({ onHold: false, unsettledStrikes: 0, totalStrikes: 0, limit: 3 })
     // OSAS sees the recommendation on the case once it arrives, and confirms it there.
@@ -76,7 +76,7 @@ describe('the Dean recommends a strike and OSAS confirms it', () => {
     const confirmed = await decide(osas, recommended.body.record.id)
     expect(confirmed.status).toBe(200)
     expect(confirmed.body.message).toBe('Strike confirmed.')
-    expect(confirmed.body.record.strike).toMatchObject({ status: 'confirmed', recordedBy: expect.objectContaining({ id: 'QCU-OSAS' }), recommendedBy: expect.objectContaining({ id: 'CCS-DEAN' }) })
+    expect(confirmed.body.record.strike).toMatchObject({ status: 'confirmed', recordedBy: expect.objectContaining({ id: 'QCU-OSAS' }), recommendedBy: expect.objectContaining({ id: 'QCU-FAC-PAULA-DELACRUZ' }) })
     expect(confirmed.body.record.clearance).toEqual({ onHold: false, unsettledStrikes: 1, totalStrikes: 1, limit: 3 })
     expect((await decide(osas, recommended.body.record.id)).status).toBe(409)
     const actions = (await state()).audit.filter((a) => a.module === 'records').map((a) => a.action)
@@ -84,7 +84,7 @@ describe('the Dean recommends a strike and OSAS confirms it', () => {
   })
 
   it('lets OSAS reject a recommendation with a reason, and a rejected strike never counts', async () => {
-    const [dean, osas] = [await login('CCS-DEAN'), await login('QCU-OSAS')]
+    const [dean, osas] = [await login('QCU-FAC-PAULA-DELACRUZ'), await login('QCU-OSAS')]
     const id = (await recommend(dean)).body.record.id
     await moveTo('RPT-0243', 'osas')
     expect((await decide(osas, id, 'reject')).status).toBe(400)
@@ -98,7 +98,7 @@ describe('the Dean recommends a strike and OSAS confirms it', () => {
   })
 
   it('lets only the Dean recommend, on a case with the Dean, against a student the concern names', async () => {
-    const dean = await login('CCS-DEAN')
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
     for (const id of ['QCU-OSAS', 'QCU-GUIDANCE', 'QCU-CHAIR-IT', 'QCU-PROF-IT']) expect([id, (await recommend(await login(id))).status]).toEqual([id, 403])
     // RPT-0246 is at OSAS, not with the Dean.
     expect((await recommend(dean, { reportId: 'RPT-0246' })).status).toBe(404)
@@ -115,7 +115,7 @@ describe('the Dean recommends a strike and OSAS confirms it', () => {
   })
 
   it('lets only OSAS decide, and only once the case is with OSAS', async () => {
-    const [dean, osas] = [await login('CCS-DEAN'), await login('QCU-OSAS')]
+    const [dean, osas] = [await login('QCU-FAC-PAULA-DELACRUZ'), await login('QCU-OSAS')]
     const id = (await recommend(dean)).body.record.id
     // Still with the Dean: OSAS cannot decide yet, and the Dean cannot confirm their own recommendation.
     expect((await decide(osas, id)).status).toBe(404)
@@ -132,7 +132,7 @@ describe('the Dean recommends a strike and OSAS confirms it', () => {
     const osas = await login('QCU-OSAS')
     const direct = await osas.post('/api/pages/P34/actions').send({ action: 'recordStrike', payload: { studentId: 'QCU-STU-CS', reportId: 'RPT-0246', kind: 'no-show', note: 'Missed the meeting.' } })
     expect(direct.status).toBeGreaterThanOrEqual(400)
-    expect((await recommend(await login('CCS-DEAN'), { kind: 'no-show' })).status).toBe(400)
+    expect((await recommend(await login('QCU-FAC-PAULA-DELACRUZ'), { kind: 'no-show' })).status).toBe(400)
     expect((await state()).strikes).toEqual([])
   })
 
@@ -147,7 +147,7 @@ describe('the Dean recommends a strike and OSAS confirms it', () => {
 
 describe('strikes and the clearance hold (issue #34)', () => {
   it('puts the clearance on hold at the third confirmed strike, and audits each step', async () => {
-    const [dean, osas] = [await login('CCS-DEAN'), await login('QCU-OSAS')]
+    const [dean, osas] = [await login('QCU-FAC-PAULA-DELACRUZ'), await login('QCU-OSAS')]
     for (const n of [1, 2]) expect((await strike(n - 1, dean, osas)).body.record.clearance).toEqual({ onHold: false, unsettledStrikes: n, totalStrikes: n, limit: 3 })
     const third = await strike(2, dean, osas)
     expect(third.body.message).toBe('Strike confirmed. The student’s clearance is now on hold.')
@@ -159,7 +159,7 @@ describe('strikes and the clearance hold (issue #34)', () => {
   })
 
   it('lifts the hold on settlement and keeps the strikes on the record', async () => {
-    const [dean, osas] = [await login('CCS-DEAN'), await login('QCU-OSAS')]
+    const [dean, osas] = [await login('QCU-FAC-PAULA-DELACRUZ'), await login('QCU-OSAS')]
     for (let n = 0; n < 3; n++) await strike(n, dean, osas)
     const settled = await settle(osas)
     expect(settled.status).toBe(200)
@@ -171,7 +171,7 @@ describe('strikes and the clearance hold (issue #34)', () => {
   })
 
   it('starts a new count after a settlement, refuses to settle without a hold, and settles only confirmed strikes', async () => {
-    const [dean, osas] = [await login('CCS-DEAN'), await login('QCU-OSAS')]
+    const [dean, osas] = [await login('QCU-FAC-PAULA-DELACRUZ'), await login('QCU-OSAS')]
     expect((await settle(osas)).status).toBe(409)
     for (let n = 0; n < 3; n++) await strike(n, dean, osas)
     // A pending recommendation is not part of the settlement.
@@ -189,11 +189,11 @@ describe('strikes and the clearance hold (issue #34)', () => {
   })
 
   it('shows strikes and the hold on the student record to the offices that may open it', async () => {
-    const [dean, osas] = [await login('CCS-DEAN'), await login('QCU-OSAS')]
+    const [dean, osas] = [await login('QCU-FAC-PAULA-DELACRUZ'), await login('QCU-OSAS')]
     for (let n = 0; n < 3; n++) await strike(n, dean, osas)
-    for (const id of ['CCS-DEAN', 'QCU-CHAIR-CS', 'QCU-OSAS']) {
+    for (const id of ['QCU-FAC-PAULA-DELACRUZ', 'QCU-CHAIR-CS', 'QCU-OSAS']) {
       const seen = await record(await login(id))
-      expect([id, seen.clearance.onHold, seen.strikes.length, seen.canRecordStrikes, seen.canRecommendStrikes]).toEqual([id, true, 3, id === 'QCU-OSAS', id === 'CCS-DEAN'])
+      expect([id, seen.clearance.onHold, seen.strikes.length, seen.canRecordStrikes, seen.canRecommendStrikes]).toEqual([id, true, 3, id === 'QCU-OSAS', id === 'QCU-FAC-PAULA-DELACRUZ'])
       expect(seen.strikes[0]).toMatchObject({ kind: 'report', status: 'confirmed', caseReference: expect.stringMatching(/^CF-|^RPT-/), settled: false })
     }
     // Settling stays with OSAS.
@@ -210,7 +210,7 @@ describe('strikes and the clearance hold (issue #34)', () => {
     repo = createRecordRepository(store)
     await repo.transact(nameReported)
     app = createApp(repo, { authStore: createMemoryAuthStore() })
-    const [dean, osas] = [await login('CCS-DEAN'), await login('QCU-OSAS')]
+    const [dean, osas] = [await login('QCU-FAC-PAULA-DELACRUZ'), await login('QCU-OSAS')]
     for (let n = 0; n < 3; n++) await strike(n, dean, osas)
     await settle(osas)
     const cold = createRecordRepository(store)

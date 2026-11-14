@@ -172,22 +172,24 @@ export const newUser = user
 const at = '2026-10-20T02:00:00.000Z'
 /** Real CCS personnel (src/faculty-roster.ts) are seeded on every stack except production. */
 export const seedRoster = !(env.TABLE_PREFIX ?? '').startsWith('accs-prod-')
+const deanRosterId = 'QCU-FAC-PAULA-DELACRUZ'
 export function seed(includeRoster = seedRoster): Database {
   const users: User[] = [
-    user('QCU-STU-IT-A', 'Mira Solis', ['student'], { campus: 'SB', program: 'BSIT', section: 'A', year: 3, studentId: 'QCU-2024-0101', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], organizationIds: ['ORG-COMPUTING'] }),
-    user('QCU-STU-IT-B', 'Luca Reed', ['student'], { campus: 'SB', program: 'BSIT', section: 'B', year: 3, studentId: 'QCU-2024-0102', adviserId: 'QCU-PROF-OTHER', spaceIds: ['SPACE-IT-B'] }),
-    user('QCU-STU-CS', 'Noa Vale', ['student'], { campus: 'SB', program: 'BSCS', section: 'A', year: 2, studentId: 'QCU-2025-0201', adviserId: 'QCU-PROF-CS', spaceIds: ['SPACE-CS-A'] }),
-    user('QCU-STU-RESTRICTED', 'Tess Finch', ['student'], { campus: 'SB', program: 'BSIT', section: 'A', year: 3, studentId: 'QCU-2024-0103', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], restrictions: ['post.create', 'post.comment', 'report.anonymous'] }),
-    user('QCU-ORG', 'Computing Society Representative', ['organization'], { organizationId: 'ORG-COMPUTING', organizationIds: ['ORG-COMPUTING'], office: 'CCS Organizations', title: 'Organization representative' }),
-    user('QCU-PROF-IT', 'Prof. Robin Elm', ['professor'], { program: 'BSIT', office: 'CCS Faculty Room', title: 'Faculty, BSIT adviser', bio: 'Teaches Data Structures and advises BSIT 3A.', officeHours: 'Thursdays, 10:00 AM to 12:00 PM, CCS Faculty Room', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'] }),
-    user('QCU-PROF-OTHER', 'Prof. Rowan Quill', ['professor'], { program: 'BSIT', office: 'CCS Faculty Room', title: 'Faculty, BSIT', bio: 'Advises BSIT 3B.', officeHours: 'Thursdays, 9:00 AM to 11:00 AM, CCS Faculty Room', spaceIds: ['SPACE-IT-B'] }),
-    user('QCU-PROF-CS', 'Prof. Sena Brook', ['professor'], { program: 'BSCS', office: 'CCS Faculty Room', title: 'Faculty, BSCS', bio: 'Advises BSCS 2A.', officeHours: 'Thursdays, 11:00 AM to 1:00 PM, CCS Faculty Room', spaceIds: ['SPACE-CS-A'] }),
-    user('QCU-CHAIR-IT', 'Dr. Morgan Ash', ['chair', 'professor'], { program: 'BSIT', office: 'BSIT Program Office', title: 'BSIT Program Chair and faculty', officeHours: 'Fridays, 10:00 AM to 12:00 PM, BSIT Program Office', spaceIds: ['SUBJECT-IT-DS'] }),
-    user('QCU-CHAIR-CS', 'Dr. Ellis Wren', ['chair'], { program: 'BSCS', office: 'BSCS Program Office', title: 'BSCS Program Chair' }),
-    user('CCS-DEAN', 'Dr. Sage Linden', ['dean'], { email: `dean@${seedDomain}`, office: 'CCS Dean\'s Office', title: 'Dean, College of Computer Studies', officeHours: 'Weekdays, 9:00 AM to 4:00 PM, Dean\'s Office' }),
-    user('ACCS-ADMIN', 'Casey Hart', ['administrator'], { email: 'admin@access-ccs.com', office: 'ACCS system administration', title: 'ACCS System Administrator' }),
-    user('QCU-GUIDANCE', 'Alex Fern', ['guidance'], { office: 'Guidance Office', title: 'Guidance officer', officeHours: 'Weekdays, 9:00 AM to 4:00 PM' }),
-    user('QCU-OSAS', 'Jamie Alder', ['osas'], { office: 'Office of Student Affairs and Services', title: 'OSAS officer', officeHours: 'Weekdays, 9:00 AM to 4:00 PM' }),
+    user('QCU-STU-IT-A', 'Demo Student Foxtrot', ['student'], { campus: 'SB', program: 'BSIT', section: 'A', year: 3, studentId: 'QCU-2024-0101', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], organizationIds: ['ORG-COMPUTING'] }),
+    user('QCU-STU-IT-B', 'Demo Student Golf', ['student'], { campus: 'SB', program: 'BSIT', section: 'B', year: 3, studentId: 'QCU-2024-0102', adviserId: 'QCU-PROF-OTHER', spaceIds: ['SPACE-IT-B'] }),
+    user('QCU-STU-CS', 'Demo Student Hotel', ['student'], { campus: 'SB', program: 'BSCS', section: 'A', year: 2, studentId: 'QCU-2025-0201', adviserId: 'QCU-PROF-CS', spaceIds: ['SPACE-CS-A'] }),
+    user('QCU-STU-RESTRICTED', 'Demo Student India', ['student'], { campus: 'SB', program: 'BSIT', section: 'A', year: 3, studentId: 'QCU-2024-0103', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], restrictions: ['post.create', 'post.comment', 'report.anonymous'] }),
+    user('QCU-ORG', 'Demo Organization Rep', ['organization'], { organizationId: 'ORG-COMPUTING', organizationIds: ['ORG-COMPUTING'], office: 'CCS Organizations', title: 'Organization representative' }),
+    user('QCU-PROF-IT', 'Demo Professor Charlie', ['professor'], { program: 'BSIT', office: 'CCS Faculty Room', title: 'Faculty, BSIT adviser', bio: 'Teaches Data Structures and advises BSIT 3A.', officeHours: 'Thursdays, 10:00 AM to 12:00 PM, CCS Faculty Room', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'] }),
+    user('QCU-PROF-OTHER', 'Demo Professor Delta', ['professor'], { program: 'BSIT', office: 'CCS Faculty Room', title: 'Faculty, BSIT', bio: 'Advises BSIT 3B.', officeHours: 'Thursdays, 9:00 AM to 11:00 AM, CCS Faculty Room', spaceIds: ['SPACE-IT-B'] }),
+    user('QCU-PROF-CS', 'Demo Professor Echo', ['professor'], { program: 'BSCS', office: 'CCS Faculty Room', title: 'Faculty, BSCS', bio: 'Advises BSCS 2A.', officeHours: 'Thursdays, 11:00 AM to 1:00 PM, CCS Faculty Room', spaceIds: ['SPACE-CS-A'] }),
+    user('QCU-CHAIR-IT', 'Demo Chair Alpha', ['chair', 'professor'], { program: 'BSIT', office: 'BSIT Program Office', title: 'BSIT Program Chair and faculty', officeHours: 'Fridays, 10:00 AM to 12:00 PM, BSIT Program Office', spaceIds: ['SUBJECT-IT-DS'] }),
+    user('QCU-CHAIR-CS', 'Demo Chair Bravo', ['chair'], { program: 'BSCS', office: 'BSCS Program Office', title: 'BSCS Program Chair' }),
+    // With the roster seeded, Dr. Paula Joy L. Dela Cruz is the Dean and this demo Dean is inactive (the record stays for seeded history).
+    user('CCS-DEAN', 'Demo Dean', ['dean'], { active: !includeRoster, email: `dean@${seedDomain}`, office: 'CCS Dean\'s Office', title: 'Dean, College of Computer Studies', officeHours: 'Weekdays, 9:00 AM to 4:00 PM, Dean\'s Office' }),
+    user('ACCS-ADMIN', 'Demo Administrator', ['administrator'], { email: 'admin@access-ccs.com', office: 'ACCS system administration', title: 'ACCS System Administrator' }),
+    user('QCU-GUIDANCE', 'Demo Guidance Officer', ['guidance'], { office: 'Guidance Office', title: 'Guidance officer', officeHours: 'Weekdays, 9:00 AM to 4:00 PM' }),
+    user('QCU-OSAS', 'Demo OSAS Officer', ['osas'], { office: 'Office of Student Affairs and Services', title: 'OSAS officer', officeHours: 'Weekdays, 9:00 AM to 4:00 PM' }),
     // Inactive until the Dean activates it. The email is a placeholder: activation can replace it.
     user('QCU-SECRETARY', 'CCS Secretary', ['secretary'], { active: false, email: 'secretary@example.invalid', office: 'CCS Office', title: 'CCS secretary', officeHours: 'Monday to Friday, 8:00 AM to 5:00 PM' }),
   ]
@@ -225,7 +227,9 @@ export function seed(includeRoster = seedRoster): Database {
   for (const faculty of users.filter(u => u.roles.some(r => ['professor', 'chair', 'dean'].includes(r)))) for (let n = 0; n < 5; n++) assignments.push({ id: `EVAL-SAMPLE-${faculty.id}-${n}`, evaluatorId: `SAMPLE-EVALUATOR-${n}`, facultyId: faculty.id, cycleId: 'CYCLE-2026-1', relation: 'Student to faculty', subject: 'Course evaluation', answers: { Q1: n % 2 ? 4 : 5, Q2: 4, Q3: n % 2 ? 5 : 4 }, submittedAt: at, comment: '' })
   const restrictions: Restriction[] = [{ id: 'RST-0101', studentId: 'QCU-STU-RESTRICTED', features: ['post.create', 'post.comment', 'report.anonymous'], basis: 'OSAS decision on file', decisionReference: 'QCU-DEC-001', starts: at, until: '2026-12-01', actorId: 'QCU-ADMIN', active: true }]
   // After the evaluation and notification loops, so the roster gets no sample evaluations or notifications.
-  const roster = includeRoster ? facultyRoster.map(({ id, name, email, roles, program, title }) => user(id, name, roles, { email, title, office: roles[0] === 'professor' ? 'CCS Faculty Room' : 'CCS Office', ...(program ? { program } : {}) })) : []
+  const roster = includeRoster ? facultyRoster.map(({ id, name, email, roles, program, title }) => id === deanRosterId
+    ? user(id, `Dr. ${name}`, ['dean', 'professor'], { email, title: 'Dean, College of Computer Studies', office: 'CCS Dean\'s Office' })
+    : user(id, name, roles, { email, title, office: roles[0] === 'professor' ? 'CCS Faculty Room' : 'CCS Office', ...(program ? { program } : {}) })) : []
   return {
     users: [...users, ...roster], spaces, organizations: [{ id: 'ORG-COMPUTING', name: 'CCS Computing Society', description: 'Student organization of the College of Computer Studies. Runs workshops and peer tutoring.', representativeId: 'QCU-ORG', memberIds: ['QCU-STU-IT-A'] }], posts, reports, drafts: {},
     threads: [

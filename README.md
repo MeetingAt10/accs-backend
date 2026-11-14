@@ -91,6 +91,8 @@ Passwords are hashed with `crypto.scryptSync` and need 10+ characters with upper
 
 Seeded demo accounts (`QCU-STU-IT-A`, `ACCS-ADMIN`, ...) sign in with their ID or email and the shared `SEED_PASSWORD` until they set a password; rotate or disable this shared password before real users join. The seeded secretary, `QCU-SECRETARY`, is inactive and never accepts the shared password: it signs in only with credentials the Dean issued.
 
+Demo accounts have generic names (`Demo Dean`, `Demo Chair Alpha`, `Demo Professor Charlie`, `Demo Student Foxtrot`, ...). On every stack except production the Dean is Dr. Paula Joy L. Dela Cruz (`QCU-FAC-PAULA-DELACRUZ`, roles `dean` and `professor`) and the demo Dean `CCS-DEAN` is inactive; on production `CCS-DEAN` is the active Dean.
+
 Seeded accounts have made-up addresses on `access-ccs.com`, the domain we own (#69), for example `stu.it.a@access-ccs.com` and `dean@access-ccs.com`. Until 13 November 2026 they were on `qcu.edu.ph`, QCU's real domain. A seeded account stored with its old `qcu.edu.ph` address (on `accs-dev-` tables seeded before the change) is read with its `access-ccs.com` address (`applyAccounts`) and saved that way the next time the account changes; nothing needs re-seeding. Seeded accounts are still never emailed. Real accounts, imported or created by the Secretary, keep their real `qcu.edu.ph` addresses.
 
 ## Account provisioning

@@ -1,7 +1,9 @@
 // Issue #41: the Dean's account is CCS-DEAN (it was QCU-DEAN). Records stored under the old ID are read under the new one,
 // a password, profile or session saved under the old ID carries over, and the old ID still signs in.
+// The Dean setup is the production flow: on the production stack the demo Dean is the active Dean (no roster is seeded).
+vi.hoisted(() => { process.env.TABLE_PREFIX = 'accs-prod-' })
 import request from 'supertest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { createApp } from '../src/app.js'
 import { createMemoryAuthStore, hashPassword } from '../src/auth.js'
@@ -17,7 +19,7 @@ const signIn = (app: ReturnType<typeof createApp>, emailOrId: string, password =
 describe('the renamed Dean account (issue #41)', () => {
   it('is CCS-DEAN in the seed, has dean@access-ccs.com, and no QCU-DEAN remains', () => {
     const users = seed().users
-    expect(users.find((u) => u.id === 'CCS-DEAN')).toMatchObject({ name: 'Dr. Sage Linden', roles: ['dean'], email: 'dean@access-ccs.com' })
+    expect(users.find((u) => u.id === 'CCS-DEAN')).toMatchObject({ name: 'Demo Dean', roles: ['dean'], email: 'dean@access-ccs.com' })
     expect(JSON.stringify(seed())).not.toContain('QCU-DEAN')
   })
 

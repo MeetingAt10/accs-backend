@@ -45,6 +45,8 @@ describe('a flagged comment (the sample MOD-0101)', () => {
 
 describe('a flagged post', () => {
   it('leaves the feed and its page for everyone but the author and the moderators, and comes back when kept', async () => {
+    // The seeded post is the demo Dean's, who is inactive here; the active Dean stands in as its author.
+    repo.read().posts.find((p) => p.id === 'POST-0101')!.authorId = 'QCU-FAC-PAULA-DELACRUZ'
     const reader = await login('QCU-STU-IT-A')
     expect(await feedIds(reader)).toContain('POST-0101')
     expect((await reader.post('/api/pages/P06/actions').send({ action: 'flag', recordId: 'POST-0101', payload: { reason: 'Off topic' } })).status).toBe(200)
@@ -56,7 +58,7 @@ describe('a flagged post', () => {
     expect((await reader.post('/api/pages/P06/actions').send({ action: 'comment', recordId: 'POST-0101', payload: { body: 'Me too' } })).status).toBe(404)
     expect((await reader.post('/api/pages/P06/actions').send({ action: 'react', recordId: 'POST-0101', payload: {} })).status).toBe(404)
     // The author (the Dean) still sees it, marked as under review.
-    expect((await (await login('CCS-DEAN')).get('/api/pages/P06?id=POST-0101')).body.data.record).toMatchObject({ id: 'POST-0101', underReview: true })
+    expect((await (await login('QCU-FAC-PAULA-DELACRUZ')).get('/api/pages/P06?id=POST-0101')).body.data.record).toMatchObject({ id: 'POST-0101', underReview: true })
     const admin = await login('ACCS-ADMIN')
     expect((await moderate(admin, modId, 'keep')).status).toBe(200)
     expect(await feedIds(reader)).toContain('POST-0101')

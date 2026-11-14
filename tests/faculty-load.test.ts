@@ -71,7 +71,7 @@ describe('uploading a faculty load', () => {
   })
 
   it('is for the CCS Secretary only', async () => {
-    for (const id of ['CCS-DEAN', 'QCU-PROF-IT', 'ACCS-ADMIN']) {
+    for (const id of ['QCU-FAC-PAULA-DELACRUZ', 'QCU-PROF-IT', 'ACCS-ADMIN']) {
       const agent = await login(id)
       expect([id, (await agent.get('/api/pages/P54')).status]).toEqual([id, 403])
       expect([id, (await upload(agent, [wednesdayClass()])).status]).toEqual([id, 403])

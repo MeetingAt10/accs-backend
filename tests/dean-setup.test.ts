@@ -1,6 +1,8 @@
 // Decided 12 November 2026: the System Administrator sets up the real Dean with their name and email. The Dean gets an
 // invite with temporary credentials, chooses their own at first sign-in, and the shared sample password stops working.
 // Once the account has a real email it is emailed like any other (reset codes, new concerns). No real names in the code.
+// The Dean setup is the production flow: on the production stack the demo Dean is the active Dean (no roster is seeded).
+vi.hoisted(() => { process.env.TABLE_PREFIX = 'accs-prod-' })
 import request from 'supertest'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 

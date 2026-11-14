@@ -418,7 +418,7 @@ describe('two app instances sharing a record store', () => {
 
   it('commits the audit entry written while a student record is read', async () => {
     const { store, instance } = instances()
-    const { agent: dean } = await signIn(instance(), 'CCS-DEAN')
+    const { agent: dean } = await signIn(instance(), 'QCU-FAC-PAULA-DELACRUZ')
     expect((await dean.get('/api/pages/P34?id=QCU-STU-RESTRICTED&purpose=Case%20handling')).status).toBe(200)
     expect(store.all().filter((item) => item.collection === 'audit').map((item) => JSON.parse(item.data!).action)).toEqual(['Record opened'])
   })

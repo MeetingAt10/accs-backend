@@ -24,9 +24,9 @@ describe('seeded demo accounts on access-ccs.com (issue #69)', () => {
   it('never emails a seeded account at its new or its old address', async () => {
     expect(isSampleAddress('QCU-PROF-IT', 'prof.it@access-ccs.com')).toBe(true)
     expect(isSampleAddress('QCU-PROF-IT', 'PROF.IT@qcu.edu.ph')).toBe(true)
-    expect(isSampleAddress('QCU-PROF-IT', 'robin.elm@qcu.edu.ph')).toBe(false)
+    expect(isSampleAddress('QCU-PROF-IT', 'charlie.demo@qcu.edu.ph')).toBe(false)
     const send = { send: async () => ({ sent: true }) }
-    const invite = (to: string) => ({ accountId: 'QCU-PROF-IT', to, name: 'Prof. Robin Elm', username: 'u', temporaryPassword: 'p', roleLabel: 'Professor' })
+    const invite = (to: string) => ({ accountId: 'QCU-PROF-IT', to, name: 'Demo Professor Charlie', username: 'u', temporaryPassword: 'p', roleLabel: 'Professor' })
     expect(await sendInvite(invite('prof.it@qcu.edu.ph') as never, send as never)).toEqual({ sent: false })
     expect(await sendInvite(invite('prof.it@access-ccs.com') as never, send as never)).toEqual({ sent: false })
   })
@@ -34,10 +34,10 @@ describe('seeded demo accounts on access-ccs.com (issue #69)', () => {
   it('reads a stored seeded account that still has its old address with the new one, and leaves a real address alone', () => {
     const db = seed()
     const stored = (id: string, email: string) => ({ ...structuredClone(db.users.find((u) => u.id === id)!), email })
-    applyAccounts(db, [stored('QCU-PROF-IT', 'prof.it@qcu.edu.ph'), stored('QCU-STU-IT-A', 'mira.solis@qcu.edu.ph'), stored('CCS-DEAN', 'dean@qcu.edu.ph')])
+    applyAccounts(db, [stored('QCU-PROF-IT', 'prof.it@qcu.edu.ph'), stored('QCU-STU-IT-A', 'foxtrot.demo@qcu.edu.ph'), stored('CCS-DEAN', 'dean@qcu.edu.ph')])
     expect(db.users.find((u) => u.id === 'QCU-PROF-IT')?.email).toBe(seedEmail('QCU-PROF-IT'))
     expect(db.users.find((u) => u.id === 'CCS-DEAN')?.email).toBe('dean@access-ccs.com')
     // A real address set later (the Dean's real account, a student's real email) is kept.
-    expect(db.users.find((u) => u.id === 'QCU-STU-IT-A')?.email).toBe('mira.solis@qcu.edu.ph')
+    expect(db.users.find((u) => u.id === 'QCU-STU-IT-A')?.email).toBe('foxtrot.demo@qcu.edu.ph')
   })
 })
