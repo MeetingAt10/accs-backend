@@ -248,3 +248,9 @@ The routes are mounted only when `TABLE_PREFIX` starts with `accs-dev-`, or, wit
 ## Errors and logging
 
 Every unexpected error returns `500 INTERNAL_ERROR` and writes one JSON line to stderr (CloudWatch on Lambda, where the runtime adds the timestamp and request ID): `level`, `msg`, `method`, `path`, `status`, and the error's name, message, and stack. The body, query string, headers, and cookies are never logged, since they can hold passwords, reset codes, and session tokens. Validation, auth, and other expected 4xx responses are not logged; a body over the 128 KB limit returns `413`.
+
+## Observability
+
+With `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_HEADERS` set, the API sends traces and logs to Grafana Cloud over OTLP/HTTP JSON (`src/telemetry.ts`, no SDK). Unset, nothing is sent and nothing changes. Each request is one server span (`GET /api/pages/:pageId`: method, route pattern, path without query string, status; 5xx is an error and carries the exception) plus one log line linked to it, and an incoming W3C `traceparent` header continues the caller's trace. Every `console.*` call is also forwarded as a log. Bodies, query strings, headers, and cookies are never recorded. Lambda sends before it returns; a local server sends every 5 seconds. A failed send is dropped with one stderr line and never affects a response.
+
+Settings, in OTel format: endpoint `https://otlp-gateway-prod-<region>.grafana.net/otlp`, headers `Authorization=Basic <base64>`. The deploy user cannot change Lambda configuration, so the deploy workflow compiles them into the bundle from the repository secrets `GRAFANA_OTLP_ENDPOINT` and `GRAFANA_OTLP_HEADERS` (a write-only token); without both secrets the build has no telemetry. Look in the Grafana Cloud stack `robustsage1032`: Explore with the Tempo (traces) and Loki (logs) data sources, filtered by `service.name = accs-backend` and `deployment.environment.name` (`dev` or `prod`).

@@ -31,7 +31,20 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       # Sessions live in ccs_identity (TABLE_PREFIX is set on the Lambda), so no signing key is inlined.
-      - run: npm run build:lambda
+      # The deploy user cannot change Lambda configuration and infra deploys only from main, so the write-only Grafana
+      # token is compiled into the private Lambda bundle instead of set as environment variables. Unset: no telemetry.
+      - name: Build the Lambda bundle
+        env:
+          GRAFANA_OTLP_ENDPOINT: ${{ secrets.GRAFANA_OTLP_ENDPOINT }}
+          GRAFANA_OTLP_HEADERS: ${{ secrets.GRAFANA_OTLP_HEADERS }}
+        run: |
+          if [ -n "$GRAFANA_OTLP_ENDPOINT" ] && [ -n "$GRAFANA_OTLP_HEADERS" ]; then
+            npm run build:lambda -- \
+              "--define:process.env.OTEL_EXPORTER_OTLP_ENDPOINT=$(node -p 'JSON.stringify(process.env.GRAFANA_OTLP_ENDPOINT)')" \
+              "--define:process.env.OTEL_EXPORTER_OTLP_HEADERS=$(node -p 'JSON.stringify(process.env.GRAFANA_OTLP_HEADERS)')"
+          else
+            npm run build:lambda
+          fi
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:

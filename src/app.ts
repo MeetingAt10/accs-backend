@@ -19,6 +19,7 @@ import { createResetStore, resetPolicy, type ResetStore } from './resets.js'
 import { createThrottleStore, type ThrottleStore } from './throttle.js'
 import { createSessionStore, isWellFormedToken, newSessionToken, sessionIdOf, sessionPolicy, sessionState, type SessionStore } from './sessions.js'
 import { demoUserIds, isSampleAddress, type Repository } from './store.js'
+import { recordException, requestTelemetry } from './telemetry.js'
 import { currentAccountId, formerAccountIds } from './renames.js'
 
 export function createApp(repository:Repository=createRepository({nodeEnv:env.NODE_ENV,tableName}),options:{authStore?:AuthStore;sessionStore?:SessionStore;resetStore?:ResetStore;throttleStore?:ThrottleStore;mailer?:InviteMailer;resetMailer?:ResetCodeMailer;concernMailer?:NewConcernMailer;materialStorage?:MaterialStorage;stack?:Stack}={}){
@@ -31,7 +32,7 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   const throttle=options.throttleStore??createThrottleStore({nodeEnv:env.NODE_ENV,tableName:tableName('ccs_identity'),onLambda})
   // The deployed app and API sit on different domains, so the session cookie must be cross-site there.
   const cookieOptions={httpOnly:true,sameSite:env.NODE_ENV==='production'?'none' as const:'lax' as const,secure:env.NODE_ENV==='production',path:'/'}
-  app.use(helmet());app.use(cors({origin:env.CORS_ORIGIN,credentials:true}));app.use(express.json({limit:'128kb'}))
+  app.use(requestTelemetry);app.use(helmet());app.use(cors({origin:env.CORS_ORIGIN,credentials:true}));app.use(express.json({limit:'128kb'}))
   app.get(['/health','/api/health'],(_req,res)=>send(res,healthResponseSchema,{status:'ok'}))
   const cookieValue=(req:Request)=>req.headers.cookie?.split(';').map(part=>part.trim()).find(part=>part.startsWith('accs_session='))?.slice('accs_session='.length)
   // Resolves the session cookie to a live SESSION item, then to the account. Roles are read from the
@@ -216,6 +217,7 @@ export const app=createApp()
  */
 export function logUnexpected(req: Request, error: unknown) {
   const err = error instanceof Error ? error : new Error(String(error))
+  recordException(err)
   console.error(JSON.stringify({
     level: 'error',
     msg: 'Unhandled error',
