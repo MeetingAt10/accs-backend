@@ -1,0 +1,7 @@
+[{"narrative":"Si sir Brook laging absent, buong section namin hindi naturuan.","stage":"chair","rule":"adviser-conflict","keptOut":["QCU-PROF-CS"],"heldBack":[],"mentions":[{"name":"Prof. Sena Brook","role":"adviser","alias":"brook","term":"laging absent","distance":0,"conflict":1}]},
+{"narrative":"Tinulungan ako ni sir Brook, pero yung registrar hindi nagrereply sa email ko.","stage":"adviser","rule":"default","keptOut":[],"heldBack":[],"mentions":[{"name":"Prof. Sena Brook","role":"adviser","alias":"brook","conflict":0.2}]},
+{"narrative":"si sir brok late lagi","stage":"adviser","rule":"default","keptOut":[],"heldBack":[],"mentions":[]},
+{"narrative":"broke na yung projector sa room 210","stage":"adviser","rule":"default","keptOut":[],"heldBack":[],"mentions":[]},
+{"narrative":"Si Dr. Wren laging late sa meeting namin.","stage":"adviser","rule":"default","keptOut":[],"heldBack":["The Program Chair may be involved."],"mentions":[{"name":"Dr. Ellis Wren","role":"chair","alias":"wren","term":"laging late","distance":0,"conflict":1}]},
+{"narrative":"Buong BSCS walang schedule ng enrollment hanggang ngayon.","stage":"chair","rule":"wide-scope","keptOut":[],"heldBack":[],"mentions":[]},
+{"narrative":"hinipuan ako ng isang estudyante sa hallway","stage":"adviser","rule":"default","keptOut":[],"heldBack":["Consider referring this concern to the Guidance Office."],"criticalTerm":"hinipuan","mentions":[]}]

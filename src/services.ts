@@ -8,6 +8,9 @@ import { appointmentCategories, appointmentProblem, concernFollowUp, purposeOf, 
 import { reactionKinds, type ReactionKind, loadRowSchema, materialUploadSchema, messageUploadSchema, actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
 import { allowedPages, canActCase, canAudience, canReadCase, isEarlierHandler, overseesCase, canCountCase, canFacultyResult, canPage, canPublish, canReach, canSpace, canStudentRecord, canThread, canViewCase, hasPermission, hasRole, isOrganizationMember, pageTitles, permissionRoles, permissions, scopeLabel } from './access.js'
 import { consentWording } from './consent.js'
+import { route, rosterFor } from './escalation/engine.js'
+import { escalationConfig } from './escalation/lexicon.js'
+import { assign } from './escalation/similarity.js'
 import type { Attachment, Material, Space, Assignment, Consultation, Cycle, Database, Message, Moderation, Post, Report, Repository, Slot, Stage, Strike, Thread, UnitOfWork } from './store.js'
 
 export class ApiError extends Error { constructor(public status: number, message: string, public code = 'FORBIDDEN') { super(message) } }
@@ -160,7 +163,7 @@ function reportView(db:Database,report:Report,user:User,owner=false) {
   // A reader who is not the current handler sees the name only if the student shared it with the reader's own office.
   const viewerStage=current?report.stage:hasRole(user,'dean')?'dean':'chair'
   const showName=report.identity==='named'||!owner&&report.disclosedTo.includes(viewerStage)
-  return {id:report.id,caseFileId:report.caseFileId,type:report.caseFileId?'Case File':'Report',category:report.category,subcategory:report.subcategory,categoryDetail:report.categoryDetail,severity:report.severity,status:statusFor(report),stage:report.stage,office:offices[report.stage],program:report.program,narrative:report.narrative,identity:report.identity,alias:report.alias,reporter:showName?author(db,report.ownerId):{name:report.alias,roles:['student'],anonymous:true},createdAt:report.createdAt,updatedAt:report.updatedAt,sourcePostId:report.sourcePostId,location:report.location,occurredOn:report.occurredOn,disclosedTo:owner?report.disclosedTo:undefined,bypassed:owner?undefined:report.bypassed,consent:report.consent&&{readStatement:true,at:report.consent.at,version:report.consent.version,wording:report.consent.wording},allowChair:true,allowDean:true,confidential:report.confidential===true,readOnly:!owner&&!current,aboutAdvisor:report.aboutAdvisor===true,talk:report.talk,history:report.history.filter(h=>!owner||h.public).map(h=>owner?{id:h.id,at:h.at,action:h.action,update:h.update,stage:h.stage,office:offices[h.stage],state:h.stage===report.stage?'current':'done'}:{...h,actorId:h.actorId===report.ownerId&&!showName?undefined:h.actorId,actor:author(db,h.actorId,h.actorId===report.ownerId&&!showName,report.alias)}),messages:report.messages.map(m=>messageView(db,m,report)),notes:owner?undefined:report.notes.map(m=>messageView(db,m)),allowedActions:owner?[]:caseActions(user,report),...(report.source==='faculty'?{source:'faculty',reportedStudent:report.reportedStudentId?person(find(db.users,report.reportedStudentId)):undefined}:{}),...(!owner&&hasRole(user,'dean','osas')?{strikes:db.strikes.filter(s=>s.reportId===report.id).map(s=>strikeView(db,s)),canRecommendStrike:current&&report.stage==='dean'&&hasPermission(user,'strike.recommend'),strikeCandidates:current&&report.stage==='dean'&&hasPermission(user,'strike.recommend')?strikeCandidates(db,report):[],canDecideStrike:current&&report.stage==='osas'&&hasPermission(user,'strike.record')}:{})}
+  return {id:report.id,caseFileId:report.caseFileId,type:report.caseFileId?'Case File':'Report',category:report.category,subcategory:report.subcategory,categoryDetail:report.categoryDetail,severity:report.severity,status:statusFor(report),stage:report.stage,office:offices[report.stage],program:report.program,narrative:report.narrative,identity:report.identity,alias:report.alias,reporter:showName?author(db,report.ownerId):{name:report.alias,roles:['student'],anonymous:true},createdAt:report.createdAt,updatedAt:report.updatedAt,sourcePostId:report.sourcePostId,location:report.location,occurredOn:report.occurredOn,disclosedTo:owner?report.disclosedTo:undefined,bypassed:owner?undefined:report.bypassed,consent:report.consent&&{readStatement:true,at:report.consent.at,version:report.consent.version,wording:report.consent.wording},allowChair:true,allowDean:true,confidential:report.confidential===true,readOnly:!owner&&!current,aboutAdvisor:report.aboutAdvisor===true,talk:report.talk,history:report.history.filter(h=>!owner||h.public).map(h=>owner?{id:h.id,at:h.at,action:h.action,update:h.update,stage:h.stage,office:offices[h.stage],state:h.stage===report.stage?'current':'done'}:{...h,actorId:h.actorId===report.ownerId&&!showName?undefined:h.actorId,actor:author(db,h.actorId,h.actorId===report.ownerId&&!showName,report.alias)}),messages:report.messages.map(m=>messageView(db,m,report)),notes:owner?undefined:report.notes.map(m=>messageView(db,m)),allowedActions:owner?[]:caseActions(user,report),routing:owner?undefined:report.routing,...(report.source==='faculty'?{source:'faculty',reportedStudent:report.reportedStudentId?person(find(db.users,report.reportedStudentId)):undefined}:{}),...(!owner&&hasRole(user,'dean','osas')?{strikes:db.strikes.filter(s=>s.reportId===report.id).map(s=>strikeView(db,s)),canRecommendStrike:current&&report.stage==='dean'&&hasPermission(user,'strike.recommend'),strikeCandidates:current&&report.stage==='dean'&&hasPermission(user,'strike.recommend')?strikeCandidates(db,report):[],canDecideStrike:current&&report.stage==='osas'&&hasPermission(user,'strike.record')}:{})}
 }
 function caseActions(user:User,r:Report) { if(!canActCase(user,r))return[]; if(r.status==='Closed')return[]; if(r.status==='Resolved')return['close'];if(r.stage==='guidance'&&!r.caseFileId)return['convert'];return ['respond','recordAction',...(['guidance','osas'].includes(r.stage)?['milestone']:[]),'resolve',...(r.stage==='adviser'||r.stage==='chair'?['escalate']:r.stage==='dean'||r.stage==='guidance'?['transfer']:[])] }
 function consultationView(db:Database,c:Database['consultations'][number]) { return {...c,student:person(find(db.users,c.studentId)),faculty:person(find(db.users,c.facultyId)),slot:find(db.slots,c.slotId)} }
@@ -240,6 +243,17 @@ function notify(repo:UnitOfWork,recipientId:string,kind:string,pageId:string,rec
 function unreadMessages(thread:Thread,userId:string) {
   const readCount = Math.min(thread.messages.length, thread.readMessageCounts[userId] ?? 0)
   return thread.messages.slice(readCount).filter(message => message.authorId !== userId).length
+}
+/** Puts a new report in a similar-report group of its program, or opens a group of two. Confidential and finished reports stay out. */
+function groupSimilar(repo:UnitOfWork,db:Database,r:Report) {
+  if(r.confidential)return
+  const open=db.reports.filter(x=>x.program===r.program&&!x.confidential&&!['Resolved','Closed'].includes(x.status)).map(x=>({id:x.id,text:x.narrative}))
+  const groups=db.clusters.filter(c=>c.program===r.program&&c.status!=='Dismissed')
+  const hit=assign({id:r.id,text:r.narrative},open,groups,escalationConfig.similarityThreshold)
+  if(!hit)return
+  const similarity=Math.round(hit.similarity*100)
+  if(hit.groupIndex!==undefined){const c=groups[hit.groupIndex]!;c.reportIds.push(r.id);c.similarity=similarity;c.phrases=hit.phrases;c.supporting=`${c.reportIds.length} reports share these terms.`;return}
+  db.clusters.push({id:repo.nextId('CLUSTER'),program:r.program,title:hit.phrases.slice(0,3).join(', ')||'Similar reports',reportIds:[hit.partnerId!,r.id],similarity,supporting:'2 reports share these terms.',dissenting:'None recorded yet.',phrases:hit.phrases,status:'To review',history:[]})
 }
 function handlerIds(db:Database,r:Report) { return db.users.filter(u=>u.active&&canActCase(u,r)).map(u=>u.id) }
 /** Offices the case has moved past; they are told about every later step (#30). */
@@ -566,7 +580,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
     case'P20':{const r=pick(ownReports,reportIdOf(db,query.id));if(r)data.record=reportView(db,r,user,true);data.consentWording=consentWording;break}
     case'P21':if(hasPermission(user,'student.report'))Object.assign(data,{canReportStudent:true,categoryOptions:concernCategories,reportableStudents:db.users.filter(u=>u.active&&hasRole(u,'student')&&db.spaces.some(sp=>sp.professorIds.includes(user.id)&&sp.studentIds.includes(u.id))).map(u=>({id:u.id,name:u.name,studentId:u.studentId,program:u.program,section:u.section}))});data.cases=cases.filter(r=>(!query.q||r.id.toLowerCase().includes(query.q.toLowerCase()))&&(!query.status||r.status===query.status)&&(!query.category||r.category===query.category)&&(!query.severity||r.severity===query.severity)).map(r=>reportView(db,r,user));break
     case'P22':{const r=pick(cases,reportIdOf(db,query.id));if(r)data.record=reportView(db,r,user);break}
-    case'P23':case'P24':{const clusters=db.clusters.filter(c=>c.program===user.program);data.clusters=clusters.map(c=>({...c,reportIds:undefined,reportCount:db.reports.filter(r=>c.reportIds.includes(r.id)&&canViewCase(user,r)).length}));data.threshold=80;if(pageId==='P24'){const c=pick(clusters,query.id);if(c){data.record={...c,reportIds:undefined};data.reports=db.reports.filter(r=>c.reportIds.includes(r.id)&&canViewCase(user,r)).map(r=>reportView(db,r,user))}}break}
+    case'P23':case'P24':{const clusters=db.clusters.filter(c=>c.program===user.program);data.clusters=clusters.map(c=>({...c,reportIds:undefined,reportCount:db.reports.filter(r=>c.reportIds.includes(r.id)&&canViewCase(user,r)).length}));data.threshold=Math.round(escalationConfig.similarityThreshold*100);if(pageId==='P24'){const c=pick(clusters,query.id);if(c){data.record={...c,reportIds:undefined};data.reports=db.reports.filter(r=>c.reportIds.includes(r.id)&&canViewCase(user,r)).map(r=>reportView(db,r,user))}}break}
     case 'P25': {
       if (query.program && hasRole(user, 'chair') && query.program !== user.program) {
         throw unavailable()
@@ -1014,10 +1028,14 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       const categoryIssue = categoryProblem(p)
       if (categoryIssue) throw new z.ZodError([{ code: 'custom', path: [categoryIssue.path], message: categoryIssue.message, input: undefined }])
       if (p.identity === 'anonymous' && user.restrictions.includes('report.anonymous')) throw deny()
-      // The adviser is a professor set as the student's adviser. Without one a concern can still go to the chair, if it is about the adviser.
+      // The adviser is a professor set as the student's adviser. Without one a concern can still go to the chair, if it goes around the adviser.
       const adviser = db.users.find(u => u.id === user.adviserId && u.active && hasRole(u, 'professor'))
-      if (!adviser && !p.aboutAdvisor) throw conflict('You do not have an active adviser, so this concern cannot be sent. Ask the CCS office to set your adviser, then try again.')
-      const bypassed = p.aboutAdvisor || p.conflictedAdviser || !!adviser && (p.involvedUserIds.includes(adviser.id) || p.narrative.toLowerCase().includes(adviser.name.toLowerCase()))
+      // Context-aware routing: the report text read together with the reporter's own faculty (src/escalation, no external service).
+      const chairIds = db.users.filter(u => u.active && hasRole(u, 'chair') && u.program === user.program).map(u => u.id)
+      const roster = rosterFor({ ...user, adviserId: adviser?.id }, db.users, db.spaces)
+      const decision = route(p.narrative, roster, p, chairIds)
+      if (!adviser && decision.stage === 'adviser') throw conflict('You do not have an active adviser, so this concern cannot be sent. Ask the CCS office to set your adviser, then try again.')
+      const { stage, bypassed } = decision
       if (p.sourcePostId) {
         const source = find(db.posts, p.sourcePostId)
         if (source.authorId !== user.id || !canAudience(db, user, source.audience, source.private)) throw unavailable()
@@ -1028,7 +1046,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
         ownerId: user.id,
         program: user.program!,
         adviserId: adviser?.id,
-        stage: bypassed ? 'chair' : 'adviser',
+        stage,
         status: 'Submitted',
         narrative: p.narrative,
         category: p.category,
@@ -1038,23 +1056,34 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
         identity: p.identity,
         alias: `Reporter A-${repo.nextId('ALIAS').slice(-4)}`,
         disclosedTo: [],
-        involvedUserIds: [...new Set([...p.involvedUserIds, ...(bypassed && adviser ? [adviser.id] : [])])],
+        involvedUserIds: decision.involvedUserIds,
         bypassed,
-        // A concern that goes around the adviser is "about the adviser" for every rule that keeps the adviser out.
-        aboutAdvisor: bypassed,
+        // "About the adviser" keeps the adviser out of every later step; a concern sent up for another reason does not set it.
+        aboutAdvisor: decision.aboutAdvisor,
+        routing: decision.trace,
         consent: { readStatement: true, at, userId: user.id, version: consentWording.version, wording: consentWording.report },
         createdAt: at,
         updatedAt: at,
         sourcePostId: p.sourcePostId,
         location: p.location,
         occurredOn: p.occurredOn,
-        history: [{ id: repo.nextId('HISTORY'), at, actorId: user.id, actorRole: 'student', action: 'Submitted', reason: bypassed ? 'Adviser named in the report. Sent to the chair for review.' : 'Sent to the student\'s adviser.', update: 'Your report was sent to the office handling it.', public: true, stage: bypassed ? 'chair' : 'adviser' }],
+        history: [{ id: repo.nextId('HISTORY'), at, actorId: user.id, actorRole: 'student', action: 'Submitted', reason: decision.reason, update: 'Your report was sent to the office handling it.', public: true, stage }],
         notes: [],
         messages: [],
       }
+      // A critical concern is never refused because Guidance has no one to receive it. The normal rules pick the stage again, but never the
+      // adviser: the Program Chair is the lowest it falls back to. aboutAdvisor and involvedUserIds do not depend on the switch, so they stay as set.
+      if (stage === 'guidance' && !handlerIds(db, r).length) {
+        const fallback = route(p.narrative, roster, p, chairIds, { ...escalationConfig, criticalToGuidance: false })
+        r.stage = fallback.stage === 'adviser' ? 'chair' : fallback.stage
+        r.bypassed = true
+        r.routing = { ...fallback.trace, rule: 'critical-no-guidance' }
+        Object.assign(r.history[0]!, { stage: r.stage, reason: `No Guidance officer can receive this yet. Sent to the ${offices[r.stage]}.` })
+      }
       // Nothing is stored or sent when no one can receive it.
-      if (!handlerIds(db, r).length) throw conflict(bypassed ? 'Your concern goes to your Program Chair, and your program does not have a Program Chair who can receive it yet. Ask the CCS office to set one, then try again.' : 'Your adviser cannot receive concerns right now. Ask the CCS office to check your adviser, then try again.')
+      if (!handlerIds(db, r).length) throw conflict(r.stage === 'dean' ? 'Your concern goes to the Dean, and no Dean can receive it yet. Ask the CCS office, then try again.' : r.stage === 'guidance' ? 'Your concern goes to the Guidance Office, and no Guidance officer can receive it yet. Ask the CCS office, then try again.' : r.bypassed ? 'Your concern goes to your Program Chair, and your program does not have a Program Chair who can receive it yet. Ask the CCS office to set one, then try again.' : 'Your adviser cannot receive concerns right now. Ask the CCS office to check your adviser, then try again.')
       db.reports.push(r)
+      groupSimilar(repo, db, r)
       delete db.drafts[user.id]
       audit(repo, user, 'Report submitted', 'reports', r.id)
       audit(repo, user, 'Report consent recorded', 'reports', r.id)

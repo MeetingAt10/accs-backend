@@ -1,5 +1,6 @@
 import { consentWording } from './consent.js'
 import { ulid } from './ids.js'
+import type { Decision } from './escalation/engine.js'
 import { formerAccountIds } from './renames.js'
 import type { ReactionKind, Role, TalkMode, User } from './schemas.js'
 
@@ -24,8 +25,9 @@ export type Talk = { mode: TalkMode; consents: TalkConsent[]; slotId?: string; c
  * A concern a student filed, or (source 'faculty', decided 12 November 2026) a report a faculty member filed about a student.
  * For a faculty report the owner is the faculty member, the reported student is `reportedStudentId` and is in `involvedUserIds`,
  * and there is no consent or talk mode. Stored reports without `source` are students' concerns.
+ * `routing` is the escalation engine's record of why the concern went where it did. Handlers see it; the student does not.
  */
-export type Report = { id: string; ownerId: string; program: string; adviserId?: string; stage: Stage; status: string; narrative: string; category: string; subcategory?: string; categoryDetail?: string; severity: 'low' | 'medium' | 'high'; identity: 'named' | 'anonymous'; alias: string; disclosedTo: string[]; involvedUserIds: string[]; bypassed: boolean; aboutAdvisor: boolean; allowChair?: boolean; allowDean?: boolean; confidential?: boolean; consent?: ReportConsent; source?: 'student' | 'faculty'; reportedStudentId?: string; talk?: Talk; createdAt: string; updatedAt: string; caseFileId?: string; sourcePostId?: string; location?: string; occurredOn?: string; history: History[]; notes: Message[]; messages: Message[] }
+export type Report = { routing?: Decision['trace']; id: string; ownerId: string; program: string; adviserId?: string; stage: Stage; status: string; narrative: string; category: string; subcategory?: string; categoryDetail?: string; severity: 'low' | 'medium' | 'high'; identity: 'named' | 'anonymous'; alias: string; disclosedTo: string[]; involvedUserIds: string[]; bypassed: boolean; aboutAdvisor: boolean; allowChair?: boolean; allowDean?: boolean; confidential?: boolean; consent?: ReportConsent; source?: 'student' | 'faculty'; reportedStudentId?: string; talk?: Talk; createdAt: string; updatedAt: string; caseFileId?: string; sourcePostId?: string; location?: string; occurredOn?: string; history: History[]; notes: Message[]; messages: Message[] }
 export type Post = {
   id: string
   authorId: string
