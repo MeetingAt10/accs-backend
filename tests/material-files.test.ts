@@ -75,7 +75,11 @@ describe('uploading a class material file', () => {
     expect(shown).toMatchObject({ kind: 'file', status: 'ready', downloadUrl: `/api/materials/${material.id}/file` })
     expect(shown.key).toBeUndefined()
     const download = await student.get(`/api/materials/${material.id}/file`).redirects(0)
-    expect([download.status, download.headers.location]).toEqual([302, `memory://download/${key}?name=Week_6_Notes.pdf`])
+    // The confirmed file is a copy the upload URL cannot overwrite; the upload itself is gone.
+    const frozen = repo.read().materials.find((m) => m.id === material.id)!.key!
+    expect(frozen).toMatch(/^materials\/classes\//)
+    expect(storage.objects.has(key)).toBe(false)
+    expect([download.status, download.headers.location]).toEqual([302, `memory://download/${frozen}?name=Week_6_Notes.pdf`])
     expect(repo.read().audit.filter((a) => a.reference === material.id).map((a) => a.action)).toEqual(['Class material file upload started', 'Class material added'])
   })
 

@@ -940,21 +940,21 @@ export type OutgoingMail = { kind: 'newConcern'; userId: string; to: string; nam
 /** Work done once an action has committed: emails, and stored files to delete (#44). */
 export type AfterCommit = OutgoingMail | { kind: 'deleteFile'; key: string }
 export async function performAction(repo:Repository,user:User,pageId:string,request:ActionRequest,saveAccount?:(change:AccountChange)=>Promise<void>,saveProfile?:(id:string,change:ProfileChange)=>Promise<void>,sendMail?:(work:AfterCommit[])=>Promise<void>,files?:MaterialStorage){
-  const postKeys=fileActions.includes(request.action)?await checkMessageFiles(repo,user,request,files):new Map<string,string>()
-  const {outbox,...result}=await repo.transact(unit=>runAction(unit,user,pageId,request,postKeys))
+  const fileKeys=fileActions.includes(request.action)?await checkMessageFiles(repo,user,request,files):new Map<string,string>()
+  const {outbox,...result}=await repo.transact(unit=>runAction(unit,user,pageId,request,fileKeys))
   // Emails go out only once the change is saved, and never reach the response.
   if(outbox.length)await sendMail?.(outbox)
   if(request.action==='updateRoles')await saveAccount?.(result.record as AccountChange)
   if(request.action==='saveProfile')await saveProfile?.(user.id,actionPayloads.saveProfile.parse(request.payload))
   return result
 }
-function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest,postKeys=new Map<string,string>()){
+function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest,fileKeys=new Map<string,string>()){
   if(!canPage(user,pageId)||!actionPages[request.action]?.includes(pageId))throw deny()
   const db=repo.read();attachPhotos(db);const id=request.recordId;let record:unknown;let message='Changes saved.';const outbox:AfterCommit[]=[]
   // The report is named by the record ID, or by `reportId` in the payload for the talk actions.
   const getOwnReport=(reportId=id)=>{const r=find(db.reports,reportIdOf(db,reportId));if(r.ownerId!==user.id||!hasRole(user,'student'))throw unavailable();return r}
   const getCase=(reportId=id)=>{const r=find(db.reports,reportIdOf(db,reportId));if(!canActCase(user,r))throw unavailable();return r}
-  const addMessage=(list:Message[],body:string,files:{id:string;fileName:string;contentType:string;size:number}[]=[])=>{const m:Message={id:repo.nextId('MESSAGE'),authorId:user.id,body,at:now(),...(files.length?{attachments:files.map(f=>({...f,key:messageFileKey(user.id,f.id,f.fileName)}))}:{})};list.push(m);return m}
+  const addMessage=(list:Message[],body:string,files:{id:string;fileName:string;contentType:string;size:number}[]=[])=>{const m:Message={id:repo.nextId('MESSAGE'),authorId:user.id,body,at:now(),...(files.length?{attachments:files.map(f=>({...f,key:fileKeys.get(f.id)!}))}:{})};list.push(m);return m}
   switch(request.action){
     case 'createPost': {
       const payload = actionPayloads.createPost.parse(request.payload)
@@ -963,7 +963,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       const { attachments: postFiles, ...postFields } = payload
       const post: Post = {
         ...postFields,
-        ...(postFiles?.length ? { attachments: postFiles.map(f => ({ ...f, key: postKeys.get(f.id)! })) } : {}),
+        ...(postFiles?.length ? { attachments: postFiles.map(f => ({ ...f, key: fileKeys.get(f.id)! })) } : {}),
         label: payload.kind === 'announcement' ? 'Announcement' : payload.label!,
         id: repo.nextId('POST'),
         authorId: user.id,
@@ -992,7 +992,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       const { attachments: postFiles, ...postFields } = payload
       Object.assign(post, postFields, { label, updatedAt: now() })
       if (postFiles) {
-        if (postFiles.length) post.attachments = postFiles.map(f => ({ ...f, key: post.attachments?.find(a => a.id === f.id)?.key ?? postKeys.get(f.id)! }))
+        if (postFiles.length) post.attachments = postFiles.map(f => ({ ...f, key: post.attachments?.find(a => a.id === f.id)?.key ?? fileKeys.get(f.id)! }))
         else delete post.attachments
       }
       if (!post.body && !post.attachments?.length) throw new z.ZodError([{ code: 'custom', path: ['body'], message: 'Write something or attach a file.', input: undefined }])
@@ -1504,8 +1504,8 @@ export async function startMessageUpload(user:User,payload:unknown,storage?:Mate
 }
 /**
  * Before a message or post is saved, each file must be the sender's own upload, stored with the declared size and type.
- * A post's new files are copied to a key without the author's ID, because readers of an anonymous post get a signed link
- * that shows the key. Returns the new key of each copied file.
+ * New files are then copied to a key of their own: the signed upload URL stays usable for a while and cannot change a sent
+ * file, and readers of an anonymous post get a signed link without the author's ID. Returns the new key of each file.
  */
 async function checkMessageFiles(repo:Repository,user:User,request:ActionRequest,storage?:MaterialStorage){
   const keys=new Map<string,string>()
@@ -1520,11 +1520,14 @@ async function checkMessageFiles(repo:Repository,user:User,request:ActionRequest
     if(!stored)throw conflict(`${f.fileName} has not finished uploading. Try again.`)
     if(stored.size!==f.size||stored.contentType!==undefined&&stored.contentType!==f.contentType)throw conflict(`${f.fileName} does not match what was uploaded. Choose it again.`)
   }
-  if(request.action!=='createPost'&&request.action!=='updatePost')return keys
+  const post=request.action==='createPost'||request.action==='updatePost'
   const kept=request.action==='updatePost'?await repo.view(unit=>unit.read().posts.find(p=>p.id===request.recordId)?.attachments?.map(a=>a.id)??[]):[]
   for(const f of parsed.filter(file=>!kept.includes(file.id))){
-    const key=`materials/posts/${ulid()}/${safeFileName(f.fileName)}`
+    const key=`materials/${post?'posts':'sent'}/${ulid()}/${safeFileName(f.fileName)}`
     await storage.copy(messageFileKey(user.id,f.id,f.fileName),key)
+    // Checked again on the copy: the upload could have changed between the check above and the copy.
+    const copied=await storage.head(key)
+    if(!copied||copied.size!==f.size||copied.contentType!==undefined&&copied.contentType!==f.contentType){await storage.remove(key);throw conflict(`${f.fileName} does not match what was uploaded. Choose it again.`)}
     keys.set(f.id,key)
   }
   return keys
@@ -1578,7 +1581,13 @@ export async function completeMaterialUpload(repo:Repository,user:User,id:string
   const stored=await storage.head(pending.key!)
   if(!stored)throw conflict('The file has not been uploaded yet. Upload it, then try again.')
   if(stored.size!==pending.size||stored.size>materialMaxBytes||stored.contentType!==undefined&&stored.contentType!==pending.contentType){await storage.remove(pending.key!);throw conflict('The uploaded file does not match what was declared. Upload it again.')}
-  return repo.transact(unit=>{const m=find(unit.read().materials,id);m.status='ready';m.updatedAt=now();audit(unit,user,'Class material added','academic',m.id);const {key:_k,...shown}=m;return shown})
+  // The confirmed file is a copy the upload URL cannot reach, checked again; the upload itself is removed.
+  const frozen=`materials/classes/${ulid()}/${safeFileName(pending.fileName!)}`
+  await storage.copy(pending.key!,frozen)
+  const copied=await storage.head(frozen)
+  if(!copied||copied.size!==pending.size||copied.contentType!==undefined&&copied.contentType!==pending.contentType){await storage.remove(frozen);throw conflict('The uploaded file does not match what was declared. Upload it again.')}
+  await storage.remove(pending.key!)
+  return repo.transact(unit=>{const m=find(unit.read().materials,id);m.key=frozen;m.status='ready';m.updatedAt=now();audit(unit,user,'Class material added','academic',m.id);const {key:_k,...shown}=m;return shown})
 }
 /** A short-lived download link for a confirmed file, for the subject's professors and students only. */
 export async function materialDownloadUrl(repo:Repository,user:User,id:string,storage?:MaterialStorage){

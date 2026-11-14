@@ -68,6 +68,8 @@ describe('files in messages', () => {
     expect(sent.status, JSON.stringify(sent.body)).toBe(200)
     expect(sent.body.record.attachments).toEqual(files)
     expect(JSON.stringify(sent.body)).not.toContain('materials/messages/')
+    // Sent files are copies the upload URL cannot overwrite.
+    expect(repo.read().threads.find((t) => t.id === 'THREAD-DIRECT-1')!.messages.at(-1)!.attachments!.map((a) => a.key)).toEqual([expect.stringMatching(/^materials\/sent\//), expect.stringMatching(/^materials\/sent\//)])
 
     const professor = await login('QCU-PROF-IT')
     const record = (await thread(professor, 'THREAD-DIRECT-1')).record
