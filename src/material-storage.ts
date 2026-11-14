@@ -41,7 +41,8 @@ export interface MaterialStorage {
 /** A file name safe for a storage key and a download header: letters, digits, dot, dash and underscore. */
 export const safeFileName = (name: string) => name.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^\.+/, '').slice(-100) || 'file'
 
-export function createS3MaterialStorage(bucket: string, s3: S3Client = new S3Client({})): MaterialStorage {
+// WHEN_REQUIRED: by default the SDK signs a CRC32 of the empty body into a presigned PUT, so S3 rejects the browser's real file.
+export function createS3MaterialStorage(bucket: string, s3: S3Client = new S3Client({ requestChecksumCalculation: 'WHEN_REQUIRED' })): MaterialStorage {
   return {
     uploadUrl: (key, contentType, size) => getSignedUrl(s3, new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: contentType, ContentLength: size }), { expiresIn: uploadUrlSeconds, signableHeaders: new Set(['content-type', 'content-length']) }),
     downloadUrl: (key, fileName, inline = false) => getSignedUrl(s3, new GetObjectCommand({ Bucket: bucket, Key: key, ResponseContentDisposition: `${inline ? 'inline' : 'attachment'}; filename="${safeFileName(fileName)}"` }), { expiresIn: downloadUrlSeconds }),

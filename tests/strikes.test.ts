@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.js'
 import { createMemoryAuthStore } from '../src/auth.js'
 import { createRecordRepository } from '../src/persist.js'
-import { createMemoryRecordStore } from '../src/records.js'
+import { createMemoryRecordStore, type RecordStore } from '../src/records.js'
 import { createMemoryRepository, type Repository, type Stage, type UnitOfWork } from '../src/store.js'
 import { seedPassword } from './helpers.js'
 
@@ -203,6 +203,41 @@ describe('strikes and the clearance hold (issue #34)', () => {
     const own = (await (await login('QCU-STU-IT-A')).get('/api/pages/P20?id=RPT-0246')).body.data.record
     expect(own).toBeDefined()
     expect(own.strikes).toBeUndefined()
+  })
+
+  it('records one recommendation when two instances recommend at the same time', async () => {
+    const store = createMemoryRecordStore()
+    repo = createRecordRepository(store)
+    await repo.transact(nameReported)
+    await moveTo('RPT-0243', 'dean')
+    // Once armed, each instance's first write waits until both have read and decided, so the two really race.
+    let armed = false
+    let arrived = 0
+    let release!: () => void
+    const bothReady = new Promise<void>((resolve) => { release = resolve })
+    const racing = (): RecordStore => {
+      let first = true
+      return {
+        list: (table, collection) => store.list(table, collection),
+        async write(writes) {
+          if (armed && first) { first = false; if (++arrived === 2) release(); await bothReady }
+          return store.write(writes)
+        },
+      }
+    }
+    repo = createRecordRepository(racing())
+    const other = createRecordRepository(racing())
+    const deanOn = async (target: Repository) => {
+      const agent = request.agent(createApp(target, { authStore: createMemoryAuthStore() }))
+      expect((await agent.post('/api/auth/sign-in').send({ emailOrId: 'QCU-FAC-PAULA-DELACRUZ', password: seedPassword })).status).toBe(200)
+      return agent
+    }
+    const [a, b] = [await deanOn(repo), await deanOn(other)]
+    armed = true
+    const results = await Promise.all([recommend(a), recommend(b)])
+    expect(results.map((r) => r.status).sort()).toEqual([200, 409])
+    const cold = createRecordRepository(store)
+    expect(await cold.view((unit) => unit.read().strikes.filter((s) => s.reportId === 'RPT-0243').length, ['strikes'])).toBe(1)
   })
 
   it('keeps strikes and settlements across instances', async () => {

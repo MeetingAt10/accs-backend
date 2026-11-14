@@ -140,6 +140,17 @@ describe('uploading a class material file', () => {
 })
 
 describe('S3 storage', () => {
+  it('signs no checksum of an empty body into an upload, so S3 accepts the real file', async () => {
+    const saved = { ...process.env }
+    Object.assign(process.env, { AWS_REGION: 'ap-southeast-1', AWS_ACCESS_KEY_ID: 'AKIDEXAMPLE', AWS_SECRET_ACCESS_KEY: 'secret' })
+    try {
+      const put = await createS3MaterialStorage('accs-dev-materials').uploadUrl('materials/S/M/notes.pdf', 'application/pdf', 1234)
+      expect(put).not.toMatch(/checksum/i)
+    } finally {
+      process.env = saved
+    }
+  })
+
   it('signs an upload that only accepts the declared type and size, and a download under the original name', async () => {
     const s3 = new S3Client({ region: 'ap-southeast-1', credentials: { accessKeyId: 'AKIDEXAMPLE', secretAccessKey: 'secret' } })
     const s3Storage = createS3MaterialStorage('accs-dev-materials', s3)

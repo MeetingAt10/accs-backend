@@ -1412,6 +1412,8 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       if (db.strikes.some(s => s.reportId === r.id && s.studentId === student.id && s.status !== 'rejected')) throw conflict('This case already has a strike for this student.')
       const s: Strike = { id: repo.nextId('STRIKE'), studentId: student.id, reportId: r.id, kind: 'report', note: p.note, actorId: user.id, at: now(), status: 'recommended' }
       db.strikes.push(s)
+      // Written with the report, so two recommendations at once conflict on it and the second runs again and is refused.
+      r.updatedAt = s.at
       audit(repo, user, 'Strike recommended', 'records', student.studentId ?? student.id)
       record = strikeView(db, s)
       message = 'Strike recommended. OSAS confirms it when the case reaches them.'
