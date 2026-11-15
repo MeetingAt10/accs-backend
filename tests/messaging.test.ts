@@ -68,6 +68,15 @@ describe('message read state and muted notifications', () => {
     expect((await student.get('/api/pages/P11')).body.data.threads.find(
       (thread: { id: string }) => thread.id === 'THREAD-IT-A',
     ).unread).toBe(1)
+
+    const unmuted = await student.post('/api/pages/P12/actions').send({
+      action: 'muteThread',
+      recordId: 'THREAD-IT-A',
+      payload: { muted: false },
+    })
+
+    expect(unmuted.status).toBe(200)
+    expect((await student.get('/api/pages/P12?id=THREAD-IT-A')).body.data.record.muted).toBe(false)
   })
 
   it('STU-03-I denies read-state changes for a conversation outside the user scope', async () => {
