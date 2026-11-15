@@ -17,6 +17,7 @@ Node 22 or later. Environment variables are parsed in `src/env.ts`:
 - `PORT` (default 3000) and `NODE_ENV` (`development`, `test`, `production`; default `development`).
 - `CORS_ORIGIN`: comma-separated allowed browser origins (default `http://localhost:5173`). All modules are served from the one portal host, and the portal calls this API with credentials, so list only the portal origin in deployed environments.
 - `TABLE_PREFIX`: DynamoDB table prefix. Set on the Lambda; see Storage boundary and Sessions.
+- `SEED_ROSTER` (`true` or `false`; default `true`): seeds the 58 real CCS faculty and personnel on top of the demo accounts. They sign in with the shared `SEED_PASSWORD`.
 - `AUTH_STORE_BUCKET`, `AUTH_STORE_KEY`, `AUTH_STORE_FILE`: where accounts live; see Accounts and sign-in.
 - `MAIL_FROM`: verified Amazon SES sender of password reset codes, new-concern emails and account invites; see Password reset codes, New-concern emails and Account provisioning.
 - `MATERIALS_BUCKET`: private S3 bucket for class material files; see Subjects and class materials.
@@ -91,7 +92,7 @@ Passwords are hashed with `crypto.scryptSync` and need 10+ characters with upper
 
 Seeded demo accounts (`QCU-STU-IT-A`, `ACCS-ADMIN`, ...) sign in with their ID or email and the shared `SEED_PASSWORD` until they set a password; rotate or disable this shared password before real users join. The seeded secretary, `QCU-SECRETARY`, is inactive and never accepts the shared password: it signs in only with credentials the Dean issued.
 
-Demo accounts have generic names (`Demo Dean`, `Demo Chair Alpha`, `Demo Professor Charlie`, `Demo Student Foxtrot`, ...). On every stack except production the Dean is Dr. Paula Joy L. Dela Cruz (`QCU-FAC-PAULA-DELACRUZ`, roles `dean` and `professor`) and the demo Dean `CCS-DEAN` is inactive; on production `CCS-DEAN` is the active Dean.
+Demo accounts have generic names (`Demo Dean`, `Demo Chair Alpha`, `Demo Professor Charlie`, `Demo Student Foxtrot`, ...). The 58 real CCS faculty and personnel (`src/faculty-roster.ts`) are seeded on every stack, production included: the Dean is Dr. Paula Joy L. Dela Cruz (`QCU-FAC-PAULA-DELACRUZ`, roles `dean` and `professor`) and the demo Dean `CCS-DEAN` is inactive. With `SEED_ROSTER=false` the roster is left out and `CCS-DEAN` is the active Dean.
 
 Seeded accounts have made-up addresses on `access-ccs.com`, the domain we own (#69), for example `stu.it.a@access-ccs.com` and `dean@access-ccs.com`. Until 13 November 2026 they were on `qcu.edu.ph`, QCU's real domain. A seeded account stored with its old `qcu.edu.ph` address (on `accs-dev-` tables seeded before the change) is read with its `access-ccs.com` address (`applyAccounts`) and saved that way the next time the account changes; nothing needs re-seeding. Seeded accounts are still never emailed. Real accounts, imported or created by the Secretary, keep their real `qcu.edu.ph` addresses.
 
