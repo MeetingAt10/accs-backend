@@ -1,7 +1,7 @@
 // Issue #41: the Dean's account is CCS-DEAN (it was QCU-DEAN). Records stored under the old ID are read under the new one,
 // a password, profile or session saved under the old ID carries over, and the old ID still signs in.
-// The Dean setup is the production flow: on the production stack the demo Dean is the active Dean (no roster is seeded).
-vi.hoisted(() => { process.env.TABLE_PREFIX = 'accs-prod-' })
+// The Dean setup runs on a stack without the roster (SEED_ROSTER=false), where the demo Dean is the active Dean.
+vi.hoisted(() => { process.env.SEED_ROSTER = 'false' })
 import request from 'supertest'
 import { describe, expect, it, vi } from 'vitest'
 

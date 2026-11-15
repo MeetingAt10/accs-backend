@@ -6,6 +6,8 @@ const schema = z.object({
   // DynamoDB tables are <TABLE_PREFIX><DOC006 table>, e.g. accs-dev-ccs_identity (accs-architecture adr/0004).
   // The Lambda sets it; required there.
   TABLE_PREFIX: z.string().min(1).optional(),
+  // Real CCS personnel (src/faculty-roster.ts) are seeded on every stack, production included. `false` leaves them out.
+  SEED_ROSTER: z.enum(['true', 'false']).default('true'),
   // Registered users and credentials: an S3 object when the bucket is set, otherwise a JSON file.
   AUTH_STORE_FILE: z.string().default('/tmp/accs-auth-store.json'),
   AUTH_STORE_BUCKET: z.string().optional(),

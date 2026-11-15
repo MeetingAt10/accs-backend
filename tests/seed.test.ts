@@ -55,14 +55,14 @@ describe('CCS personnel seed', () => {
     expect(active(base)).toEqual(['CCS-DEAN'])
   })
 
-  it('leaves out the roster with includeRoster false (the production stack)', () => {
+  it('leaves out the roster with includeRoster false', () => {
     expect(base.users.some((u) => rosterIds.has(u.id))).toBe(false)
   })
 
-  it.each([['accs-prod-', false], ['accs-dev-', true], [undefined, true]])('seeds the roster by default for TABLE_PREFIX %s: %s', async (prefix, included) => {
+  it.each([['accs-prod-', undefined, true], ['accs-dev-', undefined, true], [undefined, undefined, true], ['accs-prod-', 'false', false]])('seeds the roster by default for TABLE_PREFIX %s, SEED_ROSTER %s: %s', async (prefix, seedRoster, included) => {
     vi.resetModules()
-    if (prefix) vi.stubEnv('TABLE_PREFIX', prefix)
-    else vi.stubEnv('TABLE_PREFIX', undefined as never)
+    vi.stubEnv('TABLE_PREFIX', prefix as never)
+    vi.stubEnv('SEED_ROSTER', seedRoster as never)
     const store = await import('../src/store.js')
     expect(store.seed().users.some((u) => u.id === 'QCU-FAC-PAULA-DELACRUZ')).toBe(included)
     expect(store.demoUserIds.has('QCU-FAC-PAULA-DELACRUZ')).toBe(included)

@@ -175,8 +175,8 @@ function user(id: string, name: string, roles: Role[], extra: Partial<User> = {}
 /** The account shape with its default profile text, for accounts created after the seed. */
 export const newUser = user
 const at = '2026-10-20T02:00:00.000Z'
-/** Real CCS personnel (src/faculty-roster.ts) are seeded on every stack except production. */
-export const seedRoster = !(env.TABLE_PREFIX ?? '').startsWith('accs-prod-')
+/** Real CCS personnel (src/faculty-roster.ts) are seeded on every stack, production included, unless SEED_ROSTER=false. */
+export const seedRoster = env.SEED_ROSTER === 'true'
 const deanRosterId = 'QCU-FAC-PAULA-DELACRUZ'
 export function seed(includeRoster = seedRoster): Database {
   const users: User[] = [
