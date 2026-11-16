@@ -4,8 +4,10 @@ import { consentWording } from './consent.js'
 
 export const permissionRoles: Record<string, Role[]> = {
   'feed.read': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'],
-  'post.create': ['student','organization','professor','chair','dean','guidance','osas'], 'post.anonymous': ['student'], 'announcement.publish': ['organization','professor','chair','dean'],
-  'message.send': ['student','professor','chair','dean','guidance','osas'], 'roster.view': ['student','organization','professor','chair','dean'], 'calendar.view': ['student','organization','professor','chair','dean','guidance','osas'], 'todo.manage': ['student'], 'consultation.request': ['student'], 'consultation.decide': ['professor'],
+  // The Secretary posts too, announcements included: she is in charge of the college's announcements (decided 16 November 2026).
+  'post.create': ['student','organization','professor','chair','dean','guidance','osas','secretary'], 'post.anonymous': ['student'], 'announcement.publish': ['organization','professor','chair','dean','secretary'],
+  // The Organization representative messages anyone (decided 16 November 2026); to-dos are for every role that has a calendar.
+  'message.send': ['student','organization','professor','chair','dean','guidance','osas'], 'roster.view': ['student','organization','professor','chair','dean'], 'calendar.view': ['student','organization','professor','chair','dean','guidance','osas'], 'todo.manage': ['student','organization','professor','chair','dean','guidance','osas'], 'consultation.request': ['student'], 'consultation.decide': ['professor'],
   'report.create': ['student'], 'report.viewOwn': ['student'], 'case.view': ['professor','chair','dean','guidance','osas'], 'case.act': ['professor','chair','dean','guidance','osas'], 'case.convert': ['guidance'], 'cluster.review': ['chair'], 'analytics.view': ['chair','dean'],
   'evaluation.fill': ['student','professor'], 'evaluation.review': ['professor'], 'evaluation.configure': ['dean'], 'evaluation.results': ['professor','chair','dean'], 'offense.view': ['chair','dean','guidance','osas'], 'goodmoral.review': ['guidance','osas'], 'restriction.manage': ['administrator','guidance','osas'], 'strike.recommend': ['dean'], 'student.report': ['professor','chair'], 'clearance.view': ['secretary','chair','dean','osas'], 'load.manage': ['secretary'], 'strike.record': ['osas'], 'standing.viewOwn': ['student'], 'moderation.review': ['administrator'], 'moderation.referral': ['secretary'], 'role.manage': ['administrator'], 'audit.view': ['administrator'],
   'directory.view': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'], 'self.manage': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'], 'assistant.use': ['student','organization','professor','chair','dean','administrator','guidance','osas','secretary'],
@@ -45,10 +47,11 @@ export function canPublish(db: Database, user: User, audience: string, announcem
     if (hasRole(user,'organization') && audience === `organization:${user.organizationId}`) return true
     if (hasRole(user,'professor') && (audience === 'faculty' || !!space?.professorIds.includes(user.id))) return true
     if (hasRole(user,'chair') && (audience === 'faculty' || audience === `program:${user.program}`)) return true
-    if (hasRole(user,'dean') && ['college','faculty'].includes(audience)) return true
+    if (hasRole(user,'dean','secretary') && ['college','faculty'].includes(audience)) return true
     return hasRole(user,'guidance','osas') && audience === 'college'
   }
   if (hasRole(user,'dean') && audience === 'college') return true
+  if (hasRole(user,'secretary') && ['college','faculty'].includes(audience)) return true
   if (hasRole(user,'chair') && audience === `program:${user.program}`) return true
   if (hasRole(user,'organization') && audience === `organization:${user.organizationId}`) return true
   const space = db.spaces.find(s => audience === `space:${s.id}`)
@@ -56,6 +59,8 @@ export function canPublish(db: Database, user: User, audience: string, announcem
 }
 export function canReach(db: Database, user: User, target: User) {
   if (user.id === target.id || !hasPermission(user,'message.send') || !target.active) return false
+  // The Organization representative messages anyone, and anyone can answer them.
+  if (hasRole(user,'organization') || hasRole(target,'organization')) return true
   const targetFaculty = hasRole(target,'professor','chair','dean')
   const shared = db.spaces.some(space => (space.studentIds.includes(user.id) || space.professorIds.includes(user.id)) && (space.studentIds.includes(target.id) || space.professorIds.includes(target.id)))
   if (hasRole(user,'student') && (hasRole(target,'student') || hasRole(target,'professor')) && shared) return true
@@ -71,6 +76,8 @@ export function canReach(db: Database, user: User, target: User) {
 export function canThread(db: Database, user: User, thread: Thread) {
   if (!hasPermission(user,'message.send') || !thread.memberIds.includes(user.id)) return false
   if (thread.spaceId) { const space = db.spaces.find(s=>s.id===thread.spaceId); return !!space && (hasRole(user,'student') && space.studentIds.includes(user.id) || hasRole(user,'professor') && space.professorIds.includes(user.id)) }
+  // A group conversation someone started (decided 16 November 2026: anyone may) is open to its members.
+  if (thread.group) return true
   const other = db.users.find(u => thread.memberIds.includes(u.id) && u.id !== user.id)
   return !!other && canReach(db,user,other)
 }

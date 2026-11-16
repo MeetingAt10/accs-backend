@@ -82,6 +82,8 @@ export type Thread = {
   title: string
   memberIds: string[]
   spaceId?: string
+  /** A group conversation someone started from Messages, with the name they gave it (decided 16 November 2026). */
+  group?: boolean
   messages: Message[]
   mutedBy: string[]
   readMessageCounts: Record<string, number>

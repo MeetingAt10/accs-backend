@@ -224,6 +224,7 @@ export const actionPayloads = {
   deleteTodo: z.object({}).strict(),
   createThread: messageContent.extend({ recipientId: z.string().min(1) }).strict().refine(hasMessageContent, noMessageContent),
   sendMessage: messageContent.strict().refine(hasMessageContent, noMessageContent),
+  createGroupThread: messageContent.extend({ title: z.string().trim().min(1, 'Name the group.').max(80, 'Use at most 80 characters.'), memberIds: z.array(z.string().min(1)).min(2, 'Add at least two people.').max(49, 'A group can have at most 50 people.') }).strict().refine(hasMessageContent, noMessageContent),
   muteThread: z.object({ muted: z.boolean() }).strict(),
   markThreadRead: z.object({}).strict(),
   markNotification: z.object({ read: z.boolean().default(true) }).strict(),

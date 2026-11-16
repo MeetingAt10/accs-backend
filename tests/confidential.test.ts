@@ -37,7 +37,7 @@ describe('the confidential mark (issue #31)', () => {
 
     for (const overseer of [chair!, dean!]) {
       const seen = await view(overseer, id)
-      expect(seen).toMatchObject({ id, statusOnly: true, confidential: true, status: 'With Adviser', office: 'Adviser' })
+      expect(seen).toMatchObject({ id, statusOnly: true, confidential: true, status: 'Escalated to Adviser', office: 'Adviser' })
       expect(seen.timeline.map((entry: { action: string }) => entry.action)).toEqual(['Submitted', 'Marked confidential'])
       const text = JSON.stringify(seen)
       for (const secret of [statement.narrative, 'Demo Student Hotel', 'I am here to help.', 'The student asked']) expect(text).not.toContain(secret)

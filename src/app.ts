@@ -13,7 +13,7 @@ import { hasPermission } from './access.js'
 import { devRouter, devToolboxEnabled, isDevToolboxCall, type Stack } from './dev.js'
 import { send } from './http.js'
 import { createRepository } from './persist.js'
-import { ApiError, completeMaterialUpload, getPage, materialDownloadUrl, performAction, refreshRestrictions, sessionView, startMaterialUpload, unavailable, type AccountChange, type AfterCommit, type ProfileChange, startMessageUpload, messageFileUrl, postFileUrl } from './services.js'
+import { ApiError, completeMaterialUpload, getPage, materialDownloadUrl, performAction, refreshRestrictions, sessionView, startMaterialUpload, unavailable, type AccountChange, type AfterCommit, type ProfileChange, startMessageUpload, messageFileUrl, postFileUrl, search } from './services.js'
 import { createS3MaterialStorage, type MaterialStorage } from './material-storage.js'
 import { createResetStore, resetPolicy, type ResetStore } from './resets.js'
 import { createThrottleStore, type ThrottleStore } from './throttle.js'
@@ -188,6 +188,8 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     send(res,actionResponseSchema,{ok:true,message:'Reset code issued. Give it to the account holder; it expires in 15 minutes and is not shown again.',record:{code,expiresAt:new Date(now+resetPolicy.codeTtlMs).toISOString()}})
   })
   app.get('/api/session',(_req,res)=>send(res,sessionResponseSchema,sessionView(res.locals.user as User)))
+  // The top search: what this person may open, a few of each kind (services.ts search).
+  app.get('/api/search',async(req,res)=>{const q=z.object({q:z.string().trim().min(2,'Type at least two letters.').max(100)}).parse(req.query).q;res.json(await search(repository,res.locals.user as User,q))})
   app.get('/api/pages/:pageId',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const query=pageQuerySchema.parse(req.query);send(res,pageResponseSchema,await getPage(repository,res.locals.user as User,pageId,query))})
   // Class material files (#44): a signed upload straight to S3, a confirmation, and a download that checks access first.
   const materialId=z.string().trim().min(1).max(64)

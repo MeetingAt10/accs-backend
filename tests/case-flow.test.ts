@@ -124,7 +124,7 @@ describe('reports stored at the removed stage (issue #29)', () => {
     const osas = await login('QCU-OSAS')
     const view = await osas.get('/api/pages/P22?id=RPT-0246')
     expect(view.status).toBe(200)
-    expect(view.body.data.record.status).toBe('With OSAS')
+    expect(view.body.data.record.status).toBe('Escalated to OSAS')
     expect((await act(osas, 'RPT-0246', 'resolve')).status).toBe(200)
   })
 })
