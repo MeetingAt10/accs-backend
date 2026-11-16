@@ -142,6 +142,8 @@ function postView(db: Database, post: Post, user: User) {
       ...messageView(db, comment),
       ...reactionView(comment, user),
       author: author(db, comment.authorId, comment.anonymous),
+      // Your own comment, anonymous or not, so the page can leave out "Report comment" for it.
+      owned: comment.authorId === user.id,
       ...(heldItem(db, 'comment', comment.id) ? { underReview: true } : {}),
     })),
     removed: post.removed,
