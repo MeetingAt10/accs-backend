@@ -208,7 +208,12 @@ function audit(repo:UnitOfWork,user:User,action:string,module:string,reference:s
 // Categories nobody can mute: a person always hears about their own concern (decided 2026-11-10).
 // Report, Case and Evaluation updates cannot be muted (baseline chapter 8; case and evaluation added for #42). A mute
 // saved before a category became required is ignored.
-export const requiredNotificationCategories: readonly string[] = ['report', 'case', 'evaluation']
+export const requiredNotificationCategories: readonly string[] = ['report', 'case', 'evaluation', 'restriction']
+/** Features a restriction can pause, in words people use. */
+export const restrictionFeatureLabels: Record<string, string> = { 'post.create': 'Posting', 'post.comment': 'Commenting', 'report.anonymous': 'Anonymous reports' }
+/** The administrator acted on a student's restrictions, so that student's waiting change requests are done. */
+function closeReferrals(db: Database, studentId: string, user: User, outcome: string) { for (const referral of db.referrals.filter(r => r.studentId === studentId && r.status === 'Awaiting administrator review')) Object.assign(referral, { status: `Done: ${outcome}`, handledAt: now(), handledBy: user.id }) }
+const featureWords = (features: string[]) => features.map(f => restrictionFeatureLabels[f] ?? f).join(', ')
 const requiredCategoryLabels: Record<string,string> = { report: 'Report updates', case: 'Case updates', evaluation: 'Evaluation updates' }
 /** `urgent` (an urgent announcement) reaches the recipient even if they muted its category. */
 function notify(repo:UnitOfWork,recipientId:string,kind:string,pageId:string,recordId?:string,options:{urgent?:boolean;body?:string;itemId?:string}={}) {
@@ -324,13 +329,16 @@ function defaultSettings(user: User) {
     priorities: { report: 'high', case: 'high', message: 'normal', consultation: 'normal', evaluation: 'normal', announcement: 'normal' },
   }
 }
+/** How many people an organization has: its representative and its members, each once. */
+const organizationSize=(o:{representativeId:string;memberIds:string[]})=>new Set([o.representativeId,...o.memberIds]).size
 function visiblePosts(db:Database,user:User,q?:string) { return db.posts.filter(post=>canAudience(db,user,post.audience,post.private)&&canSeeItem(db,user,'post',post.id,post.authorId)&&(!q||`${post.title} ${post.body}`.toLowerCase().includes(q.toLowerCase()))) }
 function visibleEvents(db: Database, user: User) {
   return db.events.filter(event => {
     const source = event.postId ? db.posts.find(post => post.id === event.postId) : undefined
     return (!event.postId || !!source && !source.removed && canSeeItem(db, user, 'post', source.id, source.authorId))
       && (!event.audience || canAudience(db, user, event.audience, event.private))
-  })
+  // A contact whose account is not active has no profile to open, so the event names none ("isn't available" before).
+  }).map(event => db.users.some(u => u.id === event.contactId && u.active) ? event : { ...event, contactId: '' })
 }
 function validateFeedScope(db: Database, user: User, scope?: string) {
   if (!scope) return
@@ -544,7 +552,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
       }
       break
     }
-    case'P09':data.organizations=db.organizations.filter(o=>match(o.name)).map(o=>({id:o.id,name:o.name,description:o.description,member:isOrganizationMember(db,user,o.id),memberCount:o.memberIds.length}));break
+    case'P09':data.organizations=db.organizations.filter(o=>match(o.name)).map(o=>({id:o.id,name:o.name,description:o.description,member:isOrganizationMember(db,user,o.id),memberCount:organizationSize(o)}));break
     case 'P10': {
       const organization = pick(db.organizations, query.id)
       if (organization) {
@@ -555,6 +563,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
           description: organization.description,
           member,
           representative: person(find(db.users, organization.representativeId)),
+          memberCount: organizationSize(organization),
           members: member ? [
             { name: find(db.users, organization.representativeId).name, organizationRole: 'Officer' },
             ...organization.memberIds.map(id => ({ name: find(db.users, id).name, organizationRole: 'Member' })),
@@ -801,7 +810,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
       break
     }
     case'P33':data.students=db.users.filter(u=>canStudentRecord(db,user,u)&&match(`${u.name} ${u.studentId}`)).map(u=>person(refreshRestrictions(db,u)));break
-    case'P34':{if(!query.purpose){data.purposeRequired=true;break}const students=db.users.filter(u=>canStudentRecord(db,user,u));const s=pick(students,query.id);if(s){const entry=audit(repo,user,'Record opened','records',s.studentId??s.id,query.purpose);data.record={...person(refreshRestrictions(db,s)),offenses:db.offenses.filter(o=>o.studentId===s.id),restrictions:restrictionViews(db,user,s.id),goodMoral:hasPermission(user,'goodmoral.review')?db.goodMoral.find(g=>g.studentId===s.id):undefined,strikes:strikeViews(db,s.id),strikeSettlements:db.strikeSettlements.filter(x=>x.studentId===s.id).map(x=>({id:x.id,kind:x.kind,reference:x.reference,note:x.note,at:x.at,strikeCount:x.strikeIds.length,settledBy:author(db,x.actorId)})),clearance:clearanceView(db,s.id),clearanceStatus:clearanceStatus(db,s.id,true),canRecordStrikes:hasPermission(user,'strike.record'),canRecommendStrikes:hasPermission(user,'strike.recommend'),openedAt:entry.at,accessHistory:hasRole(user,'dean')?safeAudit(db,db.audit.filter(a=>a.action==='Record opened'&&a.reference===(s.studentId??s.id))):undefined}}break}
+    case'P34':{if(!query.purpose){data.purposeRequired=true;break}const students=db.users.filter(u=>canStudentRecord(db,user,u));const s=pick(students,query.id);if(s){const entry=audit(repo,user,'Record opened','records',s.studentId??s.id,query.purpose,query.note||undefined);data.record={...person(refreshRestrictions(db,s)),offenses:db.offenses.filter(o=>o.studentId===s.id),restrictions:restrictionViews(db,user,s.id),goodMoral:hasPermission(user,'goodmoral.review')?db.goodMoral.find(g=>g.studentId===s.id):undefined,strikes:strikeViews(db,s.id),strikeSettlements:db.strikeSettlements.filter(x=>x.studentId===s.id).map(x=>({id:x.id,kind:x.kind,reference:x.reference,note:x.note,at:x.at,strikeCount:x.strikeIds.length,settledBy:author(db,x.actorId)})),clearance:clearanceView(db,s.id),clearanceStatus:clearanceStatus(db,s.id,true),canRecordStrikes:hasPermission(user,'strike.record'),canRecommendStrikes:hasPermission(user,'strike.recommend'),openedAt:entry.at,accessHistory:hasRole(user,'dean')?safeAudit(db,db.audit.filter(a=>a.action==='Record opened'&&a.reference===(s.studentId??s.id))):undefined}}break}
     case'P35':{const students=db.users.filter(u=>hasRole(u,'student')&&(hasRole(user,'administrator')||canStudentRecord(db,user,u)));data.students=students.map(u=>person(refreshRestrictions(db,u)));data.restrictions=restrictionViews(db,user);data.referrals=db.referrals.filter(r=>hasRole(user,'administrator')||r.actorId===user.id).map(r=>({...r,student:person(find(db.users,r.studentId)),actor:author(db,r.actorId)}));data.canApply=hasRole(user,'administrator');break}
     case 'P36': {
       const activeRestrictions = restrictionViews(db, user, user.id).filter(restriction => restriction.active)
@@ -1462,8 +1471,8 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       message = 'Settlement recorded. The clearance hold is lifted; the strikes stay on the record.'
       break
     }
-    case'applyRestriction':{requireRole(user,'administrator');const p=actionPayloads.applyRestriction.parse(request.payload);reasonOf(request);const student=find(db.users,p.studentId);if(!hasRole(student,'student'))throw unavailable();if(p.until<now().slice(0,10))throw new ApiError(400,'The end date must be today or later.','VALIDATION_ERROR');const r={id:repo.nextId('RST'),...p,starts:now(),actorId:user.id,active:true};db.restrictions.push(r);audit(repo,user,'Restriction applied','restrictions',r.id);notify(repo,student.id,'restriction','P36');record=r;message='Selected features paused.';break}
-    case'liftRestriction':{requireRole(user,'administrator');actionPayloads.liftRestriction.parse(request.payload);reasonOf(request);const r=find(db.restrictions,id);if(!r.active||r.until<now().slice(0,10))throw conflict('This restriction has already ended.');r.active=false;audit(repo,user,'Restriction lifted','restrictions',r.id);notify(repo,r.studentId,'restriction','P36');record=r;message='Restriction lifted.';break}
+    case'applyRestriction':{requireRole(user,'administrator');const p=actionPayloads.applyRestriction.parse(request.payload);reasonOf(request);const student=find(db.users,p.studentId);if(!hasRole(student,'student'))throw unavailable();if(p.until<now().slice(0,10))throw new ApiError(400,'The end date must be today or later.','VALIDATION_ERROR');const r={id:repo.nextId('RST'),...p,starts:now(),actorId:user.id,active:true};db.restrictions.push(r);closeReferrals(db,student.id,user,'restriction changed');audit(repo,user,'Restriction applied','restrictions',r.id);notify(repo,student.id,'restriction','P36',undefined,{body:`Paused until ${p.until}: ${featureWords(p.features)}. Reason: ${p.basis}`});record=r;message='Selected features paused.';break}
+    case'liftRestriction':{requireRole(user,'administrator');actionPayloads.liftRestriction.parse(request.payload);reasonOf(request);const r=find(db.restrictions,id);if(!r.active||r.until<now().slice(0,10))throw conflict('This restriction has already ended.');r.active=false;closeReferrals(db,r.studentId,user,'restriction lifted');audit(repo,user,'Restriction lifted','restrictions',r.id);notify(repo,r.studentId,'restriction','P36',undefined,{body:`Available again: ${featureWords(r.features)}.`});record=r;message='Restriction lifted.';break}
     case'referRestriction':{requireRole(user,'guidance','osas');const p=actionPayloads.referRestriction.parse(request.payload);const reason=reasonOf(request);const student=find(db.users,p.studentId);if(!canStudentRecord(db,user,student))throw unavailable();const referral={id:repo.nextId('REF'),studentId:student.id,change:p.change,decisionReference:p.decisionReference??'',reason,actorId:user.id,at:now(),status:'Awaiting administrator review'};db.referrals.push(referral);audit(repo,user,'Restriction change requested','restrictions',referral.id);for(const admin of db.users.filter(u=>hasRole(u,'administrator')))notify(repo,admin.id,'restriction','P35');record=referral;message='Request sent. Existing restrictions are unchanged.';break}
     case'setProfilePhoto':{
       const p=actionPayloads.setProfilePhoto.parse(request.payload)
