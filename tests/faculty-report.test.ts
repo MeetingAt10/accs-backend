@@ -25,7 +25,7 @@ async function login(id: string) {
   return agent
 }
 type Agent = Awaited<ReturnType<typeof login>>
-const incident = { studentId: 'QCU-STU-IT-A', narrative: 'Shouted at a classmate and pushed their bag off the table during lab.', category: 'Bullying', subcategory: 'Intimidation or threats', severity: 'medium', location: 'IC 301', occurredOn: '2026-11-10' }
+const incident = { studentId: 'QCU-STU-IT-A', narrative: 'Shouted at a classmate and pushed their bag off the table during lab.', category: 'Bullying', subcategory: 'Intimidation or threats', severity: 'medium', location: 'IC 301', occurredOn: '2026-10-15' }
 const file = (agent: Agent, extra: object = {}) => agent.post('/api/pages/P21/actions').send({ action: 'reportStudent', payload: { ...incident, ...extra } })
 const reportOf = (id: string) => repo.read().reports.find((r) => r.id === id)!
 
