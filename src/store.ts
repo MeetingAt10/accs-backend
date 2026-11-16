@@ -82,6 +82,8 @@ export type Thread = {
   title: string
   memberIds: string[]
   spaceId?: string
+  /** A group conversation someone started from Messages, with the name they gave it (decided 16 November 2026). */
+  group?: boolean
   messages: Message[]
   mutedBy: string[]
   readMessageCounts: Record<string, number>
@@ -93,7 +95,8 @@ export type Question = { id: string; criterion: string; text: string; type: 'rat
 export type Cycle = { id: string; title: string; term: string; opens: string; closes: string; status: 'Draft' | 'In review' | 'Published' | 'Closed'; instructions: string; questions: Question[]; forms: string[]; resultsPublished: boolean; reviews: { userId: string; decision: string; note: string; at: string }[] }
 export type Assignment = { id: string; evaluatorId: string; facultyId: string; cycleId: string; relation: string; subject: string; answers?: Record<string, string | number>; comment?: string; submittedAt?: string }
 export type Restriction = { id: string; studentId: string; features: string[]; basis: string; decisionReference: string; starts: string; until: string; actorId: string; active: boolean }
-export type Referral = { id: string; studentId: string; change: string; decisionReference: string; reason: string; actorId: string; at: string; status: string }
+/** A change request to a student's restrictions. `handledAt`/`handledBy` are set when the administrator acts on that student's restrictions. */
+export type Referral = { id: string; studentId: string; change: string; decisionReference: string; reason: string; actorId: string; at: string; status: string; handledAt?: string; handledBy?: string }
 /**
  * A strike against a reported student (#34, decided 11 November 2026). The Dean recommends it while the case is with the
  * Dean (`actorId`, `at`, `note`); OSAS confirms or rejects it once the case reaches OSAS. Only a confirmed strike counts.

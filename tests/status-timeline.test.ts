@@ -38,7 +38,7 @@ describe('status timeline for offices the case moved past (issue #30)', () => {
     expect((await act(chair!, id, 'recordAction', 'The chair met the student.')).status).toBe(200)
 
     const seen = await view(adviser!, id)
-    expect(seen).toMatchObject({ statusOnly: true, stage: 'chair', office: 'Program Chair', status: 'With Program Chair', statusNotice: 'This concern is now with Program Chair. You can follow its status here.' })
+    expect(seen).toMatchObject({ statusOnly: true, stage: 'chair', office: 'Program Chair', status: 'Escalated to Program Chair', statusNotice: 'This concern is now with Program Chair. You can follow its status here.' })
     expect(seen.timeline.map((t: { action: string; office: string }) => [t.action, t.office])).toEqual([['Submitted', 'Adviser'], ['Transferred', 'Program Chair'], ['Action recorded', 'Program Chair']])
     const text = JSON.stringify(seen)
     for (const secret of [statement.narrative, 'Please help me.', 'Chair private note', 'Demo Student Hotel']) expect(text).not.toContain(secret)
