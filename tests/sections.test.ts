@@ -8,12 +8,12 @@ import { createMemoryAuthStore } from '../src/auth.js'
 import { studentRowSchema } from '../src/schemas.js'
 import { campusYearProblem, programCode, sectionName } from '../src/sections.js'
 import { createMemoryRepository } from '../src/store.js'
-import { secretarySession, signIn } from './helpers.js'
+import { secretarySession, signIn, setUpAuthStore } from './helpers.js'
 
 let repo: ReturnType<typeof createMemoryRepository>
 let app: ReturnType<typeof createApp>
 let authStore: ReturnType<typeof createMemoryAuthStore>
-beforeEach(() => { repo = createMemoryRepository(); authStore = createMemoryAuthStore(); app = createApp(repo, { authStore }) })
+beforeEach(() => { repo = createMemoryRepository(); authStore = setUpAuthStore(); app = createApp(repo, { authStore }) })
 const stored = async (id: string) => (await authStore.load()).users.find((u) => u.id === id)!
 
 const row = (extra: object = {}) => ({ name: 'Ana Cruz', email: 'ana.cruz@gmail.com', studentId: '26-2001', program: 'BSIT', year: 1, section: 'A', ...extra })

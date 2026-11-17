@@ -2,10 +2,10 @@ import request from 'supertest'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.js'
 import { createMemoryRepository } from '../src/store.js'
-import { concernChoices } from './helpers.js'
+import { concernChoices, setUpAuthStore } from './helpers.js'
 
-let repo=createMemoryRepository();let app=createApp(repo)
-beforeEach(()=>{repo=createMemoryRepository();app=createApp(repo)})
+let repo=createMemoryRepository();let app=createApp(repo, { authStore: setUpAuthStore() })
+beforeEach(()=>{repo=createMemoryRepository();app=createApp(repo, { authStore: setUpAuthStore() })})
 async function login(id:string){const agent=request.agent(app);expect((await agent.post('/api/auth/sign-in').send({emailOrId:id,password:'Accs@Qcu2026!'})).status).toBe(200);return agent}
 const reportPayload={narrative:'A laboratory timetable change needs review.',category:'General concern',severity:'medium',identity:'anonymous',...concernChoices}
 describe('report and case workflow',()=>{

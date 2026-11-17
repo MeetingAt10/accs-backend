@@ -3,11 +3,12 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { createApp } from '../src/app.js'
 import { createMemoryRepository } from '../src/store.js'
+import { setUpAuthStore } from './helpers.js'
 
-let app = createApp(createMemoryRepository())
+let app = createApp(createMemoryRepository(), { authStore: setUpAuthStore() })
 
 beforeEach(() => {
-  app = createApp(createMemoryRepository())
+  app = createApp(createMemoryRepository(), { authStore: setUpAuthStore() })
 })
 
 async function signIn(accountId: string) {

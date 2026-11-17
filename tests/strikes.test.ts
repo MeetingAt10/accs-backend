@@ -6,11 +6,10 @@ import request from 'supertest'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { createApp } from '../src/app.js'
-import { createMemoryAuthStore } from '../src/auth.js'
 import { createRecordRepository } from '../src/persist.js'
 import { createMemoryRecordStore, type RecordStore } from '../src/records.js'
 import { createMemoryRepository, type Repository, type Stage, type UnitOfWork } from '../src/store.js'
-import { seedPassword } from './helpers.js'
+import { seedPassword, setUpAuthStore } from './helpers.js'
 
 let repo: Repository
 let app: ReturnType<typeof createApp>
@@ -19,7 +18,7 @@ const cases = ['RPT-0243', 'RPT-0246', 'RPT-0247', 'RPT-0241', 'RPT-0245', 'RPT-
 const nameReported = (unit: UnitOfWork) => { for (const r of unit.read().reports) if (cases.includes(r.id)) r.involvedUserIds = [...r.involvedUserIds, 'QCU-STU-CS'] }
 beforeEach(async () => {
   repo = createMemoryRepository()
-  app = createApp(repo, { authStore: createMemoryAuthStore() })
+  app = createApp(repo, { authStore: setUpAuthStore() })
   await repo.transact(nameReported)
 })
 
@@ -228,7 +227,7 @@ describe('strikes and the clearance hold (issue #34)', () => {
     repo = createRecordRepository(racing())
     const other = createRecordRepository(racing())
     const deanOn = async (target: Repository) => {
-      const agent = request.agent(createApp(target, { authStore: createMemoryAuthStore() }))
+      const agent = request.agent(createApp(target, { authStore: setUpAuthStore() }))
       expect((await agent.post('/api/auth/sign-in').send({ emailOrId: 'QCU-FAC-PAULA-DELACRUZ', password: seedPassword })).status).toBe(200)
       return agent
     }
@@ -244,7 +243,7 @@ describe('strikes and the clearance hold (issue #34)', () => {
     const store = createMemoryRecordStore()
     repo = createRecordRepository(store)
     await repo.transact(nameReported)
-    app = createApp(repo, { authStore: createMemoryAuthStore() })
+    app = createApp(repo, { authStore: setUpAuthStore() })
     const [dean, osas] = [await login('QCU-FAC-PAULA-DELACRUZ'), await login('QCU-OSAS')]
     for (let n = 0; n < 3; n++) await strike(n, dean, osas)
     await settle(osas)

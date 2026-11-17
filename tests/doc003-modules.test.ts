@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 import { createApp } from '../src/app.js'
 import { createMemoryRepository } from '../src/store.js'
+import { setUpAuthStore } from './helpers.js'
 
 // DOC003_MODULE-INVENTORY.xlsm (Module Inventory sheet), with each module's pages taken from the docs/pages Modules rows.
 type Module = { id: string; role: string; name: string; pages: string[] }
@@ -23,7 +24,7 @@ describe('DOC003 module inventory', () => {
     const roles = module.role === 'all' ? Object.keys(accounts) : [module.role]
     it(`${module.id} ${module.name}: owning role reaches at least one module page`, async () => {
       expect(module.pages.length).toBeGreaterThan(0)
-      const app = createApp(createMemoryRepository())
+      const app = createApp(createMemoryRepository(), { authStore: setUpAuthStore() })
       for (const role of roles) {
         const agent = request.agent(app)
         expect((await agent.post('/api/auth/sign-in').send({ emailOrId: accounts[role], password: 'Accs@Qcu2026!' })).status).toBe(200)
