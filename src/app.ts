@@ -18,7 +18,7 @@ import { createS3MaterialStorage, type MaterialStorage } from './material-storag
 import { createResetStore, resetPolicy, type ResetStore } from './resets.js'
 import { createThrottleStore, type ThrottleStore } from './throttle.js'
 import { createSessionStore, isWellFormedToken, newSessionToken, sessionIdOf, sessionPolicy, sessionState, type SessionStore } from './sessions.js'
-import { demoUserIds, isSampleAddress, type Repository } from './store.js'
+import { demoUserIds, isSampleAddress, rosterUserIds, type Repository } from './store.js'
 import { recordException, requestTelemetry } from './telemetry.js'
 import { currentAccountId, formerAccountIds } from './renames.js'
 
@@ -42,6 +42,8 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     const sessionId=sessionIdOf(token);const session=await sessions.get(sessionId);const now=Date.now()
     if(!session||sessionState(session,now)!=='live')return undefined
     const user=await repository.view(unit=>{const db=unit.read();const account=db.users.find(u=>u.id===currentAccountId(session.userId)&&u.active);return account&&refreshRestrictions(db,account)},['restrictions']);if(!user)return undefined
+    // A real person's account opened with the shared seed password, before that stopped working, is not a session: it has no credential of its own.
+    if(rosterUserIds.has(user.id)&&!credentialFor(user,await authStore.load()))return undefined
     if(now-Date.parse(session.lastSeenAt)>=sessionPolicy.touchIntervalMs)await sessions.touch(sessionId,new Date(now).toISOString())
     res.locals.sessionId=sessionId;return user
   }

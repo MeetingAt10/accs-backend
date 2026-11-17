@@ -2,14 +2,13 @@ import { TransactionCanceledException, type DynamoDBClient } from '@aws-sdk/clie
 import { describe, expect, it } from 'vitest'
 
 import { createApp } from '../src/app.js'
-import { createMemoryAuthStore } from '../src/auth.js'
 import type { DomainTable } from '../src/env.js'
 import { createRecordRepository, createRepository, persisted } from '../src/persist.js'
 import { createDynamoRecordStore, createMemoryRecordStore, RecordConflict, writeLimit, type RecordStore, type RecordWrite } from '../src/records.js'
 import { ApiError } from '../src/services.js'
 import { createMemorySessionStore } from '../src/sessions.js'
 import type { Database, Notification } from '../src/store.js'
-import { concernChoices, signIn } from './helpers.js'
+import { concernChoices, signIn, setUpAuthStore } from './helpers.js'
 
 const tick = () => new Promise((resolve) => setImmediate(resolve))
 const at = '2026-11-05T02:00:00.000Z'
@@ -344,7 +343,7 @@ describe('two app instances sharing a record store', () => {
   function instances(wrap: (store: RecordStore) => RecordStore = (store) => store) {
     const store = createMemoryRecordStore()
     const shared = wrap(store)
-    const authStore = createMemoryAuthStore()
+    const authStore = setUpAuthStore()
     const sessionStore = createMemorySessionStore()
     return { store, instance: () => createApp(createRecordRepository(shared), { authStore, sessionStore }) }
   }
@@ -426,7 +425,7 @@ describe('two app instances sharing a record store', () => {
   it('keeps nothing from an action that fails partway', async () => {
     const store = createMemoryRecordStore()
     const repo = createRecordRepository(store)
-    const app = createApp(repo, { authStore: createMemoryAuthStore() })
+    const app = createApp(repo, { authStore: setUpAuthStore() })
     const { agent: admin } = await signIn(app, 'ACCS-ADMIN')
     // The flagged comment's post is gone, so the action fails after it has already changed the moderation item.
     await repo.transact((unit) => { unit.read().posts = unit.read().posts.filter((post) => post.id !== 'POST-0102') })

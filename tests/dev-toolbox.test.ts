@@ -2,13 +2,12 @@ import request from 'supertest'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createApp } from '../src/app.js'
-import { createMemoryAuthStore } from '../src/auth.js'
 import { devToolboxEnabled, isDevToolboxCall, type Stack } from '../src/dev.js'
 import { createRecordRepository } from '../src/persist.js'
 import { createMemoryRecordStore } from '../src/records.js'
 import { createMemorySessionStore } from '../src/sessions.js'
 import { createMemoryRepository, seed, type MemoryRepository } from '../src/store.js'
-import { activateSecretary, secretaryPassword, seedPassword, secretarySession, signIn } from './helpers.js'
+import { activateSecretary, secretaryPassword, seedPassword, secretarySession, signIn, setUpAuthStore } from './helpers.js'
 
 type Body = Record<string, any>
 
@@ -19,7 +18,7 @@ const cookieOf = (response: request.Response) => String(response.headers['set-co
 const student = { name: 'Ben Student', email: 'ben.student@gmail.com', studentId: '26-1001', program: 'BSIT', year: 3, section: 'A' }
 
 function setup(stack: Stack, repository: MemoryRepository = createMemoryRepository()) {
-  const authStore = createMemoryAuthStore()
+  const authStore = setUpAuthStore()
   const sessionStore = createMemorySessionStore()
   return { repository, authStore, sessionStore, app: createApp(repository, { authStore, sessionStore, stack }) }
 }
@@ -227,7 +226,7 @@ describe('on the development stack', () => {
 
   it('records the switch in the audit table of a shared record store, and nothing else', async () => {
     const store = createMemoryRecordStore()
-    const authStore = createMemoryAuthStore()
+    const authStore = setUpAuthStore()
     const sessionStore = createMemorySessionStore()
     const app = createApp(createRecordRepository(store), { authStore, sessionStore, stack: dev })
     const { agent } = await signIn(app, 'QCU-FAC-PAULA-DELACRUZ')

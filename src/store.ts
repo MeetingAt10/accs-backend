@@ -276,8 +276,15 @@ export function seed(includeRoster = seedRoster): Database {
     moderation: [{ id: 'MOD-0101', itemType: 'comment', itemId: 'COMMENT-0101', parentId: 'POST-0102', authorId: 'QCU-STU-IT-B', reporterId: 'QCU-STU-IT-A', source: 'User', reason: 'Reported by a classmate as off-topic', excerpt: 'Same problem in BSIT 3B. A posted lab schedule would help us plan.', status: 'Pending', at, history: [] }], settings: {}, photos: {}, permissionOverrides: {}, telemetry: [], followUps: [],
   }
 }
-/** The seeded accounts that sign in with the shared seed password until they set their own. Inactive ones (the secretary) never do. */
-export const demoUserIds: ReadonlySet<string> = new Set(seed().users.filter(u => u.active).map(u => u.id))
+/** The real CCS personnel (src/faculty-roster.ts). Their accounts belong to real people. */
+export const rosterUserIds: ReadonlySet<string> = new Set(facultyRoster.map(person => person.id))
+/**
+ * The made-up demo accounts that sign in with the shared seed password until they set their own. Inactive ones (the
+ * secretary) never do, and neither does any real person on the roster: anyone who guessed a name could otherwise sign in
+ * as them with the shared password. A roster account signs in only with credentials set up for it (the Dean through the
+ * administrator's setup, everyone else through an invite or an issued reset code).
+ */
+export const demoUserIds: ReadonlySet<string> = new Set(seed().users.filter(u => u.active && !rosterUserIds.has(u.id)).map(u => u.id))
 const sampleEmails = new Map(seed().users.map(u => [u.id, u.email.toLowerCase()]))
 /**
  * The qcu.edu.ph addresses a seeded account had before #69, under its current ID and any former one (QCU-DEAN was

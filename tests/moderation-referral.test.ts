@@ -3,13 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createApp } from '../src/app.js'
 import { createMemoryRepository } from '../src/store.js'
-import { secretarySession, seedPassword } from './helpers.js'
+import { secretarySession, seedPassword, setUpAuthStore } from './helpers.js'
 
 let repo: ReturnType<typeof createMemoryRepository>
 let app: ReturnType<typeof createApp>
 beforeEach(() => {
   repo = createMemoryRepository()
-  app = createApp(repo)
+  app = createApp(repo, { authStore: setUpAuthStore() })
   // Activating the secretary logs that its invite was not sent.
   vi.spyOn(console, 'log').mockImplementation(() => {})
   const db = repo.read()

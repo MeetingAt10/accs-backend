@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createApp } from '../src/app.js'
 import { createMemoryRepository, type History, type Report } from '../src/store.js'
-import { seedPassword } from './helpers.js'
+import { seedPassword, setUpAuthStore } from './helpers.js'
 
 // P25 timing (CHR-03-V, DEAN-01-V): the median, trend and waiting times come from each report's own timestamps.
 const now = Date.parse('2026-11-10T12:00:00.000Z')
@@ -15,7 +15,7 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(now)
   repo = createMemoryRepository()
-  app = createApp(repo)
+  app = createApp(repo, { authStore: setUpAuthStore() })
 })
 afterEach(() => vi.useRealTimers())
 

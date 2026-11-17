@@ -5,9 +5,8 @@ import request from 'supertest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createApp } from '../src/app.js'
-import { createMemoryAuthStore } from '../src/auth.js'
 import { createMemoryRepository } from '../src/store.js'
-import { concernChoices, seedPassword } from './helpers.js'
+import { concernChoices, seedPassword, setUpAuthStore } from './helpers.js'
 
 // The Dean on a stack with the CCS roster (tests seed it).
 const dean = 'QCU-FAC-PAULA-DELACRUZ'
@@ -17,7 +16,7 @@ let app: ReturnType<typeof createApp>
 beforeEach(() => {
   vi.setSystemTime(new Date('2026-10-21T00:00:00.000Z'))
   repo = createMemoryRepository()
-  app = createApp(repo, { authStore: createMemoryAuthStore() })
+  app = createApp(repo, { authStore: setUpAuthStore() })
 })
 
 async function login(id: string) {

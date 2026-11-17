@@ -4,13 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { sendInvite, temporaryPassword, type Invite, type InviteMailer } from '../src/accounts.js'
 import { createApp } from '../src/app.js'
-import { createMemoryAuthStore, passwordProblem } from '../src/auth.js'
+import { passwordProblem } from '../src/auth.js'
 import { facultyRoster } from '../src/faculty-roster.js'
 import { createRecordRepository } from '../src/persist.js'
 import { createMemoryRecordStore } from '../src/records.js'
 import { createMemorySessionStore } from '../src/sessions.js'
 import { createMemoryRepository, type Database, type Repository } from '../src/store.js'
-import { activateSecretary, concernChoices, secretaryPassword, secretarySession, seedPassword, signIn } from './helpers.js'
+import { activateSecretary, concernChoices, secretaryPassword, secretarySession, seedPassword, signIn, setUpAuthStore } from './helpers.js'
 
 // The unsent-invite mailer logs once per account; the tests that look at the log spy on it again.
 beforeEach(() => { vi.spyOn(console, 'log').mockImplementation(() => {}) })
@@ -44,7 +44,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
   function setup(options: { mailer?: InviteMailer } = {}) {
     const newRepository = backend()
     const repository = newRepository()
-    const authStore = createMemoryAuthStore()
+    const authStore = setUpAuthStore()
     const sessionStore = createMemorySessionStore()
     return {
       repository,
