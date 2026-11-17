@@ -4,13 +4,12 @@ import request from 'supertest'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { createApp } from '../src/app.js'
-import { createMemoryAuthStore } from '../src/auth.js'
 import { createMemoryRepository } from '../src/store.js'
-import { seedPassword } from './helpers.js'
+import { seedPassword, setUpAuthStore } from './helpers.js'
 
 let repo: ReturnType<typeof createMemoryRepository>
 let app: ReturnType<typeof createApp>
-beforeEach(() => { repo = createMemoryRepository(); app = createApp(repo, { authStore: createMemoryAuthStore() }) })
+beforeEach(() => { repo = createMemoryRepository(); app = createApp(repo, { authStore: setUpAuthStore() }) })
 
 async function login(id: string) {
   const agent = request.agent(app)
@@ -46,7 +45,7 @@ describe('appointments whose time is gone', () => {
 
   it('refuses to delete a time that has an appointment on record, even a finished one', async () => {
     const c = await appointmentOf('QCU-PROF-IT')
-    await repo.transact((unit) => { const db = unit.read(); db.consultations.find((x) => x.id === c.id)!.status = 'cancelled'; db.slots.find((s) => s.id === c.slotId)!.state = 'open' })
+    await repo.transact((unit) => { const db = unit.read(); db.consultations.find((x) => x.id === c.id)!.status = 'Cancelled'; db.slots.find((s) => s.id === c.slotId)!.state = 'open' })
     const res = await (await login('QCU-PROF-IT')).post('/api/pages/P17/actions').send({ action: 'deleteAvailability', recordId: c.slotId, payload: {} })
     expect(res.status).toBe(409)
     expect(await repo.transact((unit) => unit.read().slots.some((s) => s.id === c.slotId))).toBe(true)
