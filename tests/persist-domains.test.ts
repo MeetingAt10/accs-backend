@@ -1,19 +1,18 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { createApp } from '../src/app.js'
-import { createMemoryAuthStore } from '../src/auth.js'
 import { createRecordRepository, persisted } from '../src/persist.js'
 import { createMemoryRecordStore, type RecordStore } from '../src/records.js'
 import { createMemorySessionStore } from '../src/sessions.js'
 import { createMemoryRepository, type Database } from '../src/store.js'
-import { secretaryPassword, secretarySession, signIn } from './helpers.js'
+import { secretaryPassword, secretarySession, signIn, setUpAuthStore } from './helpers.js'
 
 const at = '2026-11-05T02:00:00.000Z'
 
 /** Instances that share one record store, auth store, and session store, as Lambda instances do. */
 function stack(wrap: (store: RecordStore) => RecordStore = (store) => store) {
   const store = createMemoryRecordStore()
-  const authStore = createMemoryAuthStore()
+  const authStore = setUpAuthStore()
   const sessionStore = createMemorySessionStore()
   return {
     store,
@@ -229,7 +228,7 @@ describe('the record repository behaves like memory', () => {
   it.each(accounts)('%s gets the same status on every page', async (id) => {
     const { instance } = stack()
     const { agent: stored } = await signIn(instance(), id)
-    const { agent: memory } = await signIn(createApp(createMemoryRepository(), { authStore: createMemoryAuthStore(), sessionStore: createMemorySessionStore() }), id)
+    const { agent: memory } = await signIn(createApp(createMemoryRepository(), { authStore: setUpAuthStore(), sessionStore: createMemorySessionStore() }), id)
     for (const page of pageIds) {
       const [a, b] = await Promise.all([stored.get(`/api/pages/${page}`), memory.get(`/api/pages/${page}`)])
       expect(a.status, `${id} ${page}: ${JSON.stringify(a.body).slice(0, 200)}`).toBe(b.status)

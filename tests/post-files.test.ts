@@ -7,7 +7,7 @@ import { createApp } from '../src/app.js'
 import { createMemoryAuthStore } from '../src/auth.js'
 import { createMemoryMaterialStorage } from '../src/material-storage.js'
 import { createMemoryRepository } from '../src/store.js'
-import { secretarySession, seedPassword } from './helpers.js'
+import { secretarySession, seedPassword, setUpAuthStore } from './helpers.js'
 
 let repo: ReturnType<typeof createMemoryRepository>
 let app: ReturnType<typeof createApp>
@@ -15,7 +15,7 @@ let storage: ReturnType<typeof createMemoryMaterialStorage>
 beforeEach(() => {
   repo = createMemoryRepository()
   storage = createMemoryMaterialStorage()
-  app = createApp(repo, { authStore: createMemoryAuthStore(), materialStorage: storage })
+  app = createApp(repo, { authStore: setUpAuthStore(), materialStorage: storage })
 })
 
 async function login(id: string) {

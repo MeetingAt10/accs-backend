@@ -2,6 +2,8 @@ import request from 'supertest'
 import { expect } from 'vitest'
 
 import type { createApp } from '../src/app.js'
+import { createMemoryAuthStore, hashPassword } from '../src/auth.js'
+import { rosterUserIds } from '../src/store.js'
 
 type App = ReturnType<typeof createApp>
 
@@ -10,6 +12,13 @@ export const concernChoices = { consent: { readStatement: true }, allowChair: fa
 
 /** The shared password of the seeded accounts in tests. */
 export const seedPassword = 'Accs@Qcu2026!'
+
+// Real people on the roster (the Dean among them) never sign in with the shared seed password. Most tests stand for
+// accounts already set up, so their roster accounts start with that password stored as their own credential. Tests about
+// setting accounts up use a plain createMemoryAuthStore().
+const rosterCredential = hashPassword(seedPassword)
+/** An auth store in which every roster account is already set up, with `seedPassword` as its own password. */
+export const setUpAuthStore = () => createMemoryAuthStore({ credentials: Object.fromEntries([...rosterUserIds].map((id) => [id, rosterCredential])) })
 /** What the secretary chooses on the first sign-in. */
 export const secretaryPassword = 'Sec#Passw0rd-2026'
 

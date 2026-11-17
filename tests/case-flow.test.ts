@@ -5,16 +5,15 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { applyAccounts } from '../src/accounts.js'
 import { createApp } from '../src/app.js'
-import { createMemoryAuthStore } from '../src/auth.js'
 import { createRecordRepository } from '../src/persist.js'
 import { createMemoryRecordStore } from '../src/records.js'
 import { roles, type User } from '../src/schemas.js'
 import { createMemoryRepository, type Report } from '../src/store.js'
-import { seedPassword } from './helpers.js'
+import { seedPassword, setUpAuthStore } from './helpers.js'
 
 let repo: ReturnType<typeof createMemoryRepository>
 let app: ReturnType<typeof createApp>
-beforeEach(() => { repo = createMemoryRepository(); app = createApp(repo) })
+beforeEach(() => { repo = createMemoryRepository(); app = createApp(repo, { authStore: setUpAuthStore() }) })
 
 async function login(id: string) {
   const agent = request.agent(app)
@@ -120,7 +119,7 @@ describe('reports stored at the removed stage (issue #29)', () => {
     expect(stored.history.map((h) => h.stage)).not.toContain('executive')
     expect(stored.disclosedTo).toEqual(['osas'])
 
-    app = createApp(fresh, { authStore: createMemoryAuthStore() })
+    app = createApp(fresh, { authStore: setUpAuthStore() })
     const osas = await login('QCU-OSAS')
     const view = await osas.get('/api/pages/P22?id=RPT-0246')
     expect(view.status).toBe(200)

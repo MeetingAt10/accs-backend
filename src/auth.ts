@@ -81,8 +81,9 @@ function simpleStore(read: () => AuthData, write: (data: AuthData) => void): Aut
   }
 }
 
-export function createMemoryAuthStore(): AuthStore {
-  let data = empty()
+/** In memory, for local runs and tests; `initial` starts it with stored data (tests use it for accounts already set up). */
+export function createMemoryAuthStore(initial: Partial<AuthData> = {}): AuthStore {
+  let data = { ...empty(), ...structuredClone(initial) }
   return simpleStore(() => data, (next) => { data = next })
 }
 

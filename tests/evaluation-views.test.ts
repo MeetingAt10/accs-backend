@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { createApp } from '../src/app.js'
 import { createMemoryRepository, type Repository } from '../src/store.js'
+import { setUpAuthStore } from './helpers.js'
 
 describe('evaluation read models', () => {
   let repository: Repository
@@ -11,7 +12,7 @@ describe('evaluation read models', () => {
   beforeEach(() => {
     memory = createMemoryRepository()
     repository = memory
-    app = createApp(repository)
+    app = createApp(repository, { authStore: setUpAuthStore() })
   })
 
   async function login(accountId: string) {
@@ -77,7 +78,7 @@ function submitAll(program: string, cycleId: string) {
 
 describe('program average release (D-08: 100% of assigned evaluations)', () => {
   let app: ReturnType<typeof createApp>
-  beforeEach(() => { memory = createMemoryRepository(); app = createApp(memory) })
+  beforeEach(() => { memory = createMemoryRepository(); app = createApp(memory, { authStore: setUpAuthStore() }) })
   const login = async (id: string) => { const agent = request.agent(app); expect((await agent.post('/api/auth/sign-in').send({ emailOrId: id, password: 'Accs@Qcu2026!' })).status).toBe(200); return agent }
   const programAverage = async (agent: Awaited<ReturnType<typeof login>>) => (await agent.get('/api/pages/P29?id=QCU-PROF-IT&cycle=CYCLE-2026-1')).body.data.programAverage
 

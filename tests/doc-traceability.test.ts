@@ -6,11 +6,11 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { allowedPages as pagesFor } from '../src/access.js'
 import { createApp } from '../src/app.js'
 import { createMemoryRepository } from '../src/store.js'
-import { seedPassword } from './helpers.js'
+import { seedPassword, setUpAuthStore } from './helpers.js'
 
 let repo: ReturnType<typeof createMemoryRepository>
 let app: ReturnType<typeof createApp>
-beforeEach(() => { repo = createMemoryRepository(); app = createApp(repo) })
+beforeEach(() => { repo = createMemoryRepository(); app = createApp(repo, { authStore: setUpAuthStore() }) })
 
 const signIn = (emailOrId: string, password = seedPassword, extra: object = {}) => request(app).post('/api/auth/sign-in').send({ emailOrId, password, ...extra })
 async function login(id: string) {

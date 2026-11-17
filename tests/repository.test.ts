@@ -2,9 +2,10 @@ import request from 'supertest'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { createApp } from '../src/app.js'
-import { createMemoryAuthStore, hashPassword } from '../src/auth.js'
+import { hashPassword } from '../src/auth.js'
 import type { User } from '../src/schemas.js'
 import { createMemoryRepository, type MemoryRepository, type Repository } from '../src/store.js'
+import { setUpAuthStore } from './helpers.js'
 
 const password = 'Accs@Qcu2026!'
 const tick = () => new Promise(resolve => setImmediate(resolve))
@@ -72,7 +73,7 @@ describe('API over the repository boundary', () => {
   beforeEach(() => { repo = createMemoryRepository() })
 
   it('keeps nothing from an action that fails partway', async () => {
-    const app = createApp(repo, { authStore: createMemoryAuthStore() })
+    const app = createApp(repo, { authStore: setUpAuthStore() })
     const admin = await signIn(app, 'ACCS-ADMIN')
     // The flagged comment's post is gone, so the action fails after it has already changed the moderation item.
     repo.read().posts = repo.read().posts.filter(post => post.id !== 'POST-0102')
@@ -84,7 +85,7 @@ describe('API over the repository boundary', () => {
   })
 
   it('commits the audit entry written while a student record is read', async () => {
-    const app = createApp(repo, { authStore: createMemoryAuthStore() })
+    const app = createApp(repo, { authStore: setUpAuthStore() })
     const dean = await signIn(app, 'QCU-FAC-PAULA-DELACRUZ')
     const response = await dean.get('/api/pages/P34?id=QCU-STU-RESTRICTED&purpose=Case%20handling')
     expect(response.status).toBe(200)
@@ -92,7 +93,7 @@ describe('API over the repository boundary', () => {
   })
 
   it('does not change state when a page is read', async () => {
-    const app = createApp(repo, { authStore: createMemoryAuthStore() })
+    const app = createApp(repo, { authStore: setUpAuthStore() })
     const student = await signIn(app, 'QCU-STU-IT-A')
     const before = structuredClone(repo.read())
     for (const page of ['P03', 'P04', 'P13', 'P18', 'P26', 'P40']) expect((await student.get(`/api/pages/${page}`)).status).toBe(200)
@@ -101,7 +102,7 @@ describe('API over the repository boundary', () => {
 
   describe('with a backend that yields between steps', () => {
     let app: ReturnType<typeof createApp>
-    beforeEach(() => { app = createApp(withLatency(repo), { authStore: createMemoryAuthStore() }) })
+    beforeEach(() => { app = createApp(withLatency(repo), { authStore: setUpAuthStore() }) })
 
     it('reads, writes, and maps domain errors to their status', async () => {
       const student = await signIn(app, 'QCU-STU-IT-A')
@@ -121,7 +122,7 @@ describe('API over the repository boundary', () => {
     })
 
     it('merges an auth-store user once when requests arrive together', async () => {
-      const authStore = createMemoryAuthStore()
+      const authStore = setUpAuthStore()
       const body = { email: 'new.student@qcu.edu.ph', password: 'N3w!Passw0rdXyz' }
       const added: User = { id: 'USR-NEW', name: 'New Student', email: body.email, roles: ['student'], program: 'BSIT', section: 'A', year: 3, studentId: '26-0999', restrictions: [], title: '', bio: '', education: '', officeHours: '', spaceIds: ['SPACE-IT-A'], organizationIds: [], active: true }
       await authStore.update(data => { data.users.push(added); data.credentials[added.id] = hashPassword(body.password) })
