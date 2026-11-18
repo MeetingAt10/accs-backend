@@ -43,7 +43,8 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     if(!session||sessionState(session,now)!=='live')return undefined
     const user=await repository.view(unit=>{const db=unit.read();const account=db.users.find(u=>u.id===currentAccountId(session.userId)&&u.active);return account&&refreshRestrictions(db,account)},['restrictions']);if(!user)return undefined
     // A real person's account opened with the shared seed password, before that stopped working, is not a session: it has no credential of its own.
-    if(rosterUserIds.has(user.id)&&!credentialFor(user,await authStore.load()))return undefined
+    // Not where the dev toolbox exists: there any signed-in tester may become any account (the Dean included), so a switch to a real person's account stays.
+    if(!devToolbox&&rosterUserIds.has(user.id)&&!credentialFor(user,await authStore.load()))return undefined
     if(now-Date.parse(session.lastSeenAt)>=sessionPolicy.touchIntervalMs)await sessions.touch(sessionId,new Date(now).toISOString())
     res.locals.sessionId=sessionId;return user
   }
