@@ -44,6 +44,8 @@ describe('real people on the roster', () => {
   })
 
   it('ends a session that a real person\'s account has without a credential of its own', async () => {
+    // On production: the development stack lets testers switch to any account (tests/dev-toolbox.test.ts).
+    app = createApp(createMemoryRepository(), { authStore, stack: { tablePrefix: 'accs-prod-', nodeEnv: 'production' } })
     await authStore.update((data) => { data.credentials[professor.id] = hashPassword('Their-Own#Pass-2026') })
     const agent = request.agent(app)
     expect((await agent.post('/api/auth/sign-in').send({ emailOrId: professor.id, password: 'Their-Own#Pass-2026' })).status).toBe(200)

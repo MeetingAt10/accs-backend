@@ -2,6 +2,7 @@ import request from 'supertest'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createApp } from '../src/app.js'
+import { createMemoryAuthStore } from '../src/auth.js'
 import { devToolboxEnabled, isDevToolboxCall, type Stack } from '../src/dev.js'
 import { createRecordRepository } from '../src/persist.js'
 import { createMemoryRecordStore } from '../src/records.js'
@@ -79,6 +80,21 @@ describe.each<[string, Stack]>([
 })
 
 describe('on the development stack', () => {
+  it('switches to a real person on the roster who has no password of their own, and the session stays (signed out before)', async () => {
+    const authStore = createMemoryAuthStore()
+    const app = createApp(createMemoryRepository(), { authStore, sessionStore: createMemorySessionStore(), stack: dev })
+    const agent = request.agent(app)
+    expect((await agent.post('/api/auth/sign-in').send({ emailOrId: 'ACCS-ADMIN', password: seedPassword })).status).toBe(200)
+    const switched = await agent.post('/api/dev/switch-user').send({ userId: 'QCU-FAC-PAULA-DELACRUZ' })
+    expect(switched.status, JSON.stringify(switched.body)).toBe(200)
+    const session = await agent.get('/api/session')
+    expect(session.status).toBe(200)
+    expect(session.body.user.id).toBe('QCU-FAC-PAULA-DELACRUZ')
+    expect((await agent.get('/api/pages/P03')).status).toBe(200)
+    // The shared password still does not sign anyone in to that account.
+    expect((await request(app).post('/api/auth/sign-in').send({ emailOrId: 'QCU-FAC-PAULA-DELACRUZ', password: seedPassword })).status).toBe(401)
+  })
+
   it('needs a session', async () => {
     const { app } = setup(dev)
     expect((await request(app).get('/api/dev/users')).status).toBe(401)
