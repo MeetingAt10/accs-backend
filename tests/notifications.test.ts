@@ -57,7 +57,8 @@ describe('urgent announcements', () => {
     expect(noticesFor(member, 'announcement').at(-1)!.priority).toBe('high')
   })
 
-  it('still respect the author: an urgent announcement without notifyMembers notifies nobody', async () => {
+  // Changed 19 November 2026: an urgent announcement reaches its whole audience, ticked or not.
+  it('reach the members even when the author did not tick Notify members', async () => {
     const organization = await login('QCU-ORG')
     const before = repo.read().notifications.length
     const response = await organization.post('/api/pages/P05/actions').send({
@@ -68,7 +69,9 @@ describe('urgent announcements', () => {
       },
     })
     expect(response.status).toBe(200)
-    expect(repo.read().notifications).toHaveLength(before)
+    const sent = repo.read().notifications.slice(before)
+    expect(sent.map((n) => n.recipientId)).toContain('QCU-STU-IT-A')
+    expect(sent.map((n) => n.recipientId)).not.toContain('QCU-ORG')
   })
 })
 

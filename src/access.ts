@@ -30,9 +30,10 @@ export function canSpace(user: User, space: Space) { return hasRole(user,'dean')
 export function isOrganizationMember(db: Database, user: User, organizationId: string) { return db.organizations.some(org => org.id === organizationId && (org.representativeId === user.id || org.memberIds.includes(user.id))) }
 export function canAudience(db: Database, user: User, audience: string, privateContent = false) {
   if (audience === 'college') return true
-  if (audience === 'faculty') return hasRole(user,'professor','chair','dean','administrator')
+  // The CCS Secretary reads and posts in the Feed like the Dean (QA 19 November), the faculty audience included.
+  if (audience === 'faculty') return hasRole(user,'professor','chair','dean','administrator','secretary')
   const [kind,id] = audience.split(':')
-  if (kind === 'program') return user.program === id || hasRole(user,'dean','administrator')
+  if (kind === 'program') return user.program === id || hasRole(user,'dean','administrator','secretary')
   if (kind === 'space') { const space = db.spaces.find(s => s.id === id); return !!space && (hasRole(user,'administrator') || canSpace(user,space)) }
   if (kind === 'organization') return !privateContent || isOrganizationMember(db,user,id!)
   return false
