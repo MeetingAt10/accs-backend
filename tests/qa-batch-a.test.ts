@@ -103,3 +103,15 @@ describe('opening a student record with a note', () => {
     expect((await guidance.get('/api/pages/P34').query({ id: 'QCU-STU-IT-A', purpose: 'Case handling', note: 'x'.repeat(501) })).status).toBe(400)
   })
 })
+
+describe('notification order (QA 17 November)', () => {
+  it('lists notifications newest first, so the bell, which shows the first five, shows the new ones', async () => {
+    const student = await login('QCU-STU-IT-A')
+    const admin = await login('ACCS-ADMIN')
+    const until = new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10)
+    expect((await admin.post('/api/pages/P35/actions').send({ action: 'applyRestriction', reason: 'r', payload: { studentId: 'QCU-STU-IT-A', features: ['post.create'], until, basis: 'b', decisionReference: 'd' } })).status).toBe(200)
+    const notices = (await student.get('/api/pages/P40')).body.data.notifications as { kind: string; at: string }[]
+    expect(notices[0]!.kind).toBe('restriction')
+    expect(notices.map((n) => n.at)).toEqual([...notices.map((n) => n.at)].sort().reverse())
+  })
+})

@@ -106,3 +106,22 @@ describe('moderation referrals go to the CCS Secretary (D-04)', () => {
     expect((await secretary.get('/api/pages/P44')).body.data.categories).toContain('moderation')
   })
 })
+
+describe('telling the author what was decided (QA 17 November)', () => {
+  const decide = (agent: Agent, decision: string) => agent.post('/api/pages/P50/actions').send({ action: 'moderate', recordId: 'MOD-0101', reason: 'Breaks the posting rules', payload: { decision, notifyAuthor: true } })
+  const lastNotice = () => repo.read().notifications.at(-1)!
+
+  it('links a kept post to the post itself and says nothing changes', async () => {
+    const admin = await login('ACCS-ADMIN')
+    expect((await decide(admin, 'keep')).status).toBe(200)
+    const m = item('MOD-0101')
+    expect(lastNotice()).toMatchObject({ recipientId: m.authorId, kind: 'moderation', pageId: 'P06', body: expect.stringMatching(/kept it\. Nothing changes\./) })
+    expect(lastNotice().recordId).toBe(m.itemType === 'post' ? m.itemId : m.parentId)
+  })
+
+  it('says a removed item was removed, with the reason, instead of "Open this update" pointing back at Notifications', async () => {
+    const admin = await login('ACCS-ADMIN')
+    expect((await decide(admin, 'remove')).status).toBe(200)
+    expect(lastNotice()).toMatchObject({ kind: 'moderation', pageId: 'P40', body: expect.stringMatching(/removed your .*Reason: Breaks the posting rules/) })
+  })
+})
