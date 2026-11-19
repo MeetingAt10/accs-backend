@@ -134,3 +134,83 @@ describe('editing and deleting a sent message (decided 19 November 2026)', () =>
     expect((await prof!.post('/api/pages/P12/actions').send({ action: 'editMessage', recordId: thread, payload: { messageId: 'MESSAGE-0101', body: 'Back again' } })).status).toBe(409)
   })
 })
+
+describe('the administrator changing restrictions (QA 17 November: only Lift was possible)', () => {
+  const day = (offset: number) => new Date(Date.now() + 8 * 3_600_000 + offset * 86_400_000).toISOString().slice(0, 10)
+  async function applied(admin: Agent, extra: object = {}) {
+    const response = await admin.post('/api/pages/P35/actions').send({ action: 'applyRestriction', reason: 'r', payload: { studentId: 'QCU-STU-IT-A', features: ['post.create'], until: day(7), basis: 'b', decisionReference: 'd', ...extra } })
+    expect(response.status, JSON.stringify(response.body)).toBe(200)
+    return response.body.record.id as string
+  }
+  const restrictionNotices = () => repo.read().notifications.filter((n) => n.recipientId === 'QCU-STU-IT-A' && n.kind === 'restriction')
+
+  it('extends and shortens an active restriction, tells the student, and closes the waiting request', async () => {
+    const admin = await login('ACCS-ADMIN')
+    const id = await applied(admin)
+    const guidance = await login('QCU-GUIDANCE')
+    const asked = await guidance.post('/api/pages/P35/actions').send({ action: 'referRestriction', reason: 'Needs more time', payload: { studentId: 'QCU-STU-IT-A', change: 'Extend' } })
+    expect(asked.status, JSON.stringify(asked.body)).toBe(200)
+    const change = (until: string) => admin.post('/api/pages/P35/actions').send({ action: 'changeRestrictionEnd', recordId: id, reason: 'As requested', payload: { until } })
+    expect((await change(day(14))).body.message).toBe('Restriction extended.')
+    expect(restrictionNotices().at(-1)!.body).toBe(`Now paused until ${day(14)}: Posting.`)
+    expect(repo.read().referrals.find((r) => r.id === asked.body.record.id)).toMatchObject({ status: 'Done: restriction extended' })
+    expect((await change(day(3))).body.message).toBe('Restriction shortened.')
+    expect((await change(day(0))).status).toBe(400)
+    expect((await (await login('QCU-OSAS')).post('/api/pages/P35/actions').send({ action: 'changeRestrictionEnd', recordId: id, reason: 'x', payload: { until: day(5) } })).status).toBe(403)
+  })
+
+  it('declines a change request and tells the office that asked', async () => {
+    const admin = await login('ACCS-ADMIN')
+    await applied(admin)
+    const asked = await (await login('QCU-GUIDANCE')).post('/api/pages/P35/actions').send({ action: 'referRestriction', reason: 'Student apologised', payload: { studentId: 'QCU-STU-IT-A', change: 'Lift' } })
+    const declined = await admin.post('/api/pages/P35/actions').send({ action: 'declineReferral', recordId: asked.body.record.id, reason: 'The decision stands', payload: {} })
+    expect(declined.status, JSON.stringify(declined.body)).toBe(200)
+    expect(repo.read().referrals.find((r) => r.id === asked.body.record.id)!.status).toBe('Declined')
+    expect(repo.read().notifications.at(-1)).toMatchObject({ recipientId: 'QCU-GUIDANCE', body: 'Your request to lift a restriction was declined. Reason: The decision stands' })
+    expect((await admin.post('/api/pages/P35/actions').send({ action: 'declineReferral', recordId: asked.body.record.id, reason: 'again', payload: {} })).status).toBe(409)
+  })
+
+  it('applies without notifying the student when the administrator unticks it', async () => {
+    const admin = await login('ACCS-ADMIN')
+    const before = restrictionNotices().length
+    await applied(admin, { notifyStudent: false })
+    expect(restrictionNotices()).toHaveLength(before)
+    await applied(admin)
+    expect(restrictionNotices()).toHaveLength(before + 1)
+  })
+})
+
+describe('audit lists (QA 17 November: the oldest entry came first)', () => {
+  it('lists the newest entry first', async () => {
+    const admin = await login('ACCS-ADMIN')
+    const day = new Date(Date.now() + 8 * 3_600_000 + 7 * 86_400_000).toISOString().slice(0, 10)
+    expect((await admin.post('/api/pages/P35/actions').send({ action: 'applyRestriction', reason: 'r', payload: { studentId: 'QCU-STU-IT-A', features: ['post.create'], until: day, basis: 'b', decisionReference: 'd' } })).status).toBe(200)
+    const trail = (await admin.get('/api/pages/P51')).body.data.audit as { action: string; at: string }[]
+    expect(trail[0]!.action).toBe('Restriction applied')
+    expect(trail.map((e) => e.at)).toEqual([...trail.map((e) => e.at)].sort().reverse())
+  })
+})
+
+describe('monitoring trend (QA 17 November: only today was shown)', () => {
+  it('shows the last seven days, oldest first, with empty days at 0', async () => {
+    const student = await login('QCU-STU-IT-A')
+    await student.post('/api/pages/P41/actions').send({ action: 'assistantAsk', payload: { question: 'What can you help me with?' } })
+    const trend = (await (await login('ACCS-ADMIN')).get('/api/pages/P52')).body.data.trend as { label: string; value: number }[]
+    expect(trend).toHaveLength(7)
+    expect(trend.map((d) => d.label)).toEqual([...trend.map((d) => d.label)].sort())
+    expect(trend.at(-1)!.value).toBeGreaterThanOrEqual(1)
+  })
+})
+
+describe('moderation review context (QA 17 November)', () => {
+  it('shows a flagged message with the messages around it, the flagged one marked', async () => {
+    const student = await login('QCU-STU-IT-A')
+    for (const body of ['First note', 'Second note', 'This is the flagged one', 'After it']) await student.post('/api/pages/P12/actions').send({ action: 'sendMessage', recordId: 'THREAD-IT-A', payload: { body } })
+    const flagged = repo.read().threads.find((t) => t.id === 'THREAD-IT-A')!.messages.find((m) => m.body === 'This is the flagged one')!
+    const prof = await login('QCU-PROF-IT')
+    expect((await prof.post('/api/pages/P12/actions').send({ action: 'flag', recordId: 'THREAD-IT-A', payload: { itemType: 'message', itemId: flagged.id, reason: 'Rude' } })).status).toBe(200)
+    const modId = repo.read().moderation.at(-1)!.id
+    const messages = (await (await login('ACCS-ADMIN')).get(`/api/pages/P50?id=${modId}`)).body.data.messages as { body: string; flagged: boolean }[]
+    expect(messages.map((m) => [m.body, m.flagged])).toEqual([['Use this group for room changes and class reminders. Message me directly for anything personal.', false], ['First note', false], ['Second note', false], ['This is the flagged one', true], ['After it', false]])
+  })
+})
