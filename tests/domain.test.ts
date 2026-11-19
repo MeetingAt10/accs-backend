@@ -144,14 +144,15 @@ describe('community publication and roster contracts', () => {
       body: 'A private planning session for verified members.',
       audience: 'organization:ORG-COMPUTING',
       kind: 'announcement',
-      priority: 'urgent',
+      // Not urgent: an urgent announcement notifies its audience even when unticked (QA 19 November).
+      priority: 'important',
       private: true,
       ...eventDetails,
     }
     const before = repo.read().notifications.length
     const quiet = await organization.post('/api/pages/P05/actions').send({ action: 'createPost', payload })
     expect(quiet.status).toBe(200)
-    expect(quiet.body.record.priority).toBe('urgent')
+    expect(quiet.body.record.priority).toBe('important')
     expect(repo.read().notifications).toHaveLength(before)
     const announced = await organization.post('/api/pages/P05/actions').send({
       action: 'createPost',
@@ -159,7 +160,8 @@ describe('community publication and roster contracts', () => {
     })
     expect(announced.status).toBe(200)
     const notices = repo.read().notifications.slice(before)
-    expect(notices.map(notice => notice.recipientId).sort()).toEqual(['QCU-ORG', 'QCU-STU-IT-A'])
+    // The author is not notified about their own announcement (QA 19 November).
+    expect(notices.map(notice => notice.recipientId).sort()).toEqual(['QCU-STU-IT-A'])
     expect(JSON.stringify(notices)).not.toContain(payload.body)
     const member = await login('QCU-STU-IT-A')
     const outsider = await login('QCU-STU-IT-B')

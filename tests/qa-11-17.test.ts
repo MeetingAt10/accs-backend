@@ -277,3 +277,41 @@ describe('the assistant and Help (QA 17 November)', () => {
     expect(faq.map((f) => f.question)).toEqual(['How are roles assigned?'])
   })
 })
+
+describe('the CCS Secretary in the Feed, like the Dean (QA 19 November)', () => {
+  it('posts discussions to CCS and Faculty, publishes announcements, and reads faculty posts', async () => {
+    const { secretarySession } = await import('./helpers.js')
+    const secretary = await secretarySession(app)
+    const post = (audience: string, kind = 'discussion') => secretary.post('/api/pages/P05/actions').send({ action: 'createPost', payload: { title: 'Enrollment reminder', body: 'Submit your forms by Friday.', audience, kind, ...(kind === 'announcement' ? { priority: 'general' } : { label: 'Discussion' }) } })
+    for (const [audience, kind] of [['college', 'discussion'], ['faculty', 'discussion'], ['college', 'announcement'], ['faculty', 'announcement']] as const) {
+      const response = await post(audience, kind)
+      expect([audience, kind, response.status, JSON.stringify(response.body).slice(0, 200)]).toEqual([audience, kind, 200, expect.any(String)])
+    }
+    const feed = (await secretary.get('/api/pages/P04')).body.data.posts as { audience: string; authorId?: string }[]
+    expect(feed.some((p) => p.audience === 'faculty')).toBe(true)
+    expect((await secretary.get('/api/pages/P05')).body.data.audiences).toEqual(expect.arrayContaining(['college', 'faculty']))
+  })
+})
+
+describe('urgent announcements (QA 19 November)', () => {
+  it('reach everyone in the audience at once, even unticked and muted, and not the author', async () => {
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
+    repo.read().settings['QCU-STU-IT-A'] = { theme: 'system', density: 'comfortable', priorities: { announcement: 'muted' } }
+    const before = repo.read().notifications.length
+    const created = await dean.post('/api/pages/P05/actions').send({ action: 'createPost', payload: { title: 'Campus closed today', body: 'Classes move online because of the storm.', audience: 'college', kind: 'announcement', priority: 'urgent', notifyMembers: false } })
+    expect(created.status, JSON.stringify(created.body)).toBe(200)
+    const sent = repo.read().notifications.slice(before).filter((n) => n.kind === 'announcement')
+    const recipients = new Set(sent.map((n) => n.recipientId))
+    const active = repo.read().users.filter((u) => u.active && u.id !== 'QCU-FAC-PAULA-DELACRUZ').map((u) => u.id)
+    expect([...recipients].sort()).toEqual(active.sort())
+    expect(recipients.has('QCU-STU-IT-A')).toBe(true)
+    expect(sent[0]).toMatchObject({ title: 'Urgent announcement', body: 'Urgent: Campus closed today', priority: 'high' })
+  })
+
+  it('leaves a general announcement without Notify members quiet', async () => {
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
+    const before = repo.read().notifications.length
+    await dean.post('/api/pages/P05/actions').send({ action: 'createPost', payload: { title: 'Library hours', body: 'Open until 8 PM.', audience: 'college', kind: 'announcement', priority: 'general', notifyMembers: false } })
+    expect(repo.read().notifications.slice(before).filter((n) => n.kind === 'announcement')).toHaveLength(0)
+  })
+})

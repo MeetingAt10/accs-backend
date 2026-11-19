@@ -292,7 +292,7 @@ function notify(repo:UnitOfWork,recipientId:string,kind:string,pageId:string,rec
     id: repo.nextId('NOTIF'),
     recipientId,
     kind,
-    title: titles[kind] ?? 'New update',
+    title: kind === 'announcement' && options.urgent ? 'Urgent announcement' : titles[kind] ?? 'New update',
     body: options.body ?? 'Open this update to see the details.',
     priority: options.urgent ? 'high' : preference && preference !== 'muted' ? preference : (['report', 'case', 'restriction'].includes(kind) ? 'high' : 'normal'),
     pageId,
@@ -451,18 +451,21 @@ function notifyClassPost(repo: UnitOfWork, post: Post) {
   }
 }
 function notifyAnnouncementMembers(repo: UnitOfWork, post: Post) {
-  if (post.kind !== 'announcement' || !post.notifyMembers) return
+  // An urgent announcement reaches everyone in its audience, whether or not "Notify members" was ticked, and past a muted
+  // category (QA 19 November). The open portal shows it within seconds.
+  const urgent = post.priority === 'urgent'
+  if (post.kind !== 'announcement' || !post.notifyMembers && !urgent) return
   const db = repo.read()
   const [kind, id] = post.audience.split(':')
   const space = db.spaces.find(item => item.id === id)
-  for (const recipient of db.users.filter(user => user.active)) {
+  for (const recipient of db.users.filter(user => user.active && user.id !== post.authorId)) {
     const member = post.audience === 'college'
-      || post.audience === 'faculty' && hasRole(recipient, 'professor', 'chair', 'dean')
+      || post.audience === 'faculty' && hasRole(recipient, 'professor', 'chair', 'dean', 'secretary')
       || kind === 'program' && recipient.program === id
       || kind === 'space' && !!space && [...space.studentIds, ...space.professorIds].includes(recipient.id)
       || kind === 'organization' && isOrganizationMember(db, recipient, id!)
     if (member && canAudience(db, recipient, post.audience, post.private)) {
-      notify(repo, recipient.id, 'announcement', 'P06', post.id, { urgent: post.priority === 'urgent' })
+      notify(repo, recipient.id, 'announcement', 'P06', post.id, urgent ? { urgent, body: `Urgent: ${post.title}` } : {})
     }
   }
 }
