@@ -80,7 +80,7 @@ describe('a flagged post', () => {
     expect((await moderate(await login('ACCS-ADMIN'), modId, 'refer')).status).toBe(200)
     expect(await feedIds(reader)).not.toContain('POST-0101')
     expect((await secretary.get('/api/pages/P06?id=POST-0101')).status).toBe(200)
-    expect((await moderate(secretary, modId, 'keep')).status).toBe(200)
+    expect((await moderate(secretary, modId, 'dismiss')).status).toBe(200)
     expect(await feedIds(reader)).toContain('POST-0101')
   })
 })

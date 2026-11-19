@@ -62,13 +62,22 @@ function weeklyTrend(opened: string[], resolved: string[]) {
 }
 function requirePermission(user: User, key: string) { if (!hasPermission(user,key)) throw deny() }
 const referredStatus = 'Referred to the CCS Secretary'
-/** Moderators see every item; the CCS Secretary sees only items referred to them, including ones they have decided. */
+/** The CCS Secretary dismisses a referred flag or sends it on to OSAS, which decides it (decided 19 November 2026). */
+const osasStatus = 'Sent to OSAS'
+/** Moderators see every item; the CCS Secretary sees items referred to them, and OSAS items sent to it, including ones they have decided. */
 const canSeeModeration = (user: User, m: { history: { decision: string }[] }) =>
-  hasPermission(user,'moderation.review') || hasPermission(user,'moderation.referral') && m.history.some(entry => entry.decision === 'refer')
+  hasPermission(user,'moderation.review') || hasPermission(user,'moderation.referral') && m.history.some(entry => entry.decision === 'refer') || hasPermission(user,'moderation.osas') && m.history.some(entry => entry.decision === 'osas')
 // Flagged content is hidden until it is reviewed (#43, baseline chapter 10.4). While a post, comment or message has a
 // moderation item that is Pending (a user's flag or a word-filter match) or referred to the CCS Secretary, only its author
 // and the people reviewing it see it: moderators, and the Secretary once it is referred. "Keep" shows it again.
-const heldStatuses = ['Pending', referredStatus]
+const heldStatuses = ['Pending', referredStatus, osasStatus]
+/** The decisions this person may make on the item now, in the order the page offers them. */
+function moderationDecisions(user: User, m: Moderation) {
+  if (m.status === referredStatus) return hasPermission(user,'moderation.referral') ? ['dismiss', 'osas'] : []
+  if (m.status === osasStatus) return hasPermission(user,'moderation.osas') ? ['keep', 'remove', 'warn'] : []
+  if (m.status !== 'Pending' || !hasPermission(user,'moderation.review')) return []
+  return ['keep', 'remove', 'warn', ...(m.source === 'User' ? ['refer'] : [])]
+}
 function heldItem(db: Database, itemType: Moderation['itemType'], itemId: string) { return db.moderation.find(m => m.itemType === itemType && m.itemId === itemId && heldStatuses.includes(m.status)) }
 function canSeeItem(db: Database, user: User, itemType: Moderation['itemType'], itemId: string, authorId: string) {
   const held = heldItem(db, itemType, itemId)
@@ -98,8 +107,8 @@ function threadTitle(db:Database,thread:Thread,user:User){
   return (other&&db.users.find(u=>u.id===other)?.name)||thread.title
 }
 /** The last line shown in the conversation list: the words, or the file when only a file was sent. */
-const messagePreview=(message?:Message)=>!message?'':message.body||(message.attachments?.length?`Sent ${message.attachments.length===1?message.attachments[0]!.fileName:`${message.attachments.length} files`}`:'')
-function messageView(db:Database,message:Message,report?:Report,viewerStage=report?.stage) { return {id:message.id,body:message.body,at:message.at,...(message.attachments?.length?{attachments:message.attachments.map(attachmentView)}:{}),author:author(db,message.authorId,!!report&&message.authorId===report.ownerId&&report.identity==='anonymous'&&!report.disclosedTo.includes(viewerStage!),report?.alias)} }
+const messagePreview=(message?:Message)=>!message?'':message.deleted?'Message deleted':message.body||(message.attachments?.length?`Sent ${message.attachments.length===1?message.attachments[0]!.fileName:`${message.attachments.length} files`}`:'')
+function messageView(db:Database,message:Message,report?:Report,viewerStage=report?.stage) { return {id:message.id,body:message.deleted?'':message.body,at:message.at,...(message.editedAt?{editedAt:message.editedAt}:{}),...(message.deleted?{deleted:true}:{}),...(message.attachments?.length&&!message.deleted?{attachments:message.attachments.map(attachmentView)}:{}),author:author(db,message.authorId,!!report&&message.authorId===report.ownerId&&report.identity==='anonymous'&&!report.disclosedTo.includes(viewerStage!),report?.alias)} }
 /** Everyone's reaction to a post or comment: the old single reaction counts as "like" (#86). */
 function reactionsOf(item: { reactions?: string[]; reactionsBy?: Record<string, ReactionKind> }): Record<string, ReactionKind> {
   return { ...Object.fromEntries((item.reactions ?? []).map(id => [id, 'like' as ReactionKind])), ...(item.reactionsBy ?? {}) }
@@ -157,6 +166,17 @@ function postView(db: Database, post: Post, user: User) {
 const filedByFaculty = (user:User,report:Report) => report.source === 'faculty' && report.ownerId === user.id
 /** Where the owner of a report reads it: a student on P20, a faculty member who filed one on P22. */
 const ownerPage = (report:Report) => report.source === 'faculty' ? 'P22' : 'P20'
+/**
+ * The student's progress bar (decided 19 November 2026): Submitted, Read, Escalated, Resolved, Closed, instead of which
+ * office has the report. Read is when a handling office first opened it; Escalated is any move past the first office.
+ */
+export const progressSteps = ['Submitted', 'Read', 'Escalated', 'Resolved', 'Closed'] as const
+export function progressFor(report: Report) {
+  const first = report.history[0]?.stage ?? report.stage
+  const escalated = report.stage !== first || report.history.some(h => h.action === 'Transferred' || h.action === 'Escalated')
+  const step = report.status === 'Closed' ? 4 : report.status === 'Resolved' ? 3 : escalated ? 2 : report.readAt ? 1 : 0
+  return { steps: [...progressSteps], step, label: progressSteps[step], ...(escalated ? { escalatedTo: offices[report.stage] } : {}), ...(report.readAt ? { readAt: report.readAt } : {}) }
+}
 function reportView(db:Database,report:Report,user:User,owner=false) {
   const current=canActCase(user,report)
   if(filedByFaculty(user,report)){
@@ -166,7 +186,7 @@ function reportView(db:Database,report:Report,user:User,owner=false) {
   // Status only, never the statement, reporter, messages or notes: for the Program Chair and the Dean on a confidential
   // concern, and for an office the case has moved past (#30). Anyone else who appears in the history sees only their own entries.
   if(!owner&&!current&&!canReadCase(user,report)){
-    const status={id:report.id,caseFileId:report.caseFileId,status:statusFor(report),stage:report.stage,office:offices[report.stage],program:report.program,createdAt:report.createdAt,updatedAt:report.updatedAt,statusOnly:true,timeline:report.history.filter(h=>h.public).map(h=>({at:h.at,action:h.action,office:offices[h.stage]}))}
+    const status={progress:progressFor(report),id:report.id,caseFileId:report.caseFileId,status:statusFor(report),stage:report.stage,office:offices[report.stage],program:report.program,createdAt:report.createdAt,updatedAt:report.updatedAt,statusOnly:true,timeline:report.history.filter(h=>h.public).map(h=>({at:h.at,action:h.action,office:offices[h.stage]}))}
     if(overseesCase(user,report)) return {...status,confidential:true,statusNotice:'The adviser marked this concern confidential. You can see its status only.'}
     if(isEarlierHandler(user,report)) return {...status,confidential:report.confidential===true,statusNotice:`This concern is now with ${offices[report.stage]}. You can follow its status here.`}
     return {id:report.id,caseFileId:report.caseFileId,category:report.category,severity:report.severity,status:statusFor(report),stage:report.stage,office:offices[report.stage],program:report.program,createdAt:report.createdAt,updatedAt:report.updatedAt,historyOnly:true,history:report.history.filter(h=>h.actorId===user.id).map(h=>({...h,actor:author(db,h.actorId)})),historyNotice:'You can see only your own entries on this report.'}
@@ -174,7 +194,7 @@ function reportView(db:Database,report:Report,user:User,owner=false) {
   // A reader who is not the current handler sees the name only if the student shared it with the reader's own office.
   const viewerStage=current?report.stage:hasRole(user,'dean')?'dean':'chair'
   const showName=report.identity==='named'||!owner&&report.disclosedTo.includes(viewerStage)
-  return {id:report.id,caseFileId:report.caseFileId,type:report.caseFileId?'Case File':'Report',category:report.category,subcategory:report.subcategory,categoryDetail:report.categoryDetail,severity:report.severity,status:statusFor(report),stage:report.stage,office:offices[report.stage],program:report.program,narrative:report.narrative,identity:report.identity,alias:report.alias,reporter:showName?author(db,report.ownerId):{name:report.alias,roles:['student'],anonymous:true},createdAt:report.createdAt,updatedAt:report.updatedAt,sourcePostId:report.sourcePostId,location:report.location,occurredOn:report.occurredOn,disclosedTo:owner?report.disclosedTo:undefined,bypassed:owner?undefined:report.bypassed,consent:report.consent&&{readStatement:true,at:report.consent.at,version:report.consent.version,wording:report.consent.wording},allowChair:!earlierConsent(report)||report.allowChair===true,allowDean:!earlierConsent(report)||report.allowDean===true,confidential:report.confidential===true,readOnly:!owner&&!current,aboutAdvisor:report.aboutAdvisor===true,talk:report.talk,history:report.history.filter(h=>!owner||h.public).map(h=>owner?{id:h.id,at:h.at,action:h.action,update:h.update,stage:h.stage,office:offices[h.stage],state:h.stage===report.stage?'current':'done'}:{...h,actorId:h.actorId===report.ownerId&&!showName?undefined:h.actorId,actor:author(db,h.actorId,h.actorId===report.ownerId&&!showName,report.alias)}),messages:report.messages.map(m=>messageView(db,m,report,owner?report.stage:viewerStage)),notes:owner?undefined:report.notes.map(m=>messageView(db,m)),allowedActions:owner?[]:caseActions(user,report),routing:owner?undefined:report.routing,...(report.source==='faculty'?{source:'faculty',reportedStudent:report.reportedStudentId?person(find(db.users,report.reportedStudentId)):undefined}:{}),...(!owner&&hasRole(user,'dean','osas')?{strikes:db.strikes.filter(s=>s.reportId===report.id).map(s=>strikeView(db,s)),canRecommendStrike:current&&report.stage==='dean'&&hasPermission(user,'strike.recommend'),strikeCandidates:current&&report.stage==='dean'&&hasPermission(user,'strike.recommend')?strikeCandidates(db,report):[],canDecideStrike:current&&report.stage==='osas'&&hasPermission(user,'strike.record')}:{})}
+  return {progress:progressFor(report),id:report.id,caseFileId:report.caseFileId,type:report.caseFileId?'Case File':'Report',category:report.category,subcategory:report.subcategory,categoryDetail:report.categoryDetail,severity:report.severity,status:statusFor(report),stage:report.stage,office:offices[report.stage],program:report.program,narrative:report.narrative,identity:report.identity,alias:report.alias,reporter:showName?author(db,report.ownerId):{name:report.alias,roles:['student'],anonymous:true},createdAt:report.createdAt,updatedAt:report.updatedAt,sourcePostId:report.sourcePostId,location:report.location,occurredOn:report.occurredOn,disclosedTo:owner?report.disclosedTo:undefined,bypassed:owner?undefined:report.bypassed,consent:report.consent&&{readStatement:true,at:report.consent.at,version:report.consent.version,wording:report.consent.wording},allowChair:!earlierConsent(report)||report.allowChair===true,allowDean:!earlierConsent(report)||report.allowDean===true,confidential:report.confidential===true,readOnly:!owner&&!current,aboutAdvisor:report.aboutAdvisor===true,talk:report.talk,history:report.history.filter(h=>!owner||h.public).map(h=>owner?{id:h.id,at:h.at,action:h.action,update:h.update,stage:h.stage,office:offices[h.stage],state:h.stage===report.stage?'current':'done'}:{...h,actorId:h.actorId===report.ownerId&&!showName?undefined:h.actorId,actor:author(db,h.actorId,h.actorId===report.ownerId&&!showName,report.alias)}),messages:report.messages.map(m=>messageView(db,m,report,owner?report.stage:viewerStage)),notes:owner?undefined:report.notes.map(m=>messageView(db,m)),allowedActions:owner?[]:caseActions(user,report),routing:owner?undefined:report.routing,...(report.source==='faculty'?{source:'faculty',reportedStudent:report.reportedStudentId?person(find(db.users,report.reportedStudentId)):undefined}:{}),...(!owner&&hasRole(user,'dean','osas')?{strikes:db.strikes.filter(s=>s.reportId===report.id).map(s=>strikeView(db,s)),canRecommendStrike:current&&report.stage==='dean'&&hasPermission(user,'strike.recommend'),strikeCandidates:current&&report.stage==='dean'&&hasPermission(user,'strike.recommend')?strikeCandidates(db,report):[],canDecideStrike:current&&report.stage==='osas'&&hasPermission(user,'strike.record')}:{})}
 }
 function caseActions(user:User,r:Report) { if(!canActCase(user,r))return[]; if(r.status==='Closed')return[]; if(r.status==='Resolved')return['close'];if(r.stage==='guidance'&&!r.caseFileId)return['convert'];return ['respond','recordAction',...(['guidance','osas'].includes(r.stage)?['milestone']:[]),'resolve',...(r.stage==='adviser'||r.stage==='chair'?['escalate']:r.stage==='dean'||r.stage==='guidance'?['transfer']:[])] }
 /**
@@ -235,6 +255,20 @@ function closeReferrals(db: Database, studentId: string, user: User, outcome: st
 const featureWords = (features: string[]) => features.map(f => restrictionFeatureLabels[f] ?? f).join(', ')
 const requiredCategoryLabels: Record<string,string> = { report: 'Report updates', case: 'Case updates', evaluation: 'Evaluation updates' }
 /** `urgent` (an urgent announcement) reaches the recipient even if they muted its category. */
+/**
+ * Which roles one account may hold (QA 17 November, decided 19 November 2026). A student or an organization account
+ * holds that one role only; any other account holds at most two (for example Dean and professor). Only a student has
+ * a section, and a section is letters, like A or AB. Answers the problem in words, or nothing when the roles are fine.
+ */
+export function rolesProblem(roles: readonly string[], section?: string) {
+  const unique = new Set(roles)
+  if (unique.size !== roles.length) return 'Choose each role once.'
+  for (const single of ['student', 'organization']) if (unique.has(single) && unique.size > 1) return single === 'student' ? 'A student account has the student role only. Its program and section say where the student belongs.' : 'An organization account has the organization role only.'
+  if (unique.size > 2) return 'Choose at most two roles for one person, like Dean and professor.'
+  if (section && !unique.has('student')) return 'Only students have a section.'
+  if (section && !/^[A-Za-z]{1,3}$/.test(section.trim())) return 'Use the section letter, like A.'
+  return undefined
+}
 function notify(repo:UnitOfWork,recipientId:string,kind:string,pageId:string,recordId?:string,options:{urgent?:boolean;body?:string;itemId?:string}={}) {
   const db = repo.read()
   const stored = db.settings[recipientId]?.priorities[kind]
@@ -518,7 +552,8 @@ export function search(repo:Repository,user:User,q:string){
 // P34 records every opening of a student record in the audit trail, so that one read has to commit.
 export function getPage(repo:Repository,user:User,pageId:string,query:PageQuery={}) {
   const work=(unit:UnitOfWork)=>readPage(unit,user,pageId,query)
-  return pageId==='P34'?repo.transact(work):repo.view(work)
+  // P22 commits too, only to stamp the first opening by a handling office (the Read step); nothing changes after that.
+  return pageId==='P34'||pageId==='P22'?repo.transact(work):repo.view(work)
 }
 /** Puts each person's profile photo (#85) on the loaded accounts, so every view that shows a person can show it. */
 function attachPhotos(db:Database) { for (const u of db.users) { const photo=db.photos?.[u.id]; if (photo) u.photo=photo; else delete u.photo } }
@@ -678,7 +713,8 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
     case'P20':{const r=pick(ownReports,reportIdOf(db,query.id));if(r)data.record=reportView(db,r,user,true);data.consentWording=consentWording;break}
     // Every handler gets the full category list, so the queue can filter by any category and sub-category.
     case'P21':data.categoryOptions=concernCategories;if(hasPermission(user,'student.report'))Object.assign(data,{canReportStudent:true,categoryOptions:concernCategories,reportableStudents:db.users.filter(u=>u.active&&hasRole(u,'student')&&db.spaces.some(sp=>sp.professorIds.includes(user.id)&&sp.studentIds.includes(u.id))).map(u=>({id:u.id,name:u.name,studentId:u.studentId,program:u.program,section:u.section}))});data.cases=cases.filter(r=>(!query.q||r.id.toLowerCase().includes(query.q.toLowerCase()))&&(!query.status||r.status===query.status)&&(!query.category||r.category===query.category)&&(!query.severity||r.severity===query.severity)).map(r=>reportView(db,r,user));break
-    case'P22':{const r=pick(cases,reportIdOf(db,query.id));if(r)data.record=reportView(db,r,user);break}
+    // The first time an office that handles the report opens it, the student's progress moves to Read.
+    case'P22':{const r=pick(cases,reportIdOf(db,query.id));if(r){if(!r.readAt&&canActCase(user,r))r.readAt=now();data.record=reportView(db,r,user)}break}
     case'P23':case'P24':{
       const clusterView=(c:Database['clusters'][number])=>clusterViewFor(db,user,c)
       const clusters=db.clusters.filter(c=>c.program===user.program);data.clusters=clusters.map(c=>({...clusterView(c),reportCount:db.reports.filter(r=>c.reportIds.includes(r.id)&&canViewCase(user,r)).length}));data.threshold=Math.round(escalationConfig.similarityThreshold*100);if(pageId==='P24'){const c=pick(clusters,query.id);if(c){data.record=clusterView(c);data.reports=db.reports.filter(r=>c.reportIds.includes(r.id)&&canViewCase(user,r)).map(r=>reportView(db,r,user))}}break}
@@ -891,7 +927,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
     case'P47':{const u=pick(db.users,query.id);if(u){data.record={...person(refreshRestrictions(db,u)),active:u.active};data.audit=safeAudit(db,db.audit.filter(a=>a.reference===u.id))}data.roles=roles.map(role=>({id:role,label:roleLabels[role]}));break}
     case'P48':data.permissionMatrix=Object.entries(permissionRoles).map(([key,grantedRoles])=>({key,roles:grantedRoles}));data.permissionProposals=db.permissionOverrides;data.roles=roles.map(role=>({id:role,label:roleLabels[role]}));break
     case'P49':data.moderation=db.moderation.filter(m=>canSeeModeration(user,m)&&(!query.status||m.status===query.status)).map(m=>({...m,authorId:undefined,reporterId:undefined}));break
-    case'P50':{const m=pick(db.moderation.filter(item=>canSeeModeration(user,item)),query.id);if(m){data.record={...m,authorId:undefined,reporterId:undefined,reporter:m.reporterId?{name:'Verified community member'}:undefined};const p=db.posts.find(p=>p.id===m.parentId);if(p)data.post=postView(db,p,user);if(m.itemType==='message'){const thread=db.threads.find(t=>t.id===m.parentId);data.messages=thread?.messages.filter(message=>message.id===m.itemId).map(message=>messageView(db,message))??[]}}break}
+    case'P50':{const m=pick(db.moderation.filter(item=>canSeeModeration(user,item)),query.id);if(m){data.record={...m,authorId:undefined,reporterId:undefined,reporter:m.reporterId?{name:'Verified community member'}:undefined};data.decisions=moderationDecisions(user,m);const p=db.posts.find(p=>p.id===m.parentId);if(p)data.post=postView(db,p,user);if(m.itemType==='message'){const thread=db.threads.find(t=>t.id===m.parentId);data.messages=thread?.messages.filter(message=>message.id===m.itemId).map(message=>messageView(db,message))??[]}}break}
     case'P51':data.audit=safeAudit(db,db.audit.filter(a=>(!query.from||a.at>=query.from)&&(!query.to||a.at<=`${query.to}T23:59:59.999Z`)&&(!query.q||`${a.reference} ${a.action} ${a.module}`.toLowerCase().includes(query.q.toLowerCase()))));break
     case'P52':{const telemetry=query.period==='none'?[]:db.telemetry;data.stats=[{label:'Assistant sessions',value:telemetry.length,note:'Help assistant'},{label:'Failures',value:telemetry.filter(t=>!t.success).length,note:'Counts only'},{label:'Median response time',value:telemetry.length?`${telemetry.map(t=>t.durationMs).sort((a,b)=>a-b)[Math.floor(telemetry.length/2)]} ms`:'No data',note:'Since the server started'}];data.systemStatus={api:'Operational',assistant:'Built-in help assistant',storage:'Application store'};data.telemetry=telemetry;data.incidents=[];data.trend=telemetry.length?[{label:now().slice(0,10),value:telemetry.length}]:[];break}
   }
@@ -971,6 +1007,8 @@ const actionPages: Record<string, string[]> = {
   createGroupThread: ['P11'],
   sendMessage: ['P12'],
   muteThread: ['P12'],
+  editMessage: ['P12'],
+  deleteMessage: ['P12'],
   markThreadRead: ['P12'],
   markNotification: ['P40'],
   markAllNotifications: ['P40'],
@@ -1398,7 +1436,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       message='Material saved.'
       break
     }
-    case'createTodo':{requirePermission(user,'todo.manage');const p=actionPayloads.createTodo.parse(request.payload);const todo={id:repo.nextId('TODO'),ownerId:user.id,...p,done:false};db.todos.push(todo);record=todo;message='To-do added.';break}
+    case'createTodo':{requirePermission(user,'todo.manage');const p=actionPayloads.createTodo.parse(request.payload);if(p.date<campusNow().date)throw dateIssue('date','Choose today or a later date.');const todo={id:repo.nextId('TODO'),ownerId:user.id,...p,done:false};db.todos.push(todo);record=todo;message='To-do added.';break}
     case'toggleTodo':case'deleteTodo':{requirePermission(user,'todo.manage');const todo=find(db.todos,id);if(todo.ownerId!==user.id)throw unavailable();if(request.action==='toggleTodo')todo.done=actionPayloads.toggleTodo.parse(request.payload).done;else{actionPayloads.deleteTodo.parse(request.payload);db.todos=db.todos.filter(t=>t.id!==todo.id)}record=todo;message='To-do updated.';break}
     case 'createThread': {
       requirePermission(user, 'message.send')
@@ -1460,6 +1498,31 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       }
       record = messageView(db, sent)
       message = 'Message sent.'
+      break
+    }
+    // The author edits or takes back their own message (decided 19 November 2026). A message under review stays as it is
+    // until it is decided, so an edit cannot hide what was flagged. Notification previews of the old words are cleared.
+    case 'editMessage': case 'deleteMessage': {
+      const payload = request.action === 'editMessage' ? actionPayloads.editMessage.parse(request.payload) : { ...actionPayloads.deleteMessage.parse(request.payload), body: '' }
+      const thread = find(db.threads, id)
+      if (!canThread(db, user, thread)) throw unavailable()
+      const own = find(thread.messages, payload.messageId)
+      if (own.authorId !== user.id) throw deny()
+      if (own.deleted) throw conflict('This message was deleted.')
+      if (heldItem(db, 'message', own.id)) throw conflict('This message is being reviewed, so it cannot be changed now.')
+      redactNotices(db, own.id)
+      if (request.action === 'deleteMessage') {
+        own.deleted = true
+        own.body = ''
+        own.attachments = undefined
+        message = 'Message deleted.'
+      } else {
+        own.body = payload.body
+        own.editedAt = now()
+        autoFlag(repo, { itemType: 'message', itemId: own.id, parentId: thread.id, authorId: user.id, text: payload.body })
+        message = 'Message edited.'
+      }
+      record = messageView(db, own)
       break
     }
     case 'muteThread': {
@@ -1544,7 +1607,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       message = 'Settlement recorded. The clearance hold is lifted; the strikes stay on the record.'
       break
     }
-    case'applyRestriction':{requireRole(user,'administrator');const p=actionPayloads.applyRestriction.parse(request.payload);reasonOf(request);const student=find(db.users,p.studentId);if(!hasRole(student,'student'))throw unavailable();if(p.until<now().slice(0,10))throw new ApiError(400,'The end date must be today or later.','VALIDATION_ERROR');const r={id:repo.nextId('RST'),...p,starts:now(),actorId:user.id,active:true};db.restrictions.push(r);closeReferrals(db,student.id,user,'restriction changed');audit(repo,user,'Restriction applied','restrictions',r.id);notify(repo,student.id,'restriction','P36',undefined,{body:`Paused until ${p.until}: ${featureWords(p.features)}. Reason: ${p.basis}`});record=r;message='Selected features paused.';break}
+    case'applyRestriction':{requireRole(user,'administrator');const p=actionPayloads.applyRestriction.parse(request.payload);reasonOf(request);const student=find(db.users,p.studentId);if(!hasRole(student,'student'))throw unavailable();if(p.until<=campusNow().date)throw new ApiError(400,'Choose tomorrow or a later end date.','VALIDATION_ERROR');const r={id:repo.nextId('RST'),...p,starts:now(),actorId:user.id,active:true};db.restrictions.push(r);closeReferrals(db,student.id,user,'restriction changed');audit(repo,user,'Restriction applied','restrictions',r.id);notify(repo,student.id,'restriction','P36',undefined,{body:`Paused until ${p.until}: ${featureWords(p.features)}. Reason: ${p.basis}`});record=r;message='Selected features paused.';break}
     case'liftRestriction':{requireRole(user,'administrator');actionPayloads.liftRestriction.parse(request.payload);reasonOf(request);const r=find(db.restrictions,id);if(!r.active||r.until<now().slice(0,10))throw conflict('This restriction has already ended.');r.active=false;closeReferrals(db,r.studentId,user,'restriction lifted');audit(repo,user,'Restriction lifted','restrictions',r.id);notify(repo,r.studentId,'restriction','P36',undefined,{body:`Available again: ${featureWords(r.features)}.`});record=r;message='Restriction lifted.';break}
     case'referRestriction':{requireRole(user,'guidance','osas');const p=actionPayloads.referRestriction.parse(request.payload);const reason=reasonOf(request);const student=find(db.users,p.studentId);if(!canStudentRecord(db,user,student))throw unavailable();const referral={id:repo.nextId('REF'),studentId:student.id,change:p.change,decisionReference:p.decisionReference??'',reason,actorId:user.id,at:now(),status:'Awaiting administrator review'};db.referrals.push(referral);audit(repo,user,'Restriction change requested','restrictions',referral.id);for(const admin of db.users.filter(u=>hasRole(u,'administrator')))notify(repo,admin.id,'restriction','P35');record=referral;message='Request sent. Existing restrictions are unchanged.';break}
     case'setProfilePhoto':{
@@ -1557,16 +1620,20 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
     case'saveProfile':{const p=actionPayloads.saveProfile.parse(request.payload);const saved=find(db.users,user.id);Object.assign(saved,p);Object.assign(user,p);record=person(user);message='Profile saved.';break}
     case'saveSettings':{const p=actionPayloads.saveSettings.parse(request.payload);db.settings[user.id]={...(db.settings[user.id]??defaultSettings(user)),...p};record=db.settings[user.id];message='Settings saved.';break}
     case'saveNotificationPreferences':{const p=actionPayloads.saveNotificationPreferences.parse(request.payload);if(Object.keys(p.priorities).some(key=>!notificationCategories(user).includes(key)))throw new ApiError(400,'Your account does not have that notification category.','VALIDATION_ERROR');const mutedRequired=Object.entries(p.priorities).find(([key,value])=>value==='muted'&&requiredNotificationCategories.includes(key));if(mutedRequired)throw new ApiError(400,`${requiredCategoryLabels[mutedRequired[0]]} cannot be muted.`,'VALIDATION_ERROR');/* Saved preferences do not change source access. */db.settings[user.id]={...(db.settings[user.id]??defaultSettings(user)),priorities:p.priorities};record=db.settings[user.id];message='Notification priorities saved.';break}
-    case'updateRoles':{requirePermission(user,'role.manage');const p=actionPayloads.updateRoles.parse(request.payload);reasonOf(request);const account=find(db.users,id);if(p.roles.some(r=>['student','chair'].includes(r))&&!p.program&&!account.program)throw new ApiError(400,'Choose a program for that role.','VALIDATION_ERROR');account.roles=p.roles;if(p.program)account.program=p.program;if(p.section)account.section=p.section;if(p.active!==undefined)account.active=p.active;audit(repo,user,'Role assignment changed','identity',account.id,undefined,reasonOf(request));notify(repo,account.id,'role','P43');record={...person(account),active:account.active};message='Assignment saved. The new roles apply to the user right away.';break}
+    case'updateRoles':{requirePermission(user,'role.manage');const p=actionPayloads.updateRoles.parse(request.payload);reasonOf(request);const account=find(db.users,id);const roleProblem=rolesProblem(p.roles,p.section);if(roleProblem)throw new ApiError(400,roleProblem,'VALIDATION_ERROR');if(p.roles.some(r=>['student','chair'].includes(r))&&!p.program&&!account.program)throw new ApiError(400,'Choose a program for that role.','VALIDATION_ERROR');account.roles=p.roles;if(p.program)account.program=p.program;if(p.section)account.section=p.section.trim().toUpperCase();if(p.active!==undefined)account.active=p.active;audit(repo,user,'Role assignment changed','identity',account.id,undefined,reasonOf(request));notify(repo,account.id,'role','P43');record={...person(account),active:account.active};message='Assignment saved. The new roles apply to the user right away.';break}
     case'updatePermission':{requirePermission(user,'role.manage');const p=actionPayloads.updatePermission.parse(request.payload);reasonOf(request);if(!permissionRoles[p.permission])throw new ApiError(400,'That permission does not exist.','VALIDATION_ERROR');/* TBD(D-06): approval workflow is undefined; save proposed cells without granting new runtime powers. */db.permissionOverrides[`${p.role}:${p.permission}`]=p.allowed;audit(repo,user,'Permission change proposed','identity',`${p.role}:${p.permission}`,undefined,reasonOf(request));record={...p,status:'Pending CCS approval'};message='Permission change saved for review.';break}
-    case'moderate':{const reviewer=hasPermission(user,'moderation.review');if(!reviewer&&!hasPermission(user,'moderation.referral'))throw deny();const p=actionPayloads.moderate.parse(request.payload);const reason=reasonOf(request);const m=find(db.moderation,id);if(!canSeeModeration(user,m))throw unavailable()
+    case'moderate':{const reviewer=hasPermission(user,'moderation.review');if(!reviewer&&!hasPermission(user,'moderation.referral')&&!hasPermission(user,'moderation.osas'))throw deny();const p=actionPayloads.moderate.parse(request.payload);const reason=reasonOf(request);const m=find(db.moderation,id);if(!canSeeModeration(user,m))throw unavailable()
       // D-04 (decided 2026-11-10): a moderator refers user-reported content to the CCS Secretary, who makes the final decision on it.
-      if(m.status===referredStatus){if(!hasPermission(user,'moderation.referral'))throw conflict('This item was referred to the CCS Secretary.');if(p.decision==='refer')throw conflict('This item is already with the CCS Secretary.')}
+      if(m.status===referredStatus){if(!hasPermission(user,'moderation.referral'))throw conflict('This item was referred to the CCS Secretary.');if(!['dismiss','osas'].includes(p.decision))throw conflict('The CCS Secretary dismisses the flag or sends it to OSAS.')}
+      else if(m.status===osasStatus){if(!hasPermission(user,'moderation.osas'))throw conflict('This item was sent to OSAS.');if(!['keep','remove','warn'].includes(p.decision))throw conflict('OSAS keeps the content, removes it, or removes it with a warning.')}
       else if(!reviewer||m.status!=='Pending')throw conflict('This item has already been reviewed.')
+      else if(['dismiss','osas'].includes(p.decision))throw conflict('Keep, remove, warn, or refer the item to the CCS Secretary.')
+      const osasOfficers=p.decision==='osas'?db.users.filter(u=>u.active&&hasPermission(u,'moderation.osas')):[]
+      if(p.decision==='osas'&&!osasOfficers.length)throw conflict('No OSAS account is active, so this cannot be sent to OSAS yet.')
       const secretaries=p.decision==='refer'?db.users.filter(u=>u.active&&hasPermission(u,'moderation.referral')):[]
       if(p.decision==='refer'&&m.source!=='User')throw deny()
       if(p.decision==='refer'&&!secretaries.length)throw conflict('The CCS Secretary account is not active, so this cannot be referred yet.')
-      const wasHeldPost=m.itemType==='post'&&m.source==='Filter'&&m.status==='Pending'&&!db.moderation.some(other=>other!==m&&other.itemType==='post'&&other.itemId===m.itemId&&heldStatuses.includes(other.status));m.status=p.decision==='keep'?'Kept':p.decision==='refer'?referredStatus:p.decision==='warn'?'Removed and warned':'Removed';m.history.push({at:now(),actorId:user.id,decision:p.decision,reason});if(['remove','warn'].includes(p.decision)){if(m.itemType==='post')find(db.posts,m.parentId).removed=true;else if(m.itemType==='comment'){const comment=find(find(db.posts,m.parentId).comments,m.itemId);comment.body='This content was removed after review.'}else{const message=find(find(db.threads,m.parentId).messages,m.itemId);message.body='This content was removed after review.';message.attachments=undefined;redactNotices(db,message.id)}}if(p.decision==='keep'&&wasHeldPost){const kept=db.posts.find(post=>post.id===m.itemId);if(kept&&!kept.removed){notifyAnnouncementMembers(repo,kept);notifyClassPost(repo,kept)}}audit(repo,user,'Moderation decision','moderation',m.id);for(const secretary of secretaries)notify(repo,secretary.id,'moderation','P50',m.id);if(p.notifyAuthor){const kept=m.status==='Kept';const what=m.itemType==='message'?'message':m.itemType==='comment'?'comment':'post';const link:[string,string]|undefined=kept?(m.itemType==='message'?['P12',m.parentId]:['P06',m.itemType==='post'?m.itemId:m.parentId]):undefined;notify(repo,m.authorId,'moderation',link?.[0]??'P40',link?.[1],{body:kept?`A reviewer looked at your ${what} and kept it. Nothing changes.`:m.status==='Referred'||p.decision==='refer'?`A reviewer sent your ${what} to the office that handles it. You will hear from them if anything changes.`:`A reviewer removed your ${what}${p.decision==='warn'?' and recorded a warning':''}. Reason: ${reason}`})};record={id:m.id,status:m.status,history:m.history};message='Decision recorded.';break}
+      const wasHeldPost=m.itemType==='post'&&m.source==='Filter'&&m.status==='Pending'&&!db.moderation.some(other=>other!==m&&other.itemType==='post'&&other.itemId===m.itemId&&heldStatuses.includes(other.status));m.status=p.decision==='keep'?'Kept':p.decision==='dismiss'?'Dismissed':p.decision==='osas'?osasStatus:p.decision==='refer'?referredStatus:p.decision==='warn'?'Removed and warned':'Removed';m.history.push({at:now(),actorId:user.id,decision:p.decision,reason});if(['remove','warn'].includes(p.decision)){if(m.itemType==='post')find(db.posts,m.parentId).removed=true;else if(m.itemType==='comment'){const comment=find(find(db.posts,m.parentId).comments,m.itemId);comment.body='This content was removed after review.'}else{const message=find(find(db.threads,m.parentId).messages,m.itemId);message.body='This content was removed after review.';message.attachments=undefined;redactNotices(db,message.id)}}if(p.decision==='keep'&&wasHeldPost){const kept=db.posts.find(post=>post.id===m.itemId);if(kept&&!kept.removed){notifyAnnouncementMembers(repo,kept);notifyClassPost(repo,kept)}}audit(repo,user,'Moderation decision','moderation',m.id);for(const secretary of secretaries)notify(repo,secretary.id,'moderation','P50',m.id);for(const officer of osasOfficers)notify(repo,officer.id,'moderation','P50',m.id,{body:'The CCS Secretary sent a flagged item to OSAS for a decision.'});if(p.notifyAuthor){const kept=m.status==='Kept'||m.status==='Dismissed';const what=m.itemType==='message'?'message':m.itemType==='comment'?'comment':'post';const link:[string,string]|undefined=kept?(m.itemType==='message'?['P12',m.parentId]:['P06',m.itemType==='post'?m.itemId:m.parentId]):undefined;notify(repo,m.authorId,'moderation',link?.[0]??'P40',link?.[1],{body:kept?`A reviewer looked at your ${what} and kept it. Nothing changes.`:p.decision==='refer'||p.decision==='osas'?`A reviewer sent your ${what} to the office that handles it. You will hear from them if anything changes.`:`A reviewer removed your ${what}${p.decision==='warn'?' and recorded a warning':''}. Reason: ${reason}`})};record={id:m.id,status:m.status,history:m.history};message='Decision recorded.';break}
     default:throw new ApiError(400,'That action does not exist.','VALIDATION_ERROR')
   }
   return {...JSON.parse(JSON.stringify({ok:true,message,...(record===undefined?{}:{record})})) as {ok:true;message:string;record?:unknown},outbox}

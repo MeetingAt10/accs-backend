@@ -10,7 +10,8 @@ import type { ReactionKind, Role, TalkMode, User } from './schemas.js'
 export type Stage = 'adviser' | 'chair' | 'dean' | 'guidance' | 'osas'
 /** A file sent with a message. It lives in the files bucket under `key`, which only the server knows. */
 export type Attachment = { id: string; fileName: string; contentType: string; size: number; key: string }
-export type Message = { id: string; authorId: string; body: string; at: string; attachments?: Attachment[] }
+/** `editedAt` and `deleted`: the author changed or took back the message (decided 19 November 2026). */
+export type Message = { id: string; authorId: string; body: string; at: string; attachments?: Attachment[]; editedAt?: string; deleted?: boolean }
 export type History = { id: string; at: string; actorId: string; actorRole: string; action: string; reason: string; update: string; public: boolean; stage: Stage }
 /** The student's agreement to send a concern, stamped by the server with the exact wording they were shown. */
 export type ReportConsent = { readStatement: true; at: string; userId: string; version: string; wording: string }
@@ -30,7 +31,8 @@ export type Talk = { mode: TalkMode; consents: TalkConsent[]; slotId?: string; c
  * and there is no consent or talk mode. Stored reports without `source` are students' concerns.
  * `routing` is the escalation engine's record of why the concern went where it did. Handlers see it; the student does not.
  */
-export type Report = { routing?: Decision['trace']; id: string; ownerId: string; program: string; adviserId?: string; stage: Stage; status: string; narrative: string; category: string; subcategory?: string; categoryDetail?: string; severity: 'low' | 'medium' | 'high'; identity: 'named' | 'anonymous'; alias: string; disclosedTo: string[]; involvedUserIds: string[]; bypassed: boolean; aboutAdvisor: boolean; allowChair?: boolean; allowDean?: boolean; confidential?: boolean; consent?: ReportConsent; source?: 'student' | 'faculty'; reportedStudentId?: string; talk?: Talk; createdAt: string; updatedAt: string; caseFileId?: string; sourcePostId?: string; location?: string; occurredOn?: string; history: History[]; notes: Message[]; messages: Message[] }
+/** `readAt`: when an office handling the report first opened it (the "Read" step the student sees). */
+export type Report = { routing?: Decision['trace']; readAt?: string; id: string; ownerId: string; program: string; adviserId?: string; stage: Stage; status: string; narrative: string; category: string; subcategory?: string; categoryDetail?: string; severity: 'low' | 'medium' | 'high'; identity: 'named' | 'anonymous'; alias: string; disclosedTo: string[]; involvedUserIds: string[]; bypassed: boolean; aboutAdvisor: boolean; allowChair?: boolean; allowDean?: boolean; confidential?: boolean; consent?: ReportConsent; source?: 'student' | 'faculty'; reportedStudentId?: string; talk?: Talk; createdAt: string; updatedAt: string; caseFileId?: string; sourcePostId?: string; location?: string; occurredOn?: string; history: History[]; notes: Message[]; messages: Message[] }
 export type Post = {
   id: string
   authorId: string

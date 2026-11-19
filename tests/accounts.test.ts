@@ -344,7 +344,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       const secretary = await secretarySession(app)
       const [csProf, itProf] = await createFaculty(secretary, [faculty(1, 'BSCS'), faculty(2, 'BSIT')])
       await secretary.put('/api/accounts/advisors/2').send({ facultyIds: [csProf!.account.id] })
-      await secretary.put('/api/accounts/advisors/4').send({ facultyIds: [csProf!.account.id, itProf!.account.id] })
+      await secretary.put('/api/accounts/advisors/4').send({ facultyIds: [csProf!.account.id] })
       const all = (await secretary.get('/api/accounts/faculty')).body.faculty as { id: string; program: string; advisorYears: number[]; chairProgram: string | null }[]
       expect(all.map((row) => row.id)).toEqual(expect.arrayContaining(['QCU-PROF-IT', 'QCU-PROF-OTHER', 'QCU-PROF-CS', 'QCU-CHAIR-IT', csProf!.account.id]))
       expect(all.find((row) => row.id === csProf!.account.id)).toMatchObject({ advisorYears: [2, 4], chairProgram: null })
@@ -448,14 +448,23 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       return { ...context, secretary, it: it!.account.id, cs: cs!.account.id }
     }
 
-    it('resolves the adviser of a student from the year, preferring their program, then the first assigned', async () => {
-      const { secretary, it, cs } = await ready()
-      // The BSCS adviser is listed first, so the first-assigned fallback is observable.
-      const set = await secretary.put('/api/accounts/advisors/3').send({ facultyIds: [cs, it] })
-      expect([set.status, set.body.record]).toEqual([200, { yearLevel: 3, facultyIds: [cs, it], studentsUpdated: 0 }])
+    it("gives every student of a year level that year's one adviser, whatever their program", async () => {
+      const { secretary, cs } = await ready()
+      const set = await secretary.put('/api/accounts/advisors/3').send({ facultyIds: [cs] })
+      expect([set.status, set.body.record]).toEqual([200, { yearLevel: 3, facultyIds: [cs], studentsUpdated: 0 }])
       const results = await importStudents(secretary, [student(1), student(2, { program: 'BSCS' }), student(3, { program: 'BSIS' }), student(4, { year: 1 })])
-      const advisers = results.map((row) => row.account.adviserId)
-      expect(advisers).toEqual([it, cs, cs, undefined])
+      expect(results.map((row) => row.account.adviserId)).toEqual([cs, cs, cs, undefined])
+    })
+
+    it('takes one adviser per year level (QA 17 November: the secretary could tick several)', async () => {
+      const { secretary, it, cs } = await ready()
+      const two = await secretary.put('/api/accounts/advisors/3').send({ facultyIds: [it, cs] })
+      expect([two.status, two.body.code, JSON.stringify(two.body)]).toEqual([400, 'VALIDATION_ERROR', expect.stringContaining('Choose one adviser for each year level.')])
+      expect((await secretary.get('/api/accounts/advisors')).body.advisors.find((row: { yearLevel: number }) => row.yearLevel === 3).faculty).toEqual([])
+      // The setup in use today: one adviser for 1st and 2nd year, another for 3rd and 4th.
+      for (const [year, id] of [[1, it], [2, it], [3, cs], [4, cs]] as const) expect((await secretary.put(`/api/accounts/advisors/${year}`).send({ facultyIds: [id] })).status).toBe(200)
+      const listing = (await secretary.get('/api/accounts/advisors')).body.advisors as { yearLevel: number; faculty: { id: string }[] }[]
+      expect(listing.map((row) => [row.yearLevel, row.faculty.map((f) => f.id)])).toEqual([[1, [it]], [2, [it]], [3, [cs]], [4, [cs]]])
     })
 
     it('recomputes when the assignments change, and lets one person advise several years', async () => {
@@ -463,11 +472,11 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       const [a, b, c, d] = (await importStudents(secretary, [student(1), student(2, { program: 'BSCS' }), student(3, { year: 1 }), student(4, { year: 3 })])).map((row) => row.account.id) as [string, string, string, string]
       const adviser = async () => { const found = await studentsById(secretary, 'Number'); return [a, b, c, d].map((id) => found.get(id)?.adviserId) }
       expect(await adviser()).toEqual([undefined, undefined, undefined, undefined])
-      expect((await secretary.put('/api/accounts/advisors/3').send({ facultyIds: [it, cs] })).body.record.studentsUpdated).toBe(3)
-      expect(await adviser()).toEqual([it, cs, undefined, it])
-      // One person for two years; the BSCS student's year-3 choice falls back to the only one assigned.
+      expect((await secretary.put('/api/accounts/advisors/3').send({ facultyIds: [cs] })).body.record.studentsUpdated).toBe(3)
+      expect(await adviser()).toEqual([cs, cs, undefined, cs])
+      // One person for two years.
       expect((await secretary.put('/api/accounts/advisors/1').send({ facultyIds: [it] })).body.record.studentsUpdated).toBe(1)
-      await secretary.put('/api/accounts/advisors/3').send({ facultyIds: [it] })
+      expect((await secretary.put('/api/accounts/advisors/3').send({ facultyIds: [it] })).body.record.studentsUpdated).toBe(3)
       expect(await adviser()).toEqual([it, it, it, it])
       // Clearing a year takes the adviser away.
       expect((await secretary.put('/api/accounts/advisors/1').send({ facultyIds: [] })).status).toBe(200)
@@ -508,7 +517,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
     it('counts advisers in the account types', async () => {
       const { secretary, it, cs } = await ready()
       await secretary.put('/api/accounts/advisors/1').send({ facultyIds: [it] })
-      await secretary.put('/api/accounts/advisors/2').send({ facultyIds: [it, cs] })
+      await secretary.put('/api/accounts/advisors/2').send({ facultyIds: [cs] })
       const types = (await secretary.get('/api/accounts/types')).body.types as { type: string; active: number; inactive: number; canManage: boolean }[]
       expect(types.find((row) => row.type === 'advisor')).toMatchObject({ active: 2, inactive: 0, canManage: true })
       expect(types.find((row) => row.type === 'secretary')).toMatchObject({ active: 2, inactive: 0, canManage: false })  // the activated placeholder and the roster secretary

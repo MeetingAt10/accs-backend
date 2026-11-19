@@ -211,10 +211,11 @@ describe('accounts across a restart', () => {
   it('keeps P46/P47 role grants after a restart', async () => {
     const { instance } = stack()
     const { agent: admin } = await signIn(instance(), 'ACCS-ADMIN')
-    const granted = await admin.post('/api/pages/P47/actions').send({ action: 'updateRoles', recordId: 'QCU-ORG', reason: 'New duties', payload: { roles: ['organization', 'guidance'] } })
+    // A faculty member takes on a second duty (at most two roles; an organization account keeps one, decided 19 November 2026).
+    const granted = await admin.post('/api/pages/P47/actions').send({ action: 'updateRoles', recordId: 'QCU-PROF-OTHER', reason: 'New duties', payload: { roles: ['professor', 'guidance'] } })
     expect(granted.status, JSON.stringify(granted.body)).toBe(200)
-    const { agent: restarted } = await signIn(instance(), 'QCU-ORG')
-    expect((await restarted.get('/api/session')).body.user.roles).toEqual(['organization', 'guidance'])
+    const { agent: restarted } = await signIn(instance(), 'QCU-PROF-OTHER')
+    expect((await restarted.get('/api/session')).body.user.roles).toEqual(['professor', 'guidance'])
   })
 })
 

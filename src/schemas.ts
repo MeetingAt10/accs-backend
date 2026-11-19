@@ -54,7 +54,7 @@ export const studentRowSchema = z.object({
   studentId: z.string({ error: 'Enter the student ID.' }).trim().regex(/^[A-Za-z0-9][A-Za-z0-9-]{2,39}$/, 'Use letters, numbers, and dashes, like 24-1234.'),
   program: accountProgram,
   year: z.coerce.number({ error: 'Choose a year level from 1 to 4.' }).int('Choose a year level from 1 to 4.').min(1, 'Choose a year level from 1 to 4.').max(4, 'Choose a year level from 1 to 4.'),
-  section: z.string({ error: 'Enter the section.' }).trim().toUpperCase().regex(/^[A-Z0-9]{1,10}$/, 'Use the section letter, like A.'),
+  section: z.string({ error: 'Enter the section.' }).trim().toUpperCase().regex(/^[A-Z]{1,3}$/, 'Use the section letter, like A.'),
   // SB, BAT or SF (src/sections.ts). Left out, the student is at San Bartolome, so the current import screen keeps working.
   campus: z.string().trim().toUpperCase().pipe(z.enum(campusCodes, { error: 'Choose SB (San Bartolome), BAT (Batasan) or SF (San Francisco).' })).default(mainCampus),
 }).superRefine((row, ctx) => {
@@ -71,7 +71,8 @@ export const activateSecretarySchema = z.object({ name: fullName.optional(), ema
 /** The real Dean's name and email; both are required, so the account stops being a sample one. */
 export const setupDeanSchema = z.object({ name: fullName, email: accountEmail }).strict()
 export const yearLevelParamsSchema = z.object({ yearLevel: z.coerce.number().int().min(1).max(4) }).strict()
-export const setAdvisorsSchema = z.object({ facultyIds: z.array(z.string().trim().min(1).max(64)).max(50) }).strict()
+/** One adviser per year level (decided 19 November 2026); one person may advise several year levels. An empty list clears the year. */
+export const setAdvisorsSchema = z.object({ facultyIds: z.array(z.string().trim().min(1).max(64)).max(1, 'Choose one adviser for each year level.') }).strict()
 export const programParamsSchema = z.object({ program: z.enum(programs) }).strict()
 export const setChairSchema = z.object({ facultyId: z.string().trim().min(1).max(64) }).strict()
 export const accountsQuerySchema = z.object({ role: roleSchema.optional(), q: z.string().max(200).optional() }).strict()
@@ -226,6 +227,8 @@ export const actionPayloads = {
   sendMessage: messageContent.strict().refine(hasMessageContent, noMessageContent),
   createGroupThread: messageContent.extend({ title: z.string().trim().min(1, 'Name the group.').max(80, 'Use at most 80 characters.'), memberIds: z.array(z.string().min(1)).min(2, 'Add at least two people.').max(49, 'A group can have at most 50 people.') }).strict().refine(hasMessageContent, noMessageContent),
   muteThread: z.object({ muted: z.boolean() }).strict(),
+  editMessage: z.object({ messageId: z.string().min(1).max(100), body: z.string().trim().min(1, 'Write the message.').max(4000) }).strict(),
+  deleteMessage: z.object({ messageId: z.string().min(1).max(100) }).strict(),
   markThreadRead: z.object({}).strict(),
   markNotification: z.object({ read: z.boolean().default(true) }).strict(),
   markAllNotifications: z.object({}).strict(),
@@ -253,6 +256,6 @@ export const actionPayloads = {
   saveNotificationPreferences: z.object({ priorities: z.record(z.string(), z.enum(['high', 'normal', 'muted'])) }).strict(),
   updateRoles: z.object({ roles: z.array(roleSchema).min(1), program: z.enum(programs).optional(), section: z.string().max(50).optional(), active: z.boolean().optional() }).strict(),
   updatePermission: z.object({ role: roleSchema, permission: z.string().min(1), allowed: z.boolean() }).strict(),
-  moderate: z.object({ decision: z.enum(['keep', 'remove', 'warn', 'refer']), notifyAuthor: z.boolean().default(true) }).strict(),
+  moderate: z.object({ decision: z.enum(['keep', 'remove', 'warn', 'refer', 'dismiss', 'osas']), notifyAuthor: z.boolean().default(true) }).strict(),
 } satisfies Record<string, z.ZodType>
 export type ActionName = keyof typeof actionPayloads
