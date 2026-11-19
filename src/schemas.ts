@@ -67,6 +67,13 @@ export const studentRowSchema = z.object({
   const problem = campusYearProblem(row.campus, row.year)
   if (problem) ctx.addIssue({ code: 'custom', path: ['campus'], message: problem })
 })
+/** A new organization and its account (decided 19 November 2026): the Secretary or the Dean creates both, and names a student as its President. */
+export const createOrganizationSchema = z.object({
+  name: z.string({ error: 'Enter the organization name.' }).trim().min(2, 'Enter the organization name.').max(100, 'Use at most 100 characters.'),
+  description: z.string().trim().max(500, 'Use at most 500 characters.').default(''),
+  email: accountEmail,
+  presidentId: z.string({ error: 'Choose the President.' }).trim().min(1, 'Choose the President.'),
+}).strict()
 export const createFacultySchema = z.object({ faculty: z.array(z.unknown()).min(1).max(batchLimit).optional() }).catchall(z.unknown())
 export const importStudentsSchema = z.object({ students: z.array(z.unknown()).min(1).max(batchLimit) }).strict()
 export const accountIdParamsSchema = z.object({ id: z.string().trim().min(1).max(64) }).strict()
@@ -261,6 +268,10 @@ export const actionPayloads = {
   saveProfile: z.object({ title: z.string().trim().max(100), bio: z.string().trim().max(1000), education: z.string().trim().max(500), officeHours: z.string().trim().max(200) }).strict().refine((p) => Object.values(p).some(Boolean), { message: 'Fill in at least one field.', path: ['title'] }),
   saveSettings: z.object({ theme: z.enum(['system', 'light', 'dark']), density: z.enum(['comfortable', 'compact']) }).strict(),
   saveNotificationPreferences: z.object({ priorities: z.record(z.string(), z.enum(['high', 'normal', 'muted'])) }).strict(),
+  // A position is the member's title in the organization, like VP for Information; empty clears it (19 November 2026).
+  addOrganizationMember: z.object({ studentId: z.string().min(1), position: z.string().trim().max(60, 'Use at most 60 characters.').optional() }).strict(),
+  removeOrganizationMember: z.object({ studentId: z.string().min(1) }).strict(),
+  setMemberPosition: z.object({ memberId: z.string().min(1), position: z.string().trim().max(60, 'Use at most 60 characters.') }).strict(),
   updateRoles: z.object({ roles: z.array(roleSchema).min(1), program: z.enum(programs).optional(), section: z.string().max(50).optional(), active: z.boolean().optional() }).strict(),
   updatePermission: z.object({ role: roleSchema, permission: z.string().min(1), allowed: z.boolean() }).strict(),
   moderate: z.object({ decision: z.enum(['keep', 'remove', 'warn', 'refer', 'dismiss', 'osas']), notifyAuthor: z.boolean().default(true) }).strict(),

@@ -1,6 +1,6 @@
 import { randomInt } from 'node:crypto'
 import express, { type Request, type Response } from 'express'
-import type { ZodError, ZodType } from 'zod'
+import { ZodError, type ZodType } from 'zod'
 
 import { hasPermission } from './access.js'
 import { hashPassword, passwordProblem, type AuthData, type AuthStore } from './auth.js'
@@ -10,7 +10,7 @@ import { ulid } from './ids.js'
 import { renameAccountIds, renamedAccountIds } from './renames.js'
 import {
   accountIdParamsSchema, accountListResponseSchema, accountsQuerySchema, accountTypesResponseSchema, actionResponseSchema, activateSecretarySchema, setupDeanSchema,
-  advisorsResponseSchema, createFacultySchema, facultyListResponseSchema, facultyQuerySchema, facultyRowSchema, importStudentsSchema, programParamsSchema,
+  advisorsResponseSchema, createFacultySchema, createOrganizationSchema, facultyListResponseSchema, facultyQuerySchema, facultyRowSchema, importStudentsSchema, programParamsSchema,
   roles, setActiveSchema, setAdvisorsSchema, setChairSchema, studentRowSchema, yearLevelParamsSchema, type Role, type User,
 } from './schemas.js'
 import { ApiError, deny, unavailable, type AccountChange, type ProfileChange } from './services.js'
@@ -435,6 +435,47 @@ export function accountRouter({ repository, authStore, sessions, mailer }: Accou
   router.post('/students', async (req, res) => {
     need(actor(res), 'account.provision')
     await create(req, res, 'student', importStudentsSchema.parse(req.body).students)
+  })
+
+  /**
+   * Creates an organization and the account that runs it (decided 19 November 2026). The account signs in with temporary
+   * details like any new account; the chosen student joins as the organization's President.
+   */
+  router.post('/organizations', async (req, res) => {
+    const user = actor(res)
+    need(user, 'organization.create')
+    const body = createOrganizationSchema.parse(req.body ?? {})
+    const fieldProblem = (path: string, message: string) => new ZodError([{ code: 'custom', path: [path], message, input: undefined }])
+    const { all, organizations } = await repository.view((unit) => ({ all: unit.read().users, organizations: unit.read().organizations }), ['organizations'])
+    const president = all.find((account) => account.id === body.presidentId && account.active && account.roles.includes('student'))
+    if (!president) throw fieldProblem('presidentId', 'Choose an active student as the President.')
+    if (organizations.some((organization) => organization.name.toLowerCase() === body.name.toLowerCase())) throw fieldProblem('name', 'An organization with this name already exists.')
+    const password = temporaryPassword()
+    const hash = hashPassword(password)
+    let account: User | undefined
+    let username = ''
+    await authStore.update((data) => {
+      account = undefined
+      const taken = takenBy(merged(all, data).values())
+      if (taken.has(body.email)) return
+      username = temporaryUsername(body.name, taken)
+      account = newUser(`USR-${ulid()}`, body.name, ['organization'], { email: body.email, active: true, username, mustChangeCredentials: true })
+      data.users.push(account)
+      data.credentials[account.id] = hash
+    })
+    if (!account) throw fieldProblem('email', 'An account with this email already exists.')
+    const created = account
+    const organization = { id: `ORG-${ulid()}`, name: body.name, description: body.description, representativeId: created.id, memberIds: [president.id], positions: { [president.id]: 'President' } }
+    await repository.transact((unit) => {
+      unit.read().organizations.push(organization)
+    }, ['organizations'])
+    await audit(user, [{ action: 'Organization account created', reference: created.id }, { action: 'Organization created', reference: organization.id }])
+    const url = signInUrl(req)
+    const { sent } = await sendInvite({ accountId: created.id, to: created.email, name: created.name, signInUrl: url, username, temporaryPassword: password }, mailer)
+    done(res, 'Organization created. Give the organization its sign-in details; they are not shown again.', {
+      organization: { id: organization.id, name: organization.name, president: { id: president.id, name: president.name } },
+      account: summary(created), credentials: { username, temporaryPassword: password }, invite: { sent, signInUrl: url },
+    })
   })
 
   router.get('/advisors', async (_req, res) => {
