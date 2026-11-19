@@ -55,13 +55,21 @@ describe('moderation referrals go to the CCS Secretary (D-04)', () => {
     expect((await moderate(admin, 'MOD-0101', 'refer')).status).toBe(409)
     expect((await moderate(secretary, 'MOD-0101', 'refer')).status).toBe(409)
 
-    const decided = await moderate(secretary, 'MOD-0101', 'remove')
+    // The secretary dismisses the flag or sends it to OSAS (decided 19 November 2026); OSAS then decides it.
+    expect((await moderate(secretary, 'MOD-0101', 'remove')).status).toBe(409)
+    const sent = await moderate(secretary, 'MOD-0101', 'osas')
+    expect(sent.status).toBe(200)
+    expect(sent.body.record.status).toBe('Sent to OSAS')
+    const osas = await login('QCU-OSAS')
+    expect((await osas.get('/api/pages/P50?id=MOD-0101')).body.data.decisions).toEqual(['keep', 'remove', 'warn'])
+    const decided = await moderate(osas, 'MOD-0101', 'remove')
     expect(decided.status).toBe(200)
     expect(decided.body.record.status).toBe('Removed')
-    expect(decided.body.record.history.map((h: { actorId: string; decision: string }) => [h.actorId, h.decision])).toEqual([['ACCS-ADMIN', 'refer'], ['QCU-SECRETARY', 'remove']])
+    expect(decided.body.record.history.map((h: { actorId: string; decision: string }) => [h.actorId, h.decision])).toEqual([['ACCS-ADMIN', 'refer'], ['QCU-SECRETARY', 'osas'], ['QCU-OSAS', 'remove']])
     const post = repo.read().posts.find((p) => p.id === item('MOD-0101').parentId)!
     expect(post.comments.find((c) => c.id === item('MOD-0101').itemId)!.body).toBe('This content was removed after review.')
-    expect((await moderate(secretary, 'MOD-0101', 'keep')).status).toBe(409)
+    expect((await moderate(osas, 'MOD-0101', 'keep')).status).toBe(409)
+    expect((await moderate(secretary, 'MOD-0101', 'dismiss')).status).toBe(409)
   })
 
   it('shows the secretary only referred items, before and after deciding them', async () => {
@@ -76,8 +84,11 @@ describe('moderation referrals go to the CCS Secretary (D-04)', () => {
     expect((await secretary.get('/api/pages/P50?id=MOD-0101')).status).toBe(200)
     expect((await secretary.get('/api/pages/P50?id=MOD-0102')).status).toBe(404)
 
-    expect((await moderate(secretary, 'MOD-0101', 'keep')).status).toBe(200)
-    expect((await secretary.get('/api/pages/P49')).body.data.moderation.map((m: { id: string; status: string }) => [m.id, m.status])).toEqual([['MOD-0101', 'Kept']])
+    expect((await secretary.get('/api/pages/P50?id=MOD-0101')).body.data.decisions).toEqual(['dismiss', 'osas'])
+    expect((await moderate(secretary, 'MOD-0101', 'dismiss')).status).toBe(200)
+    expect((await secretary.get('/api/pages/P49')).body.data.moderation.map((m: { id: string; status: string }) => [m.id, m.status])).toEqual([['MOD-0101', 'Dismissed']])
+    // OSAS sees only what was sent to it.
+    expect((await (await login('QCU-OSAS')).get('/api/pages/P49')).body.data.moderation).toEqual([])
     // The moderator still sees everything.
     expect((await admin.get('/api/pages/P49')).body.data.moderation).toHaveLength(3)
   })
@@ -123,5 +134,24 @@ describe('telling the author what was decided (QA 17 November)', () => {
     const admin = await login('ACCS-ADMIN')
     expect((await decide(admin, 'remove')).status).toBe(200)
     expect(lastNotice()).toMatchObject({ kind: 'moderation', pageId: 'P40', body: expect.stringMatching(/removed your .*Reason: Breaks the posting rules/) })
+  })
+})
+
+describe('the secretary sends a referred flag to OSAS (decided 19 November 2026)', () => {
+  it('keeps the content hidden, tells the OSAS officers, and leaves the moderator out', async () => {
+    const secretary = await secretarySession(app)
+    const admin = await login('ACCS-ADMIN')
+    expect((await moderate(admin, 'MOD-0101', 'refer')).status).toBe(200)
+    const before = repo.read().notifications.length
+    expect((await moderate(secretary, 'MOD-0101', 'osas')).status).toBe(200)
+    expect(repo.read().notifications.slice(before).filter((n) => n.recipientId === 'QCU-OSAS')).toEqual([expect.objectContaining({ kind: 'moderation', pageId: 'P50', recordId: 'MOD-0101' })])
+    expect((await moderate(admin, 'MOD-0101', 'keep')).status).toBe(409)
+    expect((await (await login('QCU-OSAS')).get('/api/pages/P49')).body.data.moderation.map((m: { id: string }) => m.id)).toEqual(['MOD-0101'])
+  })
+
+  it('does not let a moderator dismiss or send to OSAS directly', async () => {
+    const admin = await login('ACCS-ADMIN')
+    for (const decision of ['dismiss', 'osas']) expect((await moderate(admin, 'MOD-0102', decision)).status).toBe(409)
+    expect((await admin.get('/api/pages/P50?id=MOD-0102')).body.data.decisions).toEqual(['keep', 'remove', 'warn', 'refer'])
   })
 })
