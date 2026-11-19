@@ -395,3 +395,38 @@ describe('analytics by severity (QA 19 November)', () => {
     expect(data.cases.every((entry: { severity?: string }) => ['high', 'medium', 'low', undefined].includes(entry.severity))).toBe(true)
   })
 })
+
+describe('professors in order of availability (QA 19 November)', () => {
+  it('lists the professor with the soonest upcoming open time first; past open times do not count', async () => {
+    const student = await login('QCU-STU-IT-A')
+    const listed = async () => (await student.get('/api/pages/P14')).body.data.faculty as { id: string; nextSlot?: { date: string } }[]
+    const ids = (await listed()).map((f) => f.id)
+    expect(ids.length).toBeGreaterThanOrEqual(2)
+    const [first, second] = ids.slice(-2) as [string, string]
+    const day = (offset: number) => new Date(Date.now() + 8 * 3_600_000 + offset * 86_400_000).toISOString().slice(0, 10)
+    const db = repo.read()
+    db.slots = db.slots.filter((s) => !ids.includes(s.facultyId))
+    const slot = (id: string, facultyId: string, date: string) => ({ ...structuredClone(repo.read().slots[0] ?? {}), id, facultyId, date, start: '09:00', end: '09:30', state: 'open' }) as (typeof db.slots)[number]
+    db.slots.push(slot('SLOT-QA-1', first, day(5)), slot('SLOT-QA-2', second, day(1)))
+    expect((await listed()).slice(0, 2).map((f) => f.id)).toEqual([second, first])
+    // Only a past open time left for the second professor: no next time, and they move after the first.
+    const now = repo.read()
+    now.slots = now.slots.filter((s) => s.id !== 'SLOT-QA-2')
+    now.slots.push(slot('SLOT-QA-3', second, day(-3)))
+    const order = await listed()
+    expect(order.find((f) => f.id === second)!.nextSlot).toBeUndefined()
+    expect(order.map((f) => f.id).indexOf(first)).toBeLessThan(order.map((f) => f.id).indexOf(second))
+  })
+})
+
+describe('Find faculty lists professors only (QA 19 November)', () => {
+  it('leaves out a student account even when it was given the professor role', async () => {
+    const db = repo.read()
+    // A classmate (students may message classmates) who was given the professor role during testing.
+    const classmate = db.users.find((u) => u.id === 'QCU-STU-RESTRICTED')!
+    classmate.roles = ['student', 'professor']
+    const faculty = (await (await login('QCU-STU-IT-A')).get('/api/pages/P14')).body.data.faculty as { id: string }[]
+    expect(faculty.map((f) => f.id)).not.toContain('QCU-STU-RESTRICTED')
+    expect(faculty.length).toBeGreaterThan(0)
+  })
+})
