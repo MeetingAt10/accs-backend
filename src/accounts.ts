@@ -126,7 +126,10 @@ export function applyAccounts(db: Database, accounts: User[]) {
     // A role that no longer exists (the President's Office, removed on 2026-11-10) is dropped; an account left with no
     // role cannot sign in.
     const knownRoles = stored.roles.filter((role) => (roles as readonly string[]).includes(role))
-    const account = knownRoles.length === stored.roles.length ? stored : { ...stored, roles: knownRoles, active: stored.active && knownRoles.length > 0 }
+    let account = knownRoles.length === stored.roles.length ? stored : { ...stored, roles: knownRoles, active: stored.active && knownRoles.length > 0 }
+    // Student IDs are 00-0000 (19 November 2026): a stored QCU-2024-0101 reads as 24-0101.
+    const oldId = account.studentId ? /^QCU-\d{2}(\d{2})-(\d{4})$/.exec(account.studentId) : null
+    if (oldId) account = { ...account, studentId: `${oldId[1]}-${oldId[2]}` }
     const position = index.get(account.id)
     if (position === undefined) index.set(account.id, db.users.push(structuredClone(account)) - 1)
     // Stored profile text wins; a stored account without any keeps what this instance has.

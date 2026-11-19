@@ -373,3 +373,25 @@ describe('organization members (QA 19 November)', () => {
     expect(members.find((m) => m.id === 'QCU-ORG')).toMatchObject({ organizationRole: 'Officer' })
   })
 })
+
+describe('student ID format (decided 19 November 2026)', () => {
+  it('takes 00-0000 with the enrollment year first, never a later year', async () => {
+    const { studentRowSchema } = await import('../src/schemas.js')
+    const row = (studentId: string) => studentRowSchema.safeParse({ name: 'Ana Reyes', email: 'ana@example.com', studentId, program: 'BSIT', year: 1, section: 'A' })
+    const thisYear = String(new Date(Date.now() + 8 * 3_600_000).getUTCFullYear() % 100).padStart(2, '0')
+    expect(row(`${thisYear}-0001`).success).toBe(true)
+    expect(row('23-1234').success).toBe(true)
+    for (const bad of ['2026-0001', '26-001', '260001', 'QCU-2024-0101', '26-00012']) expect(row(bad).success, bad).toBe(false)
+    expect(row('99-0001').success).toBe(false)
+  })
+})
+
+describe('analytics by severity (QA 19 November)', () => {
+  it('counts High, Medium and Low cases and gives each case its severity', async () => {
+    const data = (await (await login('QCU-FAC-PAULA-DELACRUZ')).get('/api/pages/P25')).body.data
+    expect(data.bySeverity.map((row: { severity: string }) => row.severity)).toEqual(['high', 'medium', 'low'])
+    const total = data.bySeverity.reduce((sum: number, row: { value: number }) => sum + row.value, 0)
+    expect(total).toBe(repo.read().reports.length)
+    expect(data.cases.every((entry: { severity?: string }) => ['high', 'medium', 'low', undefined].includes(entry.severity))).toBe(true)
+  })
+})

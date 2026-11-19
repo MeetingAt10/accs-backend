@@ -405,8 +405,10 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
         student(8, { program: 'ABC' }),
         student(9),
       ])
-      expect(results.map((row) => [row.index, row.status, row.code])).toEqual([[0, 'created', undefined], [1, 'error', 'DUPLICATE_EMAIL'], [2, 'error', 'DUPLICATE_ID'], [3, 'error', 'INVALID_ROW'], [4, 'error', 'DUPLICATE_EMAIL'], [5, 'error', 'DUPLICATE_ID'], [6, 'error', 'INVALID_ROW'], [7, 'error', 'INVALID_ROW'], [8, 'created', undefined]])
-      expect(results[2]!.error).toBe('An account with this student ID already exists.')
+      expect(results.map((row) => [row.index, row.status, row.code])).toEqual([[0, 'created', undefined], [1, 'error', 'DUPLICATE_EMAIL'], [2, 'error', 'INVALID_ROW'], [3, 'error', 'INVALID_ROW'], [4, 'error', 'DUPLICATE_EMAIL'], [5, 'error', 'DUPLICATE_ID'], [6, 'error', 'INVALID_ROW'], [7, 'error', 'INVALID_ROW'], [8, 'created', undefined]])
+      // Student IDs are 00-0000 (19 November 2026); a duplicate ID is still refused (row 5).
+      expect(results[2]).toMatchObject({ fields: [{ path: 'studentId', message: 'Use the format 00-0000, with the enrollment year first, like 26-0001.' }] })
+      expect(results[5]!.error).toBe('An account with this student ID already exists.')
       expect(results[3]).toMatchObject({ fields: [{ path: 'year', message: 'Choose a year level from 1 to 4.' }] })
       expect(results[6]).toMatchObject({ fields: [{ path: 'email', message: 'Enter a valid email address.' }] })
       // Sending the same list again changes nothing: every row is a duplicate.

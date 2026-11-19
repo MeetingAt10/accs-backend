@@ -127,3 +127,15 @@ describe('reports stored at the removed stage (issue #29)', () => {
     expect((await act(osas, 'RPT-0246', 'resolve')).status).toBe(200)
   })
 })
+
+describe('student IDs stored in the old format (19 November 2026)', () => {
+  it('reads QCU-2024-0101 as 24-0101 and leaves a new-format ID alone', () => {
+    const db = repo.read()
+    const base = db.users.find((u) => u.id === 'QCU-STU-IT-A')!
+    const old = { ...structuredClone(base), id: 'OLD-ID-STUDENT', email: 'old.id@example.com', studentId: 'QCU-2023-0456' }
+    const current = { ...structuredClone(base), id: 'NEW-ID-STUDENT', email: 'new.id@example.com', studentId: '25-0999' }
+    applyAccounts(db, [old, current])
+    expect(db.users.find((u) => u.id === 'OLD-ID-STUDENT')!.studentId).toBe('23-0456')
+    expect(db.users.find((u) => u.id === 'NEW-ID-STUDENT')!.studentId).toBe('25-0999')
+  })
+})

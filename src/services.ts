@@ -769,6 +769,12 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
           .map((report) => daysBetween(stageEnteredAt(report), new Date().toISOString()))
         return { label: offices[stage as Stage], value: median(waiting) ?? 0, count: waiting.length }
       })
+      // High, Medium, Low, shown red, yellow and green (QA 19 November). Counted like stages, not suppressed like categories.
+      data.bySeverity = (['high', 'medium', 'low'] as const).map((severity) => ({
+        severity,
+        label: severity.charAt(0).toUpperCase() + severity.slice(1),
+        value: records.filter((report) => (report.severity ?? 'medium') === severity).length,
+      }))
       data.byCategory = [...new Set(records.map((report) => report.category))].map((label) => {
         const count = records.filter((report) => report.category === label).length
         return { label, value: count >= 5 ? count : null, suppressed: count < 5 }
@@ -777,6 +783,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
         id: report.id,
         stage: report.stage,
         status: statusFor(report),
+        severity: report.severity,
         createdAt: report.createdAt,
       }))
       break
