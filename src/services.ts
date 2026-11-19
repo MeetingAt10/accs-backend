@@ -275,6 +275,19 @@ function organizationMember(db: Database, id: string, organizationRole: string) 
   const section = hasRole(u,'student') && u.program && u.year && u.section ? sectionName({ campus: u.campus ?? mainCampus, program: u.program, year: u.year, section: u.section }) : undefined
   return { id: u.id, name: u.name, organizationRole, ...(u.program ? { program: u.program } : {}), ...(section ? { section } : {}) }
 }
+/**
+ * A professor's soonest open time that has not started (QA 19 November: the first open slot found was used, often a past
+ * one, so the Appointments list was not in order of availability).
+ */
+/** Soonest open time first; no open time last. Not localeCompare on a "~" stand-in: it sorts "~" before digits. */
+function byNextOpen(a?: { date: string; start: string }, b?: { date: string; start: string }) {
+  if (!a || !b) return Number(!a) - Number(!b)
+  const x = `${a.date}${a.start}`, y = `${b.date}${b.start}`
+  return x < y ? -1 : x > y ? 1 : 0
+}
+function nextOpenSlot(db: Database, facultyId: string) {
+  return db.slots.filter(s => s.facultyId === facultyId && s.state === 'open' && !hasBegun(s.date, s.start)).sort((a, b) => `${a.date}${a.start}`.localeCompare(`${b.date}${b.start}`))[0]
+}
 function notify(repo:UnitOfWork,recipientId:string,kind:string,pageId:string,recordId?:string,options:{urgent?:boolean;body?:string;itemId?:string}={}) {
   const db = repo.read()
   const stored = db.settings[recipientId]?.priorities[kind]
@@ -702,7 +715,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
       break
     }
     case'P13':Object.assign(data,{events:visibleEvents(db,user).filter(e=>!hasRole(user,'organization')||!e.organizationId||e.organizationId===user.organizationId),slots:hasRole(user,'organization')?[]:visibleSlots(db,user),todos:db.todos.filter(t=>t.ownerId===user.id),consultations:visibleConsultations(db,user).map(c=>consultationView(db,c,user))});break
-    case'P14':Object.assign(data,{appointmentCategories:appointmentCategories.filter(c=>!c.system),consultations:visibleConsultations(db,user).map(c=>consultationView(db,c,user)),faculty:faculty.filter(u=>match(u.name)).map(u=>({...person(u),nextSlot:db.slots.find(s=>s.facultyId===u.id&&s.state==='open')}))});break
+    case'P14':Object.assign(data,{appointmentCategories:appointmentCategories.filter(c=>!c.system),consultations:visibleConsultations(db,user).map(c=>consultationView(db,c,user)),faculty:faculty.filter(u=>match(u.name)).map(u=>({...person(u),nextSlot:nextOpenSlot(db,u.id)})).sort((a,b)=>byNextOpen(a.nextSlot,b.nextSlot)||a.name.localeCompare(b.name))});break
     case'P15':{data.appointmentCategories=appointmentCategories.filter(c=>!c.system);const f=pick(faculty,query.id);if(f){data.record=person(f);data.slots=slotsFor(user,db.slots.filter(s=>s.facultyId===f.id))}break}
     case'P16':{const c=pick(visibleConsultations(db,user),query.id);if(c)data.record=consultationView(db,c,user);break}
     case'P17':data.slots=db.slots.filter(s=>s.facultyId===user.id);data.load=db.loadSchedules.filter(c=>c.facultyId===user.id);break
