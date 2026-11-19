@@ -331,3 +331,45 @@ describe('important announcements (decided 19 November 2026)', () => {
     expect(sent[0]).toMatchObject({ title: 'New college announcement', body: 'Important: Batch photo for release' })
   })
 })
+
+describe('faculty review, sections and comments (QA 19 November)', () => {
+  it('asks every active professor to review the questions when a cycle goes to review', async () => {
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
+    const created = await dean.post('/api/pages/P30/actions').send({ action: 'createCycle', payload: { title: 'Summer term', term: 'Summer', opens: new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10), closes: '2027-03-01' } })
+    const id = created.body.record.id as string
+    const cycle = repo.read().cycles.find((c) => c.id === id)!
+    cycle.instructions = 'Rate each statement.'
+    cycle.questions = [{ id: 'Q1', criterion: 'Clarity', text: 'Explains clearly.', type: 'rating', required: true }]
+    const before = repo.read().notifications.length
+    expect((await dean.post('/api/pages/P31/actions').send({ action: 'cycleAction', recordId: id, payload: { status: 'In review' } })).status).toBe(200)
+    const asked = new Set(repo.read().notifications.slice(before).filter((n) => n.kind === 'evaluation' && n.pageId === 'P32').map((n) => n.recipientId))
+    const professors = repo.read().users.filter((u) => u.active && u.roles.includes('professor')).map((u) => u.id)
+    expect([...asked].sort()).toEqual(professors.sort())
+    const reviews = (await dean.get(`/api/pages/P31?id=${id}`)).body.data.facultyReviews as { id: string }[]
+    expect(reviews.map((r) => r.id).sort()).toEqual(professors.sort())
+  })
+
+  it('lists only section groups as sections on Home, not subjects', async () => {
+    const sections = (await (await login('QCU-PROF-IT')).get('/api/pages/P03')).body.data.sections as { id: string; title: string }[]
+    expect(sections.map((s) => s.title)).not.toContain('Data Structures, SBIT3A')
+    expect(sections.map((s) => s.id)).toContain('SPACE-IT-A')
+  })
+
+  it('lets professors and Chairs comment on college posts', async () => {
+    for (const who of ['QCU-PROF-IT', 'QCU-CHAIR-CS']) {
+      const agent = await login(who)
+      const commented = await agent.post('/api/pages/P06/actions').send({ action: 'comment', recordId: 'POST-0101', payload: { body: `A note from ${who}.` } })
+      expect([who, commented.status, JSON.stringify(commented.body).slice(0, 160)]).toEqual([who, 200, expect.any(String)])
+    }
+  })
+})
+
+describe('organization members (QA 19 November)', () => {
+  it('shows each member with their id and section', async () => {
+    const members = (await (await login('QCU-STU-IT-A')).get('/api/pages/P10?id=ORG-COMPUTING')).body.data.record.members as { id: string; name: string; section?: string }[]
+    const student = members.find((m) => m.id === 'QCU-STU-IT-A')!
+    expect(student).toMatchObject({ organizationRole: 'Member', program: 'BSIT' })
+    expect(student.section).toMatch(/^SBIT3A$/)
+    expect(members.find((m) => m.id === 'QCU-ORG')).toMatchObject({ organizationRole: 'Officer' })
+  })
+})
