@@ -161,7 +161,8 @@ describe('the concern flow', () => {
         expect(repo.read().notifications.some((notice) => notice.recipientId === 'QCU-PROF-CS' && notice.recordId === filed.body.record.id)).toBe(false)
       }
       // The Program Chair reads each one: it handles every concern that goes around the adviser.
-      expect((await listed(await login('QCU-CHAIR-CS'))).length).toBe(1 + 3)
+      // Three seeded BSCS reports at the chair (RPT-0248, RPT-0249, RPT-0250) and the three filed here.
+      expect((await listed(await login('QCU-CHAIR-CS'))).length).toBe(3 + 3)
     })
 
     it('keeps the adviser out of later steps too', async () => {

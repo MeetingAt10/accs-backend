@@ -61,7 +61,7 @@ describe('P25 timing from report history', () => {
     const a = report('RPT-0241'); a.history.push(entry(a, '2026-11-04T02:00:00.000Z', 'Resolved'))
     const trend = (await analytics()).trend
     expect(trend).toEqual([
-      { label: '19 Oct', opened: 7, resolved: 0 },
+      { label: '19 Oct', opened: 9, resolved: 0 },
       { label: '26 Oct', opened: 0, resolved: 0 },
       { label: '2 Nov', opened: 1, resolved: 1 },
     ])
