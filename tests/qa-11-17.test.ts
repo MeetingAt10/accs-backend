@@ -315,3 +315,19 @@ describe('urgent announcements (QA 19 November)', () => {
     expect(repo.read().notifications.slice(before).filter((n) => n.kind === 'announcement')).toHaveLength(0)
   })
 })
+
+describe('important announcements (decided 19 November 2026)', () => {
+  it('reach everyone in the audience without Notify members, but respect a muted category', async () => {
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
+    repo.read().settings['QCU-STU-IT-B'] = { theme: 'system', density: 'comfortable', priorities: { announcement: 'muted' } }
+    const before = repo.read().notifications.length
+    const created = await dean.post('/api/pages/P05/actions').send({ action: 'createPost', payload: { title: 'Batch photo for release', body: 'Pick up your photos at the CCS office.', audience: 'college', kind: 'announcement', priority: 'important', notifyMembers: false } })
+    expect(created.status, JSON.stringify(created.body)).toBe(200)
+    const sent = repo.read().notifications.slice(before).filter((n) => n.kind === 'announcement')
+    const recipients = sent.map((n) => n.recipientId)
+    expect(recipients).toContain('QCU-STU-IT-A')
+    expect(recipients).not.toContain('QCU-STU-IT-B')
+    expect(recipients).not.toContain('QCU-FAC-PAULA-DELACRUZ')
+    expect(sent[0]).toMatchObject({ title: 'New college announcement', body: 'Important: Batch photo for release' })
+  })
+})

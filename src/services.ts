@@ -451,10 +451,11 @@ function notifyClassPost(repo: UnitOfWork, post: Post) {
   }
 }
 function notifyAnnouncementMembers(repo: UnitOfWork, post: Post) {
-  // An urgent announcement reaches everyone in its audience, whether or not "Notify members" was ticked, and past a muted
-  // category (QA 19 November). The open portal shows it within seconds.
+  // An urgent or important announcement reaches everyone in its audience, whether or not "Notify members" was ticked
+  // (decided 19 November 2026). Urgent also gets past a muted category; the open portal shows either within seconds.
   const urgent = post.priority === 'urgent'
-  if (post.kind !== 'announcement' || !post.notifyMembers && !urgent) return
+  const everyone = urgent || post.priority === 'important'
+  if (post.kind !== 'announcement' || !post.notifyMembers && !everyone) return
   const db = repo.read()
   const [kind, id] = post.audience.split(':')
   const space = db.spaces.find(item => item.id === id)
@@ -465,7 +466,7 @@ function notifyAnnouncementMembers(repo: UnitOfWork, post: Post) {
       || kind === 'space' && !!space && [...space.studentIds, ...space.professorIds].includes(recipient.id)
       || kind === 'organization' && isOrganizationMember(db, recipient, id!)
     if (member && canAudience(db, recipient, post.audience, post.private)) {
-      notify(repo, recipient.id, 'announcement', 'P06', post.id, urgent ? { urgent, body: `Urgent: ${post.title}` } : {})
+      notify(repo, recipient.id, 'announcement', 'P06', post.id, urgent ? { urgent, body: `Urgent: ${post.title}` } : everyone ? { body: `Important: ${post.title}` } : {})
     }
   }
 }

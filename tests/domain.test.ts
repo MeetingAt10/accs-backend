@@ -144,15 +144,15 @@ describe('community publication and roster contracts', () => {
       body: 'A private planning session for verified members.',
       audience: 'organization:ORG-COMPUTING',
       kind: 'announcement',
-      // Not urgent: an urgent announcement notifies its audience even when unticked (QA 19 November).
-      priority: 'important',
+      // General: urgent and important announcements notify their audience even when unticked (decided 19 November 2026).
+      priority: 'general',
       private: true,
       ...eventDetails,
     }
     const before = repo.read().notifications.length
     const quiet = await organization.post('/api/pages/P05/actions').send({ action: 'createPost', payload })
     expect(quiet.status).toBe(200)
-    expect(quiet.body.record.priority).toBe('important')
+    expect(quiet.body.record.priority).toBe('general')
     expect(repo.read().notifications).toHaveLength(before)
     const announced = await organization.post('/api/pages/P05/actions').send({
       action: 'createPost',
