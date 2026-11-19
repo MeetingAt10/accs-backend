@@ -186,10 +186,10 @@ export const seedRoster = env.SEED_ROSTER === 'true'
 const deanRosterId = 'QCU-FAC-PAULA-DELACRUZ'
 export function seed(includeRoster = seedRoster): Database {
   const users: User[] = [
-    user('QCU-STU-IT-A', 'Demo Student Foxtrot', ['student'], { campus: 'SB', program: 'BSIT', section: 'A', year: 3, studentId: 'QCU-2024-0101', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], organizationIds: ['ORG-COMPUTING'] }),
-    user('QCU-STU-IT-B', 'Demo Student Golf', ['student'], { campus: 'SB', program: 'BSIT', section: 'B', year: 3, studentId: 'QCU-2024-0102', adviserId: 'QCU-PROF-OTHER', spaceIds: ['SPACE-IT-B'] }),
-    user('QCU-STU-CS', 'Demo Student Hotel', ['student'], { campus: 'SB', program: 'BSCS', section: 'A', year: 2, studentId: 'QCU-2025-0201', adviserId: 'QCU-PROF-CS', spaceIds: ['SPACE-CS-A'] }),
-    user('QCU-STU-RESTRICTED', 'Demo Student India', ['student'], { campus: 'SB', program: 'BSIT', section: 'A', year: 3, studentId: 'QCU-2024-0103', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], restrictions: ['post.create', 'post.comment', 'report.anonymous'] }),
+    user('QCU-STU-IT-A', 'Demo Student Foxtrot', ['student'], { campus: 'SB', program: 'BSIT', section: 'A', year: 3, studentId: '24-0101', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], organizationIds: ['ORG-COMPUTING'] }),
+    user('QCU-STU-IT-B', 'Demo Student Golf', ['student'], { campus: 'SB', program: 'BSIT', section: 'B', year: 3, studentId: '24-0102', adviserId: 'QCU-PROF-OTHER', spaceIds: ['SPACE-IT-B'] }),
+    user('QCU-STU-CS', 'Demo Student Hotel', ['student'], { campus: 'SB', program: 'BSCS', section: 'A', year: 2, studentId: '25-0201', adviserId: 'QCU-PROF-CS', spaceIds: ['SPACE-CS-A'] }),
+    user('QCU-STU-RESTRICTED', 'Demo Student India', ['student'], { campus: 'SB', program: 'BSIT', section: 'A', year: 3, studentId: '24-0103', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], restrictions: ['post.create', 'post.comment', 'report.anonymous'] }),
     user('QCU-ORG', 'Demo Organization Rep', ['organization'], { organizationId: 'ORG-COMPUTING', organizationIds: ['ORG-COMPUTING'], office: 'CCS Organizations', title: 'Organization representative' }),
     user('QCU-PROF-IT', 'Demo Professor Charlie', ['professor'], { program: 'BSIT', office: 'CCS Faculty Room', title: 'Faculty, BSIT adviser', bio: 'Teaches Data Structures and advises BSIT 3A.', officeHours: 'Thursdays, 10:00 AM to 12:00 PM, CCS Faculty Room', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'] }),
     user('QCU-PROF-OTHER', 'Demo Professor Delta', ['professor'], { program: 'BSIT', office: 'CCS Faculty Room', title: 'Faculty, BSIT', bio: 'Advises BSIT 3B.', officeHours: 'Thursdays, 9:00 AM to 11:00 AM, CCS Faculty Room', spaceIds: ['SPACE-IT-B'] }),
