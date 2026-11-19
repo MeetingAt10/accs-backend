@@ -262,3 +262,18 @@ describe('reviewed evaluation questions (QA 17 November)', () => {
     expect((await cycles()).find((c) => c.id === 'CYCLE-2026-2')).toMatchObject({ reviewed: true })
   })
 })
+
+describe('the assistant and Help (QA 17 November)', () => {
+  it('answers a greeting as a greeting', async () => {
+    const student = await login('QCU-STU-IT-A')
+    const answer = await student.post('/api/pages/P41/actions').send({ action: 'assistantAsk', payload: { question: 'hello' } })
+    expect(answer.body.record.reply).toMatch(/^Hello, /)
+  })
+
+  it('offers more than one suggestion, and Help search matches the question only', async () => {
+    const student = await login('QCU-STU-IT-A')
+    expect(((await student.get('/api/pages/P41')).body.data.suggestions as string[]).length).toBeGreaterThan(3)
+    const faq = (await student.get('/api/pages/P42').query({ q: 'roles' })).body.data.faq as { question: string }[]
+    expect(faq.map((f) => f.question)).toEqual(['How are roles assigned?'])
+  })
+})
