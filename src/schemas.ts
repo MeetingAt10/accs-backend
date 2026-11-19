@@ -253,7 +253,8 @@ export const actionPayloads = {
   referRestriction: z.object({ studentId: z.string(), change: z.enum(['Lift', 'Shorten', 'Extend', 'Review']), decisionReference: z.string().max(100).optional() }).strict(),
   // A profile photo (#85): a square JPEG, PNG or WebP the browser has already resized, sent as a data URL. null removes it.
   setProfilePhoto: z.object({ photo: z.string().max(110_000, 'Use a smaller image (at most 80 KB).').regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/, 'Use a JPEG, PNG or WebP image.').nullable() }).strict(),
-  saveProfile: z.object({ title: z.string().max(100), bio: z.string().max(1000), education: z.string().max(500), officeHours: z.string().max(200) }).strict(),
+  // At least one field: an all-blank profile was saved (QA 17 November).
+  saveProfile: z.object({ title: z.string().trim().max(100), bio: z.string().trim().max(1000), education: z.string().trim().max(500), officeHours: z.string().trim().max(200) }).strict().refine((p) => Object.values(p).some(Boolean), { message: 'Fill in at least one field.', path: ['title'] }),
   saveSettings: z.object({ theme: z.enum(['system', 'light', 'dark']), density: z.enum(['comfortable', 'compact']) }).strict(),
   saveNotificationPreferences: z.object({ priorities: z.record(z.string(), z.enum(['high', 'normal', 'muted'])) }).strict(),
   updateRoles: z.object({ roles: z.array(roleSchema).min(1), program: z.enum(programs).optional(), section: z.string().max(50).optional(), active: z.boolean().optional() }).strict(),

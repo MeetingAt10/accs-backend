@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { createApp } from '../src/app.js'
 import { createMemoryRepository } from '../src/store.js'
-import { seedPassword, setUpAuthStore } from './helpers.js'
+import { seedPassword, setUpAuthStore, reviewAll } from './helpers.js'
 
 let repo: ReturnType<typeof createMemoryRepository>
 let app: ReturnType<typeof createApp>
@@ -140,6 +140,7 @@ describe('case and evaluation updates are required', () => {
     repo.read().settings[member] = { theme: 'system', density: 'comfortable', priorities: { evaluation: 'muted' } }
     const dean = await login('QCU-FAC-PAULA-DELACRUZ')
     const before = noticesFor(member, 'evaluation').length
+    reviewAll(repo, 'CYCLE-2026-2')
     const published = await dean.post('/api/pages/P31/actions').send({ action: 'cycleAction', recordId: 'CYCLE-2026-2', payload: { status: 'Published' } })
     expect(published.status, JSON.stringify(published.body)).toBe(200)
     expect(noticesFor(member, 'evaluation')).toHaveLength(before + 1)

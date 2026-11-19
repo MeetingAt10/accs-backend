@@ -214,3 +214,51 @@ describe('moderation review context (QA 17 November)', () => {
     expect(messages.map((m) => [m.body, m.flagged])).toEqual([['Use this group for room changes and class reminders. Message me directly for anything personal.', false], ['First note', false], ['Second note', false], ['This is the flagged one', true], ['After it', false]])
   })
 })
+
+describe('evaluation review and cycle dates (QA 17 November)', () => {
+  const day = (offset: number) => new Date(Date.now() + 8 * 3_600_000 + offset * 86_400_000).toISOString().slice(0, 10)
+
+  it('waits for every faculty review before the Dean can publish (it could be published while still in review)', async () => {
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
+    const publish = () => dean.post('/api/pages/P31/actions').send({ action: 'cycleAction', recordId: 'CYCLE-2026-2', payload: { status: 'Published' } })
+    const early = await publish()
+    expect(early.status).toBe(409)
+    expect(early.body.error).toMatch(/not reviewed the questions yet/)
+    const { reviewAll } = await import('./helpers.js')
+    reviewAll(repo, 'CYCLE-2026-2')
+    expect((await publish()).status).toBe(200)
+  })
+
+  it('needs a comment when a professor asks for changes', async () => {
+    const prof = await login('QCU-PROF-IT')
+    const review = (payload: object) => prof.post('/api/pages/P32/actions').send({ action: 'reviewQuestions', recordId: 'CYCLE-2026-2', payload })
+    expect((await review({ decision: 'changes', note: '  ' })).status).toBe(400)
+    expect((await review({ decision: 'changes', note: 'Question 2 is unclear.' })).status).toBe(200)
+  })
+
+  it('refuses an opening date in the past', async () => {
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
+    const create = (opens: string) => dean.post('/api/pages/P30/actions').send({ action: 'createCycle', payload: { title: 'Summer', term: 'Summer', opens, closes: day(40) } })
+    expect((await create(day(-1))).status).toBe(400)
+    expect((await create(day(0))).status).toBe(200)
+  })
+})
+
+describe('saving a profile (QA 17 November: an all-blank profile was saved)', () => {
+  it('needs at least one field', async () => {
+    const prof = await login('QCU-PROF-IT')
+    const save = (payload: object) => prof.post('/api/pages/P39/actions').send({ action: 'saveProfile', payload: { title: '', bio: '', education: '', officeHours: '', ...payload } })
+    expect((await save({ title: '   ' })).status).toBe(400)
+    expect((await save({ bio: 'Teaches data structures.' })).status).toBe(200)
+  })
+})
+
+describe('reviewed evaluation questions (QA 17 November)', () => {
+  it('marks a cycle reviewed once the professor sends a review, so it can leave "to review"', async () => {
+    const prof = await login('QCU-PROF-IT')
+    const cycles = async () => (await prof.get('/api/pages/P26')).body.data.reviewCycles as { id: string; reviewed: boolean }[]
+    expect((await cycles()).find((c) => c.id === 'CYCLE-2026-2')).toMatchObject({ reviewed: false })
+    expect((await prof.post('/api/pages/P32/actions').send({ action: 'reviewQuestions', recordId: 'CYCLE-2026-2', payload: { decision: 'reviewed', note: '' } })).status).toBe(200)
+    expect((await cycles()).find((c) => c.id === 'CYCLE-2026-2')).toMatchObject({ reviewed: true })
+  })
+})

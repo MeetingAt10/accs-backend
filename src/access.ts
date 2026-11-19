@@ -38,6 +38,9 @@ export function canAudience(db: Database, user: User, audience: string, privateC
   return false
 }
 export function canPublish(db: Database, user: User, audience: string, announcement: boolean, operation: 'create' | 'comment' | 'react' = 'create') {
+  // Anyone who reads the post may react to it: the Dean, Chairs and professors could not react to college posts, because
+  // reacting followed the rules for starting a discussion there (QA 17 November). A restricted student still can't post.
+  if (operation === 'react') return hasPermission(user,'feed.read') && canAudience(db,user,audience,audience.startsWith('organization:'))
   const participant = operation === 'create' ? user : { ...user, restrictions: user.restrictions.filter(key => key !== 'post.create') }
   if (operation === 'comment' && user.restrictions.includes('post.comment')) return false
   if (!hasPermission(participant, announcement ? 'announcement.publish' : 'post.create') || !canAudience(db,user,audience,audience.startsWith('organization:'))) return false

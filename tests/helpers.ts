@@ -1,3 +1,4 @@
+import type { Database } from '../src/store.js'
 import request from 'supertest'
 import { expect } from 'vitest'
 
@@ -45,4 +46,12 @@ export async function secretarySession(app: App, username = 'ccs.secretary') {
   const set = await agent.post('/api/auth/complete-first-login').send({ currentPassword: credentials.temporaryPassword, username, password: secretaryPassword })
   expect(set.status).toBe(200)
   return agent
+}
+
+/** Every faculty member with assignments in the cycle has reviewed its questions, so it can be published (QA 17 November). */
+export function reviewAll(repo: { read(): Database }, cycleId: string) {
+  const db = repo.read()
+  const cycle = db.cycles.find((c) => c.id === cycleId)!
+  for (const facultyId of new Set(db.assignments.filter((a) => a.cycleId === cycleId).map((a) => a.facultyId)))
+    if (!cycle.reviews.some((r) => r.userId === facultyId)) cycle.reviews.push({ userId: facultyId, decision: 'reviewed', note: '', at: new Date().toISOString() })
 }
