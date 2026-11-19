@@ -42,8 +42,10 @@ export function canPublish(db: Database, user: User, audience: string, announcem
   // Anyone who reads the post may react to it: the Dean, Chairs and professors could not react to college posts, because
   // reacting followed the rules for starting a discussion there (QA 17 November). A restricted student still can't post.
   if (operation === 'react') return hasPermission(user,'feed.read') && canAudience(db,user,audience,audience.startsWith('organization:'))
+  // Anyone who may post and reads the post may comment on it: professors and Chairs could not comment on college posts,
+  // because commenting followed the rules for starting a discussion there (QA 19 November). Comment restrictions still apply.
+  if (operation === 'comment') return !user.restrictions.includes('post.comment') && hasPermission({ ...user, restrictions: user.restrictions.filter(key => key !== 'post.create') },'post.create') && canAudience(db,user,audience,audience.startsWith('organization:'))
   const participant = operation === 'create' ? user : { ...user, restrictions: user.restrictions.filter(key => key !== 'post.create') }
-  if (operation === 'comment' && user.restrictions.includes('post.comment')) return false
   if (!hasPermission(participant, announcement ? 'announcement.publish' : 'post.create') || !canAudience(db,user,audience,audience.startsWith('organization:'))) return false
   if (!announcement) {
     const space = db.spaces.find(s => audience === `space:${s.id}`)

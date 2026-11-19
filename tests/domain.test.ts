@@ -37,7 +37,8 @@ describe('schedule, messaging, evaluation, and assistant',()=>{
 })
 
 describe('privacy and policy regression checks',()=>{
- it('PRO-07-B limits question review to cycles evaluating that professor',async()=>{const prof=await login('QCU-PROF-IT');expect((await prof.get('/api/pages/P32?id=CYCLE-2026-2')).status).toBe(200);const unrelated=await login('QCU-PROF-CS');expect((await unrelated.get('/api/pages/P32?id=CYCLE-2026-2')).status).toBe(404);expect((await unrelated.post('/api/pages/P32/actions').send({action:'reviewQuestions',recordId:'CYCLE-2026-2',payload:{decision:'reviewed',note:''}})).status).toBe(404)})
+ // Changed 19 November 2026: every professor reviews the questions, not only those the cycle evaluates; other roles still cannot.
+ it('PRO-07-B lets every professor review the questions, and no one else',async()=>{const prof=await login('QCU-PROF-IT');expect((await prof.get('/api/pages/P32?id=CYCLE-2026-2')).status).toBe(200);const other=await login('QCU-PROF-CS');expect((await other.get('/api/pages/P32?id=CYCLE-2026-2')).status).toBe(200);expect((await other.post('/api/pages/P32/actions').send({action:'reviewQuestions',recordId:'CYCLE-2026-2',payload:{decision:'reviewed',note:''}})).status).toBe(200);const student=await login('QCU-STU-IT-A');expect((await student.post('/api/pages/P32/actions').send({action:'reviewQuestions',recordId:'CYCLE-2026-2',payload:{decision:'reviewed',note:''}})).status).toBe(403)})
  it('ADM-04-B returns moderation status without excerpts on the overview',async()=>{const admin=await login('ACCS-ADMIN');const overview=(await admin.get('/api/pages/P45')).body;expect(overview.data.moderation[0]).not.toHaveProperty('excerpt');expect(overview.data.moderation[0]).not.toHaveProperty('authorId');expect(JSON.stringify(overview)).not.toContain('A posted lab schedule would help us plan.')})
  it('ALL-02-B excludes institutional student identifiers from a public profile',async()=>{const student=await login('QCU-STU-IT-B');const profile=(await student.get('/api/pages/P38?id=QCU-STU-IT-A')).body.data.record;expect(profile).not.toHaveProperty('studentId');expect(JSON.stringify(profile)).not.toContain('QCU-2024-0101')})
  it('ALL-04-B does not answer schedule data or link a calendar for roles without access',async()=>{const admin=await login('ACCS-ADMIN');const result=await admin.post('/api/pages/P41/actions').send({action:'assistantAsk',payload:{question:'Show my schedule'}});expect(result.body.record.reply).toContain('cannot answer that one');expect(result.body.record.sources.some((s:{href:string})=>s.href==='/calendar')).toBe(false)})
@@ -264,7 +265,10 @@ describe('community publication and roster contracts', () => {
     const dean = await login('QCU-FAC-PAULA-DELACRUZ')
     expect((await dean.get('/api/pages/P08?id=SPACE-IT-A')).body.data.record).not.toHaveProperty('threadId')
     const organizationMembers = (await student.get('/api/pages/P10?id=ORG-COMPUTING')).body.data.record.members
-    expect(organizationMembers.every((member: object) => Object.keys(member).sort().join(',') === 'name,organizationRole')).toBe(true)
+    // Name, role in the organization, and (19 November 2026) the account id for the profile link, program and section.
+    // Never email or student number.
+    const allowed = ['id', 'name', 'organizationRole', 'program', 'section']
+    expect(organizationMembers.every((member: object) => Object.keys(member).every((key) => allowed.includes(key)))).toBe(true)
     expect(JSON.stringify(organizationMembers)).not.toContain('@qcu.edu.ph')
     expect(JSON.stringify(organizationMembers)).not.toContain('QCU-2024-0101')
   })
