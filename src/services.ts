@@ -770,7 +770,8 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
       }))
       break
     }
-    case'P26':Object.assign(data,{completion:hasRole(user,'student')?evaluationCycles(db).map(c=>evaluationCompletion(db,user.id,c)):undefined,assignments:db.assignments.filter(a=>a.evaluatorId===user.id&&(isStudentForm(a)||a.submittedAt)&&['Published','Closed'].includes(find(db.cycles,a.cycleId).status)).map(a=>assignmentView(db,a)),reviewCycles:hasRole(user,'professor')?db.cycles.filter(c=>c.status==='In review'&&db.assignments.some(a=>a.cycleId===c.id&&a.facultyId===user.id)):[],canConfigure:hasRole(user,'dean'),canViewResults:hasPermission(user,'evaluation.results')});break
+    case'P26':Object.assign(data,{completion:hasRole(user,'student')?evaluationCycles(db).map(c=>evaluationCompletion(db,user.id,c)):undefined,assignments:db.assignments.filter(a=>a.evaluatorId===user.id&&(isStudentForm(a)||a.submittedAt)&&['Published','Closed'].includes(find(db.cycles,a.cycleId).status)).map(a=>assignmentView(db,a)),// Cycles to review, and those this professor already reviewed (QA 17 November: reviewed ones stayed under "to review").
+      reviewCycles:hasRole(user,'professor')?db.cycles.filter(c=>db.assignments.some(a=>a.cycleId===c.id&&a.facultyId===user.id)&&(c.status==='In review'||c.reviews.some(r=>r.userId===user.id))).map(c=>({...c,reviews:undefined,reviewed:c.reviews.some(r=>r.userId===user.id)})):[],canConfigure:hasRole(user,'dean'),canViewResults:hasPermission(user,'evaluation.results')});break
     case'P27':{const a=pick(db.assignments.filter(a=>a.evaluatorId===user.id),query.id);if(a)data.record=assignmentView(db,a,true);break}
     case 'P28':
     case 'P29': {

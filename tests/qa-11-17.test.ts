@@ -252,3 +252,13 @@ describe('saving a profile (QA 17 November: an all-blank profile was saved)', ()
     expect((await save({ bio: 'Teaches data structures.' })).status).toBe(200)
   })
 })
+
+describe('reviewed evaluation questions (QA 17 November)', () => {
+  it('marks a cycle reviewed once the professor sends a review, so it can leave "to review"', async () => {
+    const prof = await login('QCU-PROF-IT')
+    const cycles = async () => (await prof.get('/api/pages/P26')).body.data.reviewCycles as { id: string; reviewed: boolean }[]
+    expect((await cycles()).find((c) => c.id === 'CYCLE-2026-2')).toMatchObject({ reviewed: false })
+    expect((await prof.post('/api/pages/P32/actions').send({ action: 'reviewQuestions', recordId: 'CYCLE-2026-2', payload: { decision: 'reviewed', note: '' } })).status).toBe(200)
+    expect((await cycles()).find((c) => c.id === 'CYCLE-2026-2')).toMatchObject({ reviewed: true })
+  })
+})
