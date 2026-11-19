@@ -78,7 +78,8 @@ export type Event = {
 }
 /** A section space carries its campus and year (#46); its title is the section name, like SBIT3A. Subject spaces may too. */
 export type Space = { id: string; title: string; program: string; section: string; campus?: string; year?: number; subject: string; professorIds: string[]; studentIds: string[] }
-export type Organization = { id: string; name: string; description: string; representativeId: string; memberIds: string[] }
+/** `positions` holds each member's title in the organization, like President or VP for Information, set by the organization account. */
+export type Organization = { id: string; name: string; description: string; representativeId: string; memberIds: string[]; positions?: Record<string, string> }
 export type Thread = {
   id: string
   title: string
@@ -137,7 +138,7 @@ export type Material = { id: string; spaceId: string; kind: 'link' | 'file'; tit
   fileName?: string; contentType?: string; size?: number; key?: string; status?: 'pending' | 'ready'
   /** Questions and replies from the subject's students and professors. */
   comments?: Message[] }
-export type Collection = 'reports' | 'consultations' | 'slots' | 'threads' | 'notifications' | 'audit' | 'posts' | 'moderation' | 'drafts' | 'events' | 'todos' | 'cycles' | 'assignments' | 'followUps' | 'restrictions' | 'referrals' | 'strikes' | 'strikeSettlements' | 'materials' | 'loadSchedules' | 'goodMoral' | 'clusters' | 'settings' | 'photos' | 'permissionOverrides' | 'telemetry'
+export type Collection = 'reports' | 'consultations' | 'slots' | 'threads' | 'notifications' | 'audit' | 'posts' | 'moderation' | 'drafts' | 'events' | 'todos' | 'cycles' | 'assignments' | 'followUps' | 'restrictions' | 'referrals' | 'strikes' | 'strikeSettlements' | 'materials' | 'loadSchedules' | 'goodMoral' | 'clusters' | 'settings' | 'photos' | 'permissionOverrides' | 'telemetry' | 'organizations'
 /**
  * The storage boundary. A backend does its I/O around the work: it loads, runs the work, then commits.
  * - `view`: read-only. Anything the work changes is discarded, and what it returns is detached from the store.

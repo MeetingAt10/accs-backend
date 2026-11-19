@@ -270,6 +270,10 @@ export function rolesProblem(roles: readonly string[], section?: string) {
   return undefined
 }
 /** An organization member as other members see them: name, role in the organization, and their section when they are a student. */
+/** Active students to choose from (a President, a new member): name and section only. */
+function studentChoices(db: Database, except: readonly string[] = []) {
+  return db.users.filter(u => u.active && hasRole(u, 'student') && !except.includes(u.id)).sort((a, b) => a.name.localeCompare(b.name)).map(u => organizationMember(db, u.id, 'Student'))
+}
 function organizationMember(db: Database, id: string, organizationRole: string) {
   const u = find(db.users, id)
   const section = hasRole(u,'student') && u.program && u.year && u.section ? sectionName({ campus: u.campus ?? mainCampus, program: u.program, year: u.year, section: u.section }) : undefined
@@ -657,7 +661,9 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
       }
       break
     }
-    case'P09':data.organizations=db.organizations.filter(o=>match(o.name)).map(o=>({id:o.id,name:o.name,description:o.description,member:isOrganizationMember(db,user,o.id),memberCount:organizationSize(o)}));break
+    case'P09':data.organizations=db.organizations.filter(o=>match(o.name)).map(o=>({id:o.id,name:o.name,description:o.description,member:isOrganizationMember(db,user,o.id),memberCount:organizationSize(o)}))
+      // The Secretary and the Dean create organizations, choosing a student as President (19 November 2026).
+      if(hasPermission(user,'organization.create'))Object.assign(data,{canCreate:true,studentOptions:studentChoices(db)});break
     case 'P10': {
       const organization = pick(db.organizations, query.id)
       if (organization) {
@@ -671,10 +677,14 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
           memberCount: organizationSize(organization),
           // Each member with their id (the name opens their profile) and section, like SBIT3A (QA 19 November).
           members: member ? [
-            organizationMember(db, organization.representativeId, 'Officer'),
-            ...organization.memberIds.map(id => organizationMember(db, id, 'Member')),
+            organizationMember(db, organization.representativeId, organization.positions?.[organization.representativeId] ?? 'Officer'),
+            // Each member's position, like President or VP for Information, set by the organization account (19 November 2026).
+            ...organization.memberIds.map(id => organizationMember(db, id, organization.positions?.[id] ?? 'Member')),
           ] : [],
         }
+        // The organization account adds and removes members and names their positions.
+        data.canManageMembers = organization.representativeId === user.id
+        if (data.canManageMembers) data.studentOptions = studentChoices(db, organization.memberIds)
         data.posts = posts.filter(post => post.audience === `organization:${organization.id}` || post.authorId === organization.representativeId && !post.private).map(post => postView(db, post, user))
         data.events = visibleEvents(db, user).filter(event => event.organizationId === organization.id)
         data.canPublish = organization.representativeId === user.id
@@ -1010,6 +1020,9 @@ function ensureCycleAssignments(repo:UnitOfWork,cycle:Cycle){
 }
 const actionPages: Record<string, string[]> = {
   createPost: ['P05', 'P08', 'P10'],
+  addOrganizationMember: ['P10'],
+  removeOrganizationMember: ['P10'],
+  setMemberPosition: ['P10'],
   updatePost: ['P06'],
   deletePost: ['P06'],
   comment: ['P06'],
@@ -1662,6 +1675,14 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
     case'saveProfile':{const p=actionPayloads.saveProfile.parse(request.payload);const saved=find(db.users,user.id);Object.assign(saved,p);Object.assign(user,p);record=person(user);message='Profile saved.';break}
     case'saveSettings':{const p=actionPayloads.saveSettings.parse(request.payload);db.settings[user.id]={...(db.settings[user.id]??defaultSettings(user)),...p};record=db.settings[user.id];message='Settings saved.';break}
     case'saveNotificationPreferences':{const p=actionPayloads.saveNotificationPreferences.parse(request.payload);if(Object.keys(p.priorities).some(key=>!notificationCategories(user).includes(key)))throw new ApiError(400,'Your account does not have that notification category.','VALIDATION_ERROR');const mutedRequired=Object.entries(p.priorities).find(([key,value])=>value==='muted'&&requiredNotificationCategories.includes(key));if(mutedRequired)throw new ApiError(400,`${requiredCategoryLabels[mutedRequired[0]]} cannot be muted.`,'VALIDATION_ERROR');/* Saved preferences do not change source access. */db.settings[user.id]={...(db.settings[user.id]??defaultSettings(user)),priorities:p.priorities};record=db.settings[user.id];message='Notification priorities saved.';break}
+    case'addOrganizationMember':case'removeOrganizationMember':case'setMemberPosition':{
+      // Only the organization's own account manages its members (19 November 2026).
+      const organization=find(db.organizations,id);if(organization.representativeId!==user.id)throw deny()
+      if(request.action==='addOrganizationMember'){const p=actionPayloads.addOrganizationMember.parse(request.payload);const student=db.users.find(u=>u.id===p.studentId&&u.active&&hasRole(u,'student'));if(!student)throw unavailable();if(!organization.memberIds.includes(student.id))organization.memberIds.push(student.id);if(p.position)organization.positions={...organization.positions,[student.id]:p.position};notify(repo,student.id,'organization','P10',organization.id,{body:`You were added to ${organization.name}${p.position?` as ${p.position}`:''}.`});message=`${student.name} added.`}
+      else if(request.action==='removeOrganizationMember'){const p=actionPayloads.removeOrganizationMember.parse(request.payload);if(!organization.memberIds.includes(p.studentId))throw unavailable();organization.memberIds=organization.memberIds.filter(m=>m!==p.studentId);if(organization.positions){const{[p.studentId]:_gone,...rest}=organization.positions;organization.positions=rest}message='Member removed.'}
+      else{const p=actionPayloads.setMemberPosition.parse(request.payload);if(!organization.memberIds.includes(p.memberId))throw unavailable();const{[p.memberId]:_old,...rest}=organization.positions??{};organization.positions=p.position?{...rest,[p.memberId]:p.position}:rest;message=p.position?`Position set to ${p.position}.`:'Position cleared.'}
+      audit(repo,user,request.action==='addOrganizationMember'?'Organization member added':request.action==='removeOrganizationMember'?'Organization member removed':'Organization position changed','community',organization.id)
+      record={id:organization.id,memberIds:organization.memberIds,positions:organization.positions??{}};break}
     case'updateRoles':{requirePermission(user,'role.manage');const p=actionPayloads.updateRoles.parse(request.payload);reasonOf(request);const account=find(db.users,id);const roleProblem=rolesProblem(p.roles,p.section);if(roleProblem)throw new ApiError(400,roleProblem,'VALIDATION_ERROR');if(p.roles.some(r=>['student','chair'].includes(r))&&!p.program&&!account.program)throw new ApiError(400,'Choose a program for that role.','VALIDATION_ERROR');account.roles=p.roles;if(p.program)account.program=p.program;if(p.section)account.section=p.section.trim().toUpperCase();if(p.active!==undefined)account.active=p.active;audit(repo,user,'Role assignment changed','identity',account.id,undefined,reasonOf(request));notify(repo,account.id,'role','P43');record={...person(account),active:account.active};message='Assignment saved. The new roles apply to the user right away.';break}
     case'updatePermission':{requirePermission(user,'role.manage');const p=actionPayloads.updatePermission.parse(request.payload);reasonOf(request);if(!permissionRoles[p.permission])throw new ApiError(400,'That permission does not exist.','VALIDATION_ERROR');/* TBD(D-06): approval workflow is undefined; save proposed cells without granting new runtime powers. */db.permissionOverrides[`${p.role}:${p.permission}`]=p.allowed;audit(repo,user,'Permission change proposed','identity',`${p.role}:${p.permission}`,undefined,reasonOf(request));record={...p,status:'Pending CCS approval'};message='Permission change saved for review.';break}
     case'moderate':{const reviewer=hasPermission(user,'moderation.review');if(!reviewer&&!hasPermission(user,'moderation.referral')&&!hasPermission(user,'moderation.osas'))throw deny();const p=actionPayloads.moderate.parse(request.payload);const reason=reasonOf(request);const m=find(db.moderation,id);if(!canSeeModeration(user,m))throw unavailable()
