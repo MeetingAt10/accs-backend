@@ -82,7 +82,8 @@ describe('the concern flow', () => {
       await write(student, 'P20', id, 'A first message')
       await write(await login('QCU-PROF-CS'), 'P22', id, 'A reply')
       const trail = (await (await login('ACCS-ADMIN')).get('/api/pages/P51')).body.data.audit as Body[]
-      const mine = trail.filter((entry) => entry.reference === id)
+      // Newest first on the page; read it in the order it happened.
+      const mine = trail.filter((entry) => entry.reference === id).reverse()
       expect(mine.map((entry) => entry.action)).toEqual(['Report submitted', 'Report consent recorded', 'Talk consent recorded', 'Reporter message sent', 'Handler message sent'])
       // The reporter stays unnamed; the office that answered is named.
       for (const entry of mine.slice(0, 4)) expect(entry).toMatchObject({ actor: { name: 'Verified student' } })

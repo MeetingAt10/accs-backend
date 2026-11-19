@@ -242,7 +242,9 @@ export const actionPayloads = {
   saveFollowUp: z.object({ note: text }).strict(),
   openRecord: z.object({ purpose: z.enum(['Case handling', 'Good Moral review', 'Restriction review', 'Program oversight']), note: z.string().max(500).optional() }).strict(),
   reviewGoodMoral: z.object({ status: z.enum(['Pending QCU review', 'Prerequisites reviewed', 'Further review needed']), decisionSource: text.max(200), notes: z.string().max(2000).default('') }).strict(),
-  applyRestriction: z.object({ studentId: z.string(), features: z.array(z.enum(['post.create', 'post.comment', 'report.anonymous'])).min(1), basis: text.max(500), until: date, decisionReference: text.max(100) }).strict(),
+  applyRestriction: z.object({ studentId: z.string(), features: z.array(z.enum(['post.create', 'post.comment', 'report.anonymous'])).min(1), basis: text.max(500), until: date, decisionReference: text.max(100), notifyStudent: z.boolean().default(true) }).strict(),
+  changeRestrictionEnd: z.object({ until: date }).strict(),
+  declineReferral: z.object({}).strict(),
   liftRestriction: z.object({}).strict(),
   // The Dean recommends a strike on a case with the Dean; OSAS confirms or rejects it on the case at OSAS.
   recommendStrike: z.object({ studentId: z.string().min(1), reportId: z.string().min(1), note: text.max(1000) }).strict(),
