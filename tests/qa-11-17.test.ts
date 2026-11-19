@@ -396,3 +396,15 @@ describe('professors in order of availability (QA 19 November)', () => {
     expect(order.map((f) => f.id).indexOf(first)).toBeLessThan(order.map((f) => f.id).indexOf(second))
   })
 })
+
+describe('Find faculty lists professors only (QA 19 November)', () => {
+  it('leaves out a student account even when it was given the professor role', async () => {
+    const db = repo.read()
+    // A classmate (students may message classmates) who was given the professor role during testing.
+    const classmate = db.users.find((u) => u.id === 'QCU-STU-RESTRICTED')!
+    classmate.roles = ['student', 'professor']
+    const faculty = (await (await login('QCU-STU-IT-A')).get('/api/pages/P14')).body.data.faculty as { id: string }[]
+    expect(faculty.map((f) => f.id)).not.toContain('QCU-STU-RESTRICTED')
+    expect(faculty.length).toBeGreaterThan(0)
+  })
+})

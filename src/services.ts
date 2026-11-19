@@ -591,7 +591,8 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
     && (!query.scope || post.audience === query.scope)
     && (!query.type || post.kind === query.type)
   ))
-  const spaces=db.spaces.filter(s=>canSpace(user,s));const faculty=db.users.filter(u=>hasRole(u,'professor')&&canReach(db,user,u));
+  const spaces=db.spaces.filter(s=>canSpace(user,s));// Professors to book; a student account never shows here, whatever roles it was given (QA 19 November).
+  const faculty=db.users.filter(u=>hasRole(u,'professor')&&!hasRole(u,'student')&&canReach(db,user,u));
   const match=(value:string)=>!query.q||value.toLowerCase().includes(query.q.toLowerCase())
   switch(pageId){
     case'P01':data.redirect='/home';break
