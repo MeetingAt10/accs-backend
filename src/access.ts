@@ -6,8 +6,9 @@ export const permissionRoles: Record<string, Role[]> = {
   'feed.read': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'],
   // The Secretary posts too, announcements included: she is in charge of the college's announcements (decided 16 November 2026).
   'post.create': ['student','organization','professor','chair','dean','guidance','osas','secretary'], 'post.anonymous': ['student'], 'announcement.publish': ['organization','professor','chair','dean','secretary'],
-  // The Organization representative messages anyone (decided 16 November 2026); to-dos are for every role that has a calendar.
-  'message.send': ['student','organization','professor','chair','dean','guidance','osas'], 'roster.view': ['student','organization','professor','chair','dean'], 'calendar.view': ['student','organization','professor','chair','dean','guidance','osas','secretary'], 'todo.manage': ['student','organization','professor','chair','dean','guidance','osas','secretary'], 'consultation.request': ['student'], 'consultation.decide': ['professor'],
+  // The Organization representative (decided 16 November 2026) and the CCS Secretary (decided 20 November 2026) message
+  // anyone; to-dos are for every role that has a calendar.
+  'message.send': ['student','organization','professor','chair','dean','guidance','osas','secretary'], 'roster.view': ['student','organization','professor','chair','dean'], 'calendar.view': ['student','organization','professor','chair','dean','guidance','osas','secretary'], 'todo.manage': ['student','organization','professor','chair','dean','guidance','osas','secretary'], 'consultation.request': ['student'], 'consultation.decide': ['professor'],
   'report.create': ['student'], 'report.viewOwn': ['student'], 'case.view': ['professor','chair','dean','guidance','osas'], 'case.act': ['professor','chair','dean','guidance','osas'], 'case.convert': ['guidance'], 'cluster.review': ['chair'], 'analytics.view': ['chair','dean'],
   'evaluation.fill': ['student','professor'], 'evaluation.review': ['professor'], 'evaluation.configure': ['dean'], 'evaluation.results': ['professor','chair','dean'], 'offense.view': ['chair','dean','guidance','osas'], 'goodmoral.review': ['guidance','osas'], 'restriction.manage': ['administrator','guidance','osas'], 'strike.recommend': ['dean'], 'student.report': ['professor','chair'], 'clearance.view': ['secretary','chair','dean','osas'], 'load.manage': ['secretary'], 'strike.record': ['osas'], 'standing.viewOwn': ['student'], 'moderation.review': ['administrator'], 'moderation.referral': ['secretary'], 'moderation.osas': ['osas'], 'role.manage': ['administrator'], 'audit.view': ['administrator'],
   'directory.view': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'], 'self.manage': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'], 'assistant.use': ['student','organization','professor','chair','dean','administrator','guidance','osas','secretary'],
@@ -67,8 +68,8 @@ export function canPublish(db: Database, user: User, audience: string, announcem
 }
 export function canReach(db: Database, user: User, target: User) {
   if (user.id === target.id || !hasPermission(user,'message.send') || !target.active) return false
-  // The Organization representative messages anyone, and anyone can answer them.
-  if (hasRole(user,'organization') || hasRole(target,'organization')) return true
+  // The Organization representative and the CCS Secretary message anyone, and anyone can answer them.
+  if (hasRole(user,'organization','secretary') || hasRole(target,'organization','secretary')) return true
   const targetFaculty = hasRole(target,'professor','chair','dean')
   const shared = db.spaces.some(space => (space.studentIds.includes(user.id) || space.professorIds.includes(user.id)) && (space.studentIds.includes(target.id) || space.professorIds.includes(target.id)))
   if (hasRole(user,'student') && (hasRole(target,'student') || hasRole(target,'professor')) && shared) return true
