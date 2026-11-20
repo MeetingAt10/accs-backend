@@ -53,6 +53,11 @@ export type AuthData = {
   credentials: Record<string, string>
   /** Faculty IDs who advise each year level ("1" to "4"). A student's adviser follows from their year and program. */
   advisorAssignments: Record<string, string[]>
+  /**
+   * Approved permission changes, "role:permission" -> allowed (decided 20 November 2026). Kept here, beside the accounts
+   * every request already loads, so each instance applies them without reading another collection.
+   */
+  permissionGrants?: Record<string, boolean>
 }
 
 /** `update` runs `mutate` on a fresh copy and persists it; if `mutate` throws, nothing is saved. */
@@ -64,8 +69,8 @@ export interface AuthStore {
 const empty = (): AuthData => ({ users: [], credentials: {}, advisorAssignments: {} })
 // Reset codes moved to ccs_identity; a leftover `resets` key in an old object is dropped on the next write.
 const parse = (text: string): AuthData => {
-  const { users, credentials, advisorAssignments } = { ...empty(), ...JSON.parse(text) } as AuthData
-  return { users, credentials, advisorAssignments }
+  const { users, credentials, advisorAssignments, permissionGrants } = { ...empty(), ...JSON.parse(text) } as AuthData
+  return { users, credentials, advisorAssignments, ...(permissionGrants ? { permissionGrants } : {}) }
 }
 
 function simpleStore(read: () => AuthData, write: (data: AuthData) => void): AuthStore {

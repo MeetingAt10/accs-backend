@@ -36,7 +36,9 @@ describe('the System Administrator (issue #40)', () => {
   })
 
   it('alone holds the audit logs, monitoring and system tools; the Dean holds none of them', async () => {
-    for (const permission of ['audit.view', 'role.manage', 'moderation.review']) expect(permissionRoles[permission], permission).toEqual(['administrator'])
+    for (const permission of ['audit.view', 'moderation.review']) expect(permissionRoles[permission], permission).toEqual(['administrator'])
+    // Roles are changed by the administrator and, since 20 November 2026, the CCS Secretary; never the Dean.
+    expect(permissionRoles['role.manage']).toEqual(['administrator', 'secretary'])
     expect(permissionRoles['restriction.manage']).not.toContain('dean')
     const { agent: dean } = await login('QCU-FAC-PAULA-DELACRUZ')
     const { agent: admin } = await login('ACCS-ADMIN')

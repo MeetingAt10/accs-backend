@@ -10,19 +10,39 @@ export const permissionRoles: Record<string, Role[]> = {
   // anyone; to-dos are for every role that has a calendar.
   'message.send': ['student','organization','professor','chair','dean','guidance','osas','secretary'], 'roster.view': ['student','organization','professor','chair','dean'], 'calendar.view': ['student','organization','professor','chair','dean','guidance','osas','secretary'], 'todo.manage': ['student','organization','professor','chair','dean','guidance','osas','secretary'], 'consultation.request': ['student'], 'consultation.decide': ['professor'],
   'report.create': ['student'], 'report.viewOwn': ['student'], 'case.view': ['professor','chair','dean','guidance','osas'], 'case.act': ['professor','chair','dean','guidance','osas'], 'case.convert': ['guidance'], 'cluster.review': ['chair'], 'analytics.view': ['chair','dean'],
-  'evaluation.fill': ['student','professor'], 'evaluation.review': ['professor'], 'evaluation.configure': ['dean'], 'evaluation.results': ['professor','chair','dean'], 'offense.view': ['chair','dean','guidance','osas'], 'goodmoral.review': ['guidance','osas'], 'restriction.manage': ['administrator','guidance','osas'], 'strike.recommend': ['dean'], 'student.report': ['professor','chair'], 'clearance.view': ['secretary','chair','dean','osas'], 'load.manage': ['secretary'], 'strike.record': ['osas'], 'standing.viewOwn': ['student'], 'moderation.review': ['administrator'], 'moderation.referral': ['secretary'], 'moderation.osas': ['osas'], 'role.manage': ['administrator'], 'audit.view': ['administrator'],
+  'evaluation.fill': ['student','professor'], 'evaluation.review': ['professor'], 'evaluation.configure': ['dean'], 'evaluation.results': ['professor','chair','dean'], 'offense.view': ['chair','dean','guidance','osas'], 'goodmoral.review': ['guidance','osas'], 'restriction.manage': ['administrator','guidance','osas'], 'strike.recommend': ['dean'], 'student.report': ['professor','chair'], 'clearance.view': ['secretary','chair','dean','osas'], 'load.manage': ['secretary'], 'strike.record': ['osas'], 'standing.viewOwn': ['student'], 'moderation.review': ['administrator'], 'moderation.referral': ['secretary'], 'moderation.osas': ['osas'], 'role.manage': ['administrator','secretary'], 'audit.view': ['administrator'],
   'directory.view': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'], 'self.manage': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'], 'assistant.use': ['student','organization','professor','chair','dean','administrator','guidance','osas','secretary'],
   // Account provisioning has no page; it is the /api/accounts routes. The Dean activates the secretary, who creates every other account.
   'account.activateSecretary': ['dean'], 'account.setupDean': ['administrator'], 'account.provision': ['secretary'],
   // The Secretary and the Dean create organizations and their accounts (decided 19 November 2026).
   'organization.create': ['secretary','dean'],
+  // Decided 20 November 2026: the Secretary and the System Administrator both change roles, and the Secretary approves
+  // permission change requests. Nobody approves their own request, so the administrator approves the Secretary's.
+  'permission.review': ['secretary','administrator'],
+}
+
+/**
+ * Permissions no request can change: who manages roles, accounts, approvals and the audit trail stays as coded, so an
+ * approved request can never hand out the power to approve or to grant more.
+ */
+export const lockedPermissions: readonly string[] = ['role.manage', 'permission.review', 'account.activateSecretary', 'account.setupDean', 'account.provision', 'audit.view']
+
+/** Approved permission changes, "role:permission" -> allowed. The API reloads them on every request (app.ts). */
+let approvedOverrides: Readonly<Record<string, boolean>> = {}
+export function setApprovedOverrides(overrides: Record<string, boolean>) {
+  approvedOverrides = Object.fromEntries(Object.entries(overrides).filter(([key]) => !lockedPermissions.includes(key.slice(key.indexOf(':') + 1))))
+}
+/** Whether a role holds a permission: an approved change where there is one, otherwise the coded matrix above. */
+export function roleHas(role: Role, permission: string) {
+  const key = `${role}:${permission}`
+  return key in approvedOverrides ? approvedOverrides[key]! : !!permissionRoles[permission]?.includes(role)
 }
 export const pagePermissions: Record<string, string[]> = {
   P01: ['self.manage'], P02: ['self.manage'], P03: ['self.manage'], P04: ['feed.read'], P05: ['post.create'], P06: ['feed.read'], P07: ['roster.view'], P08: ['roster.view'], P09: ['directory.view'], P10: ['directory.view'], P11: ['message.send'], P12: ['message.send'], P13: ['calendar.view'], P14: ['consultation.request','consultation.decide'], P15: ['consultation.request'], P16: ['consultation.request','consultation.decide'], P17: ['consultation.decide'], P18: ['report.viewOwn'], P19: ['report.create'], P20: ['report.viewOwn'], P21: ['case.view'], P22: ['case.view'], P23: ['cluster.review'], P24: ['cluster.review'], P25: ['analytics.view'], P26: ['evaluation.fill','evaluation.results','evaluation.configure'], P27: ['evaluation.fill'], P28: ['evaluation.results'], P29: ['evaluation.results'], P30: ['evaluation.configure'], P31: ['evaluation.configure'], P32: ['evaluation.review'], P33: ['offense.view'], P34: ['offense.view'], P35: ['restriction.manage'], P36: ['standing.viewOwn'], P53: ['clearance.view'], P54: ['load.manage'], P37: ['directory.view'], P38: ['directory.view'], P39: ['self.manage'], P40: ['self.manage'], P41: ['assistant.use'], P42: ['self.manage'], P43: ['self.manage'], P44: ['self.manage'], P45: ['audit.view'], P46: ['role.manage'], P47: ['role.manage'], P48: ['role.manage'], P49: ['moderation.review','moderation.referral','moderation.osas'], P50: ['moderation.review','moderation.referral','moderation.osas'], P51: ['audit.view'], P52: ['audit.view'],
 }
 export const pageTitles: Record<string, string> = { P01:'ACCS',P02:'Sign in',P03:'Home',P04:'Feed',P05:'New post',P06:'Discussion',P07:'Classes and sections',P08:'Class space',P09:'Organizations',P10:'Organization',P11:'Messages',P12:'Conversation',P13:'Calendar',P14:'Appointments',P15:'Faculty availability',P16:'Appointment request',P17:'My availability',P18:'My reports',P19:'New report',P20:'Report',P21:'Case queue',P22:'Case workspace',P23:'Similar reports',P24:'Group review',P25:'Analytics',P26:'Evaluations',P27:'Evaluation form',P28:'Evaluation results',P29:'Faculty results',P30:'Evaluation cycles',P31:'Cycle editor',P32:'Review questions',P33:'Student records',P34:'Student record',P35:'Restrictions',P36:'My standing',P37:'Personnel directory',P38:'Profile',P39:'My profile',P40:'Notifications',P41:'Assistant',P42:'Help',P43:'Settings',P44:'Notification priorities',P45:'Administration',P46:'Users and roles',P47:'User assignment',P48:'Permission matrix',P49:'Moderation',P50:'Moderation review',P51:'Audit trail',P52:'Monitoring',P53:'Clearance',P54:'Faculty load' }
 export function hasRole(user: User, ...roles: Role[]) { return user.roles.some(role => roles.includes(role)) }
-export function hasPermission(user: User, permission: string) { return !!permissionRoles[permission]?.some(role => user.roles.includes(role)) && !user.restrictions.includes(permission) }
+export function hasPermission(user: User, permission: string) { return !!permissionRoles[permission] && user.roles.some(role => roleHas(role, permission)) && !user.restrictions.includes(permission) }
 export function permissions(user: User) { return Object.keys(permissionRoles).filter(key => hasPermission(user,key)) }
 export function canPage(user: User, pageId: string) {
   if ((pageId === 'P07' || pageId === 'P08') && !hasRole(user,'student','professor','chair','dean')) return false
