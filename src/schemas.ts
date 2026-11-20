@@ -239,6 +239,9 @@ export const actionPayloads = {
   createGroupThread: messageContent.extend({ title: z.string().trim().min(1, 'Name the group.').max(80, 'Use at most 80 characters.'), memberIds: z.array(z.string().min(1)).min(2, 'Add at least two people.').max(49, 'A group can have at most 50 people.') }).strict().refine(hasMessageContent, noMessageContent),
   muteThread: z.object({ muted: z.boolean() }).strict(),
   editMessage: z.object({ messageId: z.string().min(1).max(100), body: z.string().trim().min(1, 'Write the message.').max(4000) }).strict(),
+  // QA 17 November, V3 (decided 20 November 2026): people join an existing group, and an unsent message is kept on the server.
+  addGroupMembers: z.object({ memberIds: z.array(z.string().min(1).max(64)).min(1, 'Choose at least one person.').max(48) }).strict(),
+  saveMessageDraft: z.object({ body: z.string().max(4000).default(''), attachments: z.array(messageAttachment).max(5, 'Send at most 5 files at a time.').default([]) }).strict(),
   deleteMessage: z.object({ messageId: z.string().min(1).max(100) }).strict(),
   markThreadRead: z.object({}).strict(),
   markNotification: z.object({ read: z.boolean().default(true) }).strict(),

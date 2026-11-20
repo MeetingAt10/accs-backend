@@ -406,6 +406,18 @@ function restrictionViews(db:Database,user:User,studentId?:string) {
 // Entries whose actor is the reporting student, who may be anonymous to the people reading the trail.
 const studentActions=['Identity disclosed','Report submitted','Report consent recorded','Talk consent recorded','Reporter message sent']
 /** Audit entries as staff see them, newest first (QA 17 November: the oldest came first in every list). The trail is kept in the order things happened. */
+/**
+ * A person's unsent messages, by conversation (decided 20 November 2026). They live in `drafts` beside the report draft,
+ * under their own key so the two never overwrite each other.
+ */
+function messageDraftsOf(db: Database, user: User): MessageDrafts
+function messageDraftsOf(db: Database, user: User, create: false): MessageDrafts | undefined
+function messageDraftsOf(db: Database, user: User, create = true) {
+  const key = `${user.id}:messages`
+  if (!create) return db.drafts[key] as MessageDrafts | undefined
+  return (db.drafts[key] ??= {}) as MessageDrafts
+}
+type MessageDrafts = Record<string, { body: string; attachments: unknown[]; at: string }>
 /** A stored permission change; a proposal saved before approvals existed (a bare boolean) reads as waiting. */
 function overrideOf(value: PermissionOverride | boolean | undefined): PermissionOverride {
   if (typeof value === 'boolean') return { proposal: { allowed: value, by: '', at: '' }, decisions: [] }
@@ -750,6 +762,9 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
             unread: unreadMessages(db, thread, user),
             kind: thread.spaceId || thread.group ? 'group' : 'direct',
             ...(thread.group ? { groupKind: 'people' } : thread.spaceId ? { groupKind: 'class' } : {}),
+            // The reader's unsent message, kept on the server so a refresh or another device does not lose it.
+            ...(messageDraftsOf(db, user, false)?.[thread.id] ? { draft: messageDraftsOf(db, user, false)![thread.id] } : {}),
+            canAddMembers: !!thread.group && hasPermission(user, 'message.send'),
           }
         }
       }
@@ -1100,6 +1115,8 @@ const actionPages: Record<string, string[]> = {
   createThread: ['P11'],
   createGroupThread: ['P11'],
   sendMessage: ['P12'],
+  addGroupMembers: ['P12'],
+  saveMessageDraft: ['P12'],
   muteThread: ['P12'],
   editMessage: ['P12'],
   deleteMessage: ['P12'],
@@ -1594,12 +1611,49 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       if (!canThread(db, user, thread)) throw unavailable()
       const sent = addMessage(thread.messages, payload.body, payload.attachments)
       thread.readMessageCounts[user.id] = thread.messages.length
+      const drafts = messageDraftsOf(db, user, false)
+      if (drafts?.[thread.id]) delete drafts[thread.id]
       const held = !!payload.body && autoFlag(repo, { itemType: 'message', itemId: sent.id, parentId: thread.id, authorId: user.id, text: payload.body })
       for (const recipientId of thread.memberIds.filter(memberId => memberId !== user.id)) {
         notify(repo, recipientId, 'message', 'P12', thread.id, { body: messageNotice(user, thread, payload.body, held), itemId: sent.id })
       }
       record = messageView(db, sent)
       message = 'Message sent.'
+      break
+    }
+    case 'addGroupMembers': {
+      // A member adds people they can message to a group someone started (QA 17 November, V3). Class groups follow the
+      // class list, and direct conversations stay between two people.
+      requirePermission(user, 'message.send')
+      const payload = actionPayloads.addGroupMembers.parse(request.payload)
+      const thread = find(db.threads, id)
+      if (!canThread(db, user, thread)) throw unavailable()
+      if (!thread.group) throw conflict('People can only be added to a group someone started.')
+      const added = [...new Set(payload.memberIds)].filter(memberId => !thread.memberIds.includes(memberId))
+      if (!added.length) throw conflict('Everyone you chose is already in this group.')
+      if (thread.memberIds.length + added.length > 50) throw conflict('A group can have at most 50 people.')
+      const people = added.map(memberId => find(db.users, memberId))
+      if (people.some(person => !canReach(db, user, person))) throw unavailable()
+      thread.memberIds.push(...added)
+      // They see the conversation from the start, as messages already in it are part of the group; none count as unread.
+      for (const person of people) {
+        thread.readMessageCounts[person.id] = thread.messages.length
+        notify(repo, person.id, 'message', 'P12', thread.id, { body: `${user.name} added you to ${thread.title ?? 'a group'}.` })
+      }
+      audit(repo, user, 'People added to a group conversation', 'messages', thread.id)
+      record = { id: thread.id, memberIds: thread.memberIds }
+      message = added.length === 1 ? `${people[0]!.name} was added.` : `${added.length} people were added.`
+      break
+    }
+    case 'saveMessageDraft': {
+      const payload = actionPayloads.saveMessageDraft.parse(request.payload)
+      const thread = find(db.threads, id)
+      if (!canThread(db, user, thread)) throw unavailable()
+      const drafts = messageDraftsOf(db, user)
+      if (!payload.body.trim() && !payload.attachments.length) delete drafts[thread.id]
+      else drafts[thread.id] = { body: payload.body, attachments: payload.attachments, at: now() }
+      record = drafts[thread.id] ?? null
+      message = 'Draft saved.'
       break
     }
     // The author edits or takes back their own message (decided 19 November 2026). A message under review stays as it is
