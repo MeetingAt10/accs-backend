@@ -188,7 +188,8 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       for (const module of modules.filter((entry) => entry.role === 'all')) expect(module.pages.some((page) => allowedPages.includes(page))).toBe(true)
       expect(permissions).toContain('account.provision')
       expect(permissions).not.toContain('account.activateSecretary')
-      expect(permissions).not.toContain('role.manage')
+      // 20 November 2026: the Secretary changes roles and approves permission requests, beside the administrator.
+      expect(permissions).toEqual(expect.arrayContaining(['role.manage', 'permission.review']))
       expect((await signIn(app, 'QCU-FAC-PAULA-DELACRUZ')).response.body.permissions).toContain('account.activateSecretary')
     })
   })

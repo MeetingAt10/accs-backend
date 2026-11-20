@@ -21,14 +21,18 @@ const setRoles = (admin: Agent, id: string, payload: object) => admin.post('/api
 const rolesOf = (id: string) => repo.read().users.find((u) => u.id === id)!.roles
 
 describe('which roles one account may hold', () => {
+  // 20 November 2026: a student may also be a CCS student organization representative, and nothing else.
   it('keeps a student a student: no administrator, professor or Dean on top (QA: all roles could be ticked and saved)', async () => {
     const admin = await login('ACCS-ADMIN')
-    for (const roles of [['student', 'administrator'], ['student', 'professor', 'dean'], ['student', 'secretary']]) {
+    for (const roles of [['student', 'administrator'], ['student', 'professor'], ['student', 'secretary']]) {
       const response = await setRoles(admin, 'QCU-STU-IT-A', { roles })
       expect([roles.join('+'), response.status, response.body.code]).toEqual([roles.join('+'), 400, 'VALIDATION_ERROR'])
-      expect(response.body.error).toMatch(/student role only/)
+      expect(response.body.error).toMatch(/organization representative, and nothing else/)
     }
+    expect((await setRoles(admin, 'QCU-STU-IT-A', { roles: ['student', 'professor', 'dean'] })).body.error).toMatch(/at most two roles/)
     expect(rolesOf('QCU-STU-IT-A')).toEqual(['student'])
+    expect((await setRoles(admin, 'QCU-STU-IT-A', { roles: ['student', 'organization'] })).status).toBe(200)
+    expect(rolesOf('QCU-STU-IT-A')).toEqual(['student', 'organization'])
   })
 
   it('gives faculty at most two roles, like Dean and professor', async () => {
@@ -48,8 +52,9 @@ describe('which roles one account may hold', () => {
 
   it('answers each problem in words', () => {
     expect(rolesProblem(['professor', 'professor'])).toBe('Choose each role once.')
-    expect(rolesProblem(['organization', 'student'])).toMatch(/student role only/)
-    expect(rolesProblem(['organization', 'professor'])).toBe('An organization account has the organization role only.')
+    expect(rolesProblem(['organization', 'student'])).toBeUndefined()
+    expect(rolesProblem(['organization', 'professor'])).toBe('An organization account can only be paired with the student role.')
+    expect(rolesProblem(['student', 'organization', 'professor'])).toMatch(/at most two roles/)
     expect(rolesProblem(['dean', 'professor'])).toBeUndefined()
     expect(rolesProblem(['student'], 'AB')).toBeUndefined()
   })

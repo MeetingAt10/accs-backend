@@ -122,3 +122,100 @@ describe('the assistant', () => {
     expect(await ask('When is the next evaluation?')).toMatch(/^1st Semester AY 2026-2027 is open until November 30, 2026\./)
   })
 })
+
+// Decided 20 November 2026: a permission change is a request the Secretary approves, and an approved change takes effect.
+describe('permission change requests', () => {
+  const propose = (agent: Awaited<ReturnType<typeof login>>, role: string, permission: string, allowed: boolean) =>
+    act(agent, 'P48', 'updatePermission', { role, permission, allowed }, undefined, 'QA check of the approval flow')
+  const decide = (agent: Awaited<ReturnType<typeof login>>, key: string, decision: 'approve' | 'reject') =>
+    act(agent, 'P48', 'decidePermission', { key, decision }, undefined, 'Reviewed with the Dean')
+  const permissionsOf = async (id: string) => ((await (await login(id)).get('/api/session')).body.permissions as string[])
+
+  it('changes nothing until the Secretary approves, then applies to everyone with that role', async () => {
+    const secretary = await secretarySession(app)
+    const admin = await login('ACCS-ADMIN')
+    const proposed = await propose(admin, 'osas', 'post.create', false)
+    expect(proposed.status, JSON.stringify(proposed.body)).toBe(200)
+    expect(proposed.body.message).toBe('Sent to the CCS Secretary for approval.')
+    expect(await permissionsOf('QCU-OSAS')).toContain('post.create')
+    // The Secretary is told, and sees the request as one she can decide.
+    expect(repo.read().notifications.some((n) => n.kind === 'permission' && n.recordId === 'osas:post.create')).toBe(true)
+    const matrix = (await secretary.get('/api/pages/P48')).body.data
+    expect(matrix.permissionRequests).toEqual([expect.objectContaining({ key: 'osas:post.create', allowed: false, proposedBy: 'Demo Administrator', canDecide: true })])
+    expect((await decide(secretary, 'osas:post.create', 'approve')).status).toBe(200)
+    expect(await permissionsOf('QCU-OSAS')).not.toContain('post.create')
+    const osas = await login('QCU-OSAS')
+    expect((await act(osas, 'P05', 'createPost', { title: 'Office hours', body: 'We are open.', audience: 'college', kind: 'discussion', label: 'Discussion' })).status).toBe(403)
+    const after = (await secretary.get('/api/pages/P48')).body.data
+    expect(after.permissionRequests).toEqual([])
+    expect(after.permissionMatrix.find((row: { key: string }) => row.key === 'post.create').roles).not.toContain('osas')
+  })
+
+  it('leaves the permission as it was when the request is rejected', async () => {
+    const secretary = await secretarySession(app)
+    const admin = await login('ACCS-ADMIN')
+    await propose(admin, 'osas', 'post.create', false)
+    expect((await decide(secretary, 'osas:post.create', 'reject')).status).toBe(200)
+    expect(await permissionsOf('QCU-OSAS')).toContain('post.create')
+  })
+
+  it('never lets anyone approve their own request: the administrator decides the Secretary\'s', async () => {
+    const secretary = await secretarySession(app)
+    expect((await propose(secretary, 'secretary', 'roster.view', true)).status).toBe(200)
+    expect((await decide(secretary, 'secretary:roster.view', 'approve')).status).toBe(403)
+    const admin = await login('ACCS-ADMIN')
+    expect((await decide(admin, 'secretary:roster.view', 'approve')).status).toBe(200)
+  })
+
+  it('keeps who manages roles, accounts, approvals and the audit trail out of reach of any request', async () => {
+    const admin = await login('ACCS-ADMIN')
+    for (const permission of ['role.manage', 'permission.review', 'account.provision', 'audit.view']) {
+      const response = await propose(admin, 'student', permission, true)
+      expect([permission, response.status]).toEqual([permission, 400])
+    }
+  })
+
+  it('refuses a decision from someone who does not review permissions', async () => {
+    const admin = await login('ACCS-ADMIN')
+    await propose(admin, 'osas', 'post.create', false)
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
+    expect((await decide(dean, 'osas:post.create', 'approve')).status).toBe(403)
+  })
+})
+
+describe('role changes by the Secretary', () => {
+  it('lets the Secretary change roles, like the administrator (decided 20 November 2026)', async () => {
+    const secretary = await secretarySession(app)
+    const saved = await act(secretary, 'P47', 'updateRoles', { roles: ['professor', 'chair'], program: 'BSIT' }, 'QCU-PROF-IT', 'Named BSIT chair')
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200)
+    expect(repo.read().users.find((u) => u.id === 'QCU-PROF-IT')!.roles).toEqual(['professor', 'chair'])
+  })
+
+  it('sets a student\'s year level, within what the campus teaches', async () => {
+    const admin = await login('ACCS-ADMIN')
+    expect((await act(admin, 'P47', 'updateRoles', { roles: ['student'], year: 4, section: 'B' }, 'QCU-STU-IT-A', 'Moved up')).status).toBe(200)
+    expect(repo.read().users.find((u) => u.id === 'QCU-STU-IT-A')).toMatchObject({ year: 4, section: 'B' })
+    expect((await act(admin, 'P47', 'updateRoles', { roles: ['professor'], year: 2 }, 'QCU-PROF-IT', 'Wrong field')).body.error).toBe('Only students have a year level.')
+    repo.read().users.find((u) => u.id === 'QCU-STU-CS')!.campus = 'BAT'
+    expect((await act(admin, 'P47', 'updateRoles', { roles: ['student'], year: 3 }, 'QCU-STU-CS', 'Moved up')).body.error).toMatch(/1st and 2nd year only/)
+  })
+})
+
+describe('an approved permission change on every instance', () => {
+  it('applies on another instance that shares only the accounts store', async () => {
+    const authStore = setUpAuthStore()
+    const first = createApp(createMemoryRepository(), { authStore })
+    const second = createApp(createMemoryRepository(), { authStore })
+    const signInTo = async (instance: typeof first, id: string) => {
+      const agent = request.agent(instance)
+      expect((await agent.post('/api/auth/sign-in').send({ emailOrId: id, password: seedPassword })).status).toBe(200)
+      return agent
+    }
+    const secretary = await secretarySession(first)
+    const admin = await signInTo(first, 'ACCS-ADMIN')
+    expect((await act(admin, 'P48', 'updatePermission', { role: 'osas', permission: 'post.create', allowed: false }, undefined, 'QA check')).status).toBe(200)
+    expect((await act(secretary, 'P48', 'decidePermission', { key: 'osas:post.create', decision: 'approve' }, undefined, 'Agreed')).status).toBe(200)
+    const osasElsewhere = await signInTo(second, 'QCU-OSAS')
+    expect((await osasElsewhere.get('/api/session')).body.permissions).not.toContain('post.create')
+  })
+})

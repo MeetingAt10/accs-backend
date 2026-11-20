@@ -272,8 +272,9 @@ export const actionPayloads = {
   addOrganizationMember: z.object({ studentId: z.string().min(1), position: z.string().trim().max(60, 'Use at most 60 characters.').optional() }).strict(),
   removeOrganizationMember: z.object({ studentId: z.string().min(1) }).strict(),
   setMemberPosition: z.object({ memberId: z.string().min(1), position: z.string().trim().max(60, 'Use at most 60 characters.') }).strict(),
-  updateRoles: z.object({ roles: z.array(roleSchema).min(1), program: z.enum(programs).optional(), section: z.string().max(50).optional(), active: z.boolean().optional() }).strict(),
+  updateRoles: z.object({ roles: z.array(roleSchema).min(1), program: z.enum(programs).optional(), year: z.number().int().min(1).max(4).optional(), section: z.string().max(50).optional(), active: z.boolean().optional() }).strict(),
   updatePermission: z.object({ role: roleSchema, permission: z.string().min(1), allowed: z.boolean() }).strict(),
+  decidePermission: z.object({ key: z.string().min(3).max(120), decision: z.enum(['approve', 'reject']) }).strict(),
   moderate: z.object({ decision: z.enum(['keep', 'remove', 'warn', 'refer', 'dismiss', 'osas']), notifyAuthor: z.boolean().default(true) }).strict(),
 } satisfies Record<string, z.ZodType>
 export type ActionName = keyof typeof actionPayloads

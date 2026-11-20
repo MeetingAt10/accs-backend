@@ -9,11 +9,11 @@ import { env, onLambda, tableName } from './env.js'
 import { actionRequestSchema, actionResponseSchema, changePasswordSchema, completeFirstLoginSchema, emptyBodySchema, errorResponseSchema, forgotPasswordSchema, healthResponseSchema, idParamsSchema, pageQuerySchema, pageResponseSchema, resetPasswordSchema, sessionResponseSchema, signInSchema, type User } from './schemas.js'
 import { createNewConcernMailer, createResetMailer, createSesInviteMailer, type NewConcernMailer, type ResetCodeMailer } from './mail.js'
 import { accountRouter, applyAccounts, recordAudit, saveAccountChange, saveProfileChange, setOwnCredentials, unsentMailer, type InviteMailer } from './accounts.js'
-import { hasPermission } from './access.js'
+import { hasPermission, setApprovedOverrides } from './access.js'
 import { devRouter, devToolboxEnabled, isDevToolboxCall, type Stack } from './dev.js'
 import { send } from './http.js'
 import { createRepository } from './persist.js'
-import { ApiError, completeMaterialUpload, getPage, materialDownloadUrl, performAction, refreshRestrictions, sessionView, startMaterialUpload, unavailable, type AccountChange, type AfterCommit, type ProfileChange, startMessageUpload, messageFileUrl, postFileUrl, search } from './services.js'
+import { ApiError, approvedOverrides, completeMaterialUpload, getPage, materialDownloadUrl, performAction, refreshRestrictions, sessionView, startMaterialUpload, unavailable, type AccountChange, type AfterCommit, type ProfileChange, startMessageUpload, messageFileUrl, postFileUrl, search } from './services.js'
 import { createS3MaterialStorage, type MaterialStorage } from './material-storage.js'
 import { createResetStore, resetPolicy, type ResetStore } from './resets.js'
 import { createThrottleStore, type ThrottleStore } from './throttle.js'
@@ -58,7 +58,10 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   // nothing new costs no repository work.
   let synced:AuthData|undefined
   const syncUsers=async()=>{
-    const data=await authStore.load();if(data===synced)return
+    const data=await authStore.load()
+    // Approved permission changes travel with the accounts, so every instance applies them before any permission check.
+    setApprovedOverrides(data.permissionGrants??{})
+    if(data===synced)return
     await repository.transact(unit=>applyAccounts(unit.read(),data.users),[]);synced=data
   }
   // An old account ID (QCU-DEAN) signs in as the renamed account (CCS-DEAN).
@@ -205,7 +208,11 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   app.get('/api/posts/:postId/files/:fileId',async(req,res)=>{const url=await postFileUrl(repository,res.locals.user as User,materialId.parse(req.params.postId),materialId.parse(req.params.fileId),req.query.inline==='1',materialStorage);if(req.query.format==='json'){send(res,actionResponseSchema,{ok:true,message:'File link ready.',record:{url}});return}res.redirect(302,url)})
   app.post('/api/messages/uploads',async(req,res)=>{send(res,actionResponseSchema,{ok:true,message:'Upload the file to the address given, then send the message.',record:await startMessageUpload(res.locals.user as User,req.body,materialStorage)})})
   app.get('/api/threads/:threadId/messages/:messageId/files/:fileId',async(req,res)=>{const url=await messageFileUrl(repository,res.locals.user as User,materialId.parse(req.params.threadId),materialId.parse(req.params.messageId),materialId.parse(req.params.fileId),req.query.inline==='1',materialStorage);if(req.query.format==='json'){send(res,actionResponseSchema,{ok:true,message:'File link ready.',record:{url}});return}res.redirect(302,url)})
-  app.post('/api/pages/:pageId/actions',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const body=actionRequestSchema.parse(req.body);send(res,actionResponseSchema,await performAction(repository,res.locals.user as User,pageId,body,saveAccount,saveProfile,sendMail,materialStorage))})
+  app.post('/api/pages/:pageId/actions',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const body=actionRequestSchema.parse(req.body)
+    const result=await performAction(repository,res.locals.user as User,pageId,body,saveAccount,saveProfile,sendMail,materialStorage)
+    // A decided permission request changes what is in force: store the approved set beside the accounts for every instance.
+    if(body.action==='decidePermission'){const grants=approvedOverrides({permissionOverrides:await repository.view(unit=>unit.read().permissionOverrides,['permissionOverrides'])});await authStore.update(data=>{data.permissionGrants=grants});setApprovedOverrides(grants)}
+    send(res,actionResponseSchema,result)})
   // Invites go out by email when MAIL_FROM is set (#36); otherwise the screen shows them once.
   app.use('/api/accounts',accountRouter({repository,authStore,sessions,mailer:options.mailer??(env.MAIL_FROM?createSesInviteMailer(env.MAIL_FROM):unsentMailer)}))
   if(devToolbox)app.use('/api/dev',devRouter({repository,sessions,start:startSession,out:sessionOut}))

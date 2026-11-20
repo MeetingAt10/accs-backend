@@ -1,17 +1,17 @@
 import { findFlaggedWord } from './profanity.js'
 import { z } from 'zod'
 import { categoryProblem, concernCategories } from './categories.js'
-import { mainCampus, sectionName } from './sections.js'
+import { campusYearProblem, mainCampus, sectionName } from './sections.js'
 import { materialFileTypes, materialMaxBytes, messageFileMaxBytes, messageFileTypes, safeFileName, uploadUrlSeconds, type MaterialStorage } from './material-storage.js'
 import { ulid } from './ids.js'
 import { appointmentCategories, appointmentProblem, concernFollowUp, purposeOf, type AppointmentChoice } from './appointments.js'
 import { reactionKinds, type ReactionKind, loadRowSchema, materialUploadSchema, messageUploadSchema, actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
-import { allowedPages, canActCase, earlierConsent, canAudience, canReadCase, isEarlierHandler, overseesCase, canCountCase, canFacultyResult, canPage, canPublish, canReach, canSpace, canStudentRecord, canThread, canViewCase, hasPermission, hasRole, isOrganizationMember, pageTitles, permissionRoles, permissions, scopeLabel } from './access.js'
+import { allowedPages, roleHas, lockedPermissions, setApprovedOverrides, canActCase, earlierConsent, canAudience, canReadCase, isEarlierHandler, overseesCase, canCountCase, canFacultyResult, canPage, canPublish, canReach, canSpace, canStudentRecord, canThread, canViewCase, hasPermission, hasRole, isOrganizationMember, pageTitles, permissionRoles, permissions, scopeLabel } from './access.js'
 import { consentWording } from './consent.js'
 import { route, rosterFor } from './escalation/engine.js'
 import { escalationConfig } from './escalation/lexicon.js'
 import { assign } from './escalation/similarity.js'
-import type { Attachment, Material, Space, Assignment, Consultation, Cycle, Database, Message, Moderation, Post, Report, Repository, Slot, Stage, Strike, Thread, UnitOfWork } from './store.js'
+import type { Attachment, Material, Space, Assignment, Consultation, Cycle, Database, Message, Moderation, PermissionOverride, Post, Report, Repository, Slot, Stage, Strike, Thread, UnitOfWork } from './store.js'
 
 export class ApiError extends Error { constructor(public status: number, message: string, public code = 'FORBIDDEN') { super(message) } }
 export const unavailable = () => new ApiError(404, "This record isn't available to you.", 'UNAVAILABLE')
@@ -262,15 +262,17 @@ const featureWords = (features: string[]) => features.map(f => restrictionFeatur
 const requiredCategoryLabels: Record<string,string> = { report: 'Report updates', case: 'Case updates', evaluation: 'Evaluation updates' }
 /** `urgent` (an urgent announcement) reaches the recipient even if they muted its category. */
 /**
- * Which roles one account may hold (QA 17 November, decided 19 November 2026). A student or an organization account
- * holds that one role only; any other account holds at most two (for example Dean and professor). Only a student has
- * a section, and a section is letters, like A or AB. Answers the problem in words, or nothing when the roles are fine.
+ * Which roles one account may hold (QA 17 November; decided 19 and 20 November 2026). Every account holds at most two
+ * roles. A student may also be a CCS student organization representative and nothing else; an organization account
+ * holds no faculty or office role. Only a student has a section, and a section is letters, like A or AB. Answers the
+ * problem in words, or nothing when the roles are fine.
  */
 export function rolesProblem(roles: readonly string[], section?: string) {
   const unique = new Set(roles)
   if (unique.size !== roles.length) return 'Choose each role once.'
-  for (const single of ['student', 'organization']) if (unique.has(single) && unique.size > 1) return single === 'student' ? 'A student account has the student role only. Its program and section say where the student belongs.' : 'An organization account has the organization role only.'
   if (unique.size > 2) return 'Choose at most two roles for one person, like Dean and professor.'
+  if (unique.has('student') && [...unique].some(role => !['student', 'organization'].includes(role))) return 'A student can also be a CCS student organization representative, and nothing else. Their program and section say where they belong.'
+  if (unique.has('organization') && [...unique].some(role => !['student', 'organization'].includes(role))) return 'An organization account can only be paired with the student role.'
   if (section && !unique.has('student')) return 'Only students have a section.'
   if (section && !/^[A-Za-z]{1,3}$/.test(section.trim())) return 'Use the section letter, like A.'
   return undefined
@@ -315,6 +317,7 @@ function notify(repo:UnitOfWork,recipientId:string,kind:string,pageId:string,rec
     evaluation: 'Evaluation update',
     restriction: 'Account features changed',
     role: 'Your role assignment changed',
+    permission: 'Permission change request',
     moderation: 'Content review update',
   }
   db.notifications.push({
@@ -366,7 +369,7 @@ function clusterViewFor(db:Database,user:User,c:Database['clusters'][number]) {
 function handlerIds(db:Database,r:Report) { return db.users.filter(u=>u.active&&canActCase(u,r)).map(u=>u.id) }
 /** Offices the case has moved past; they are told about every later step (#30). */
 function earlierHandlerIds(db:Database,r:Report) { return db.users.filter(u=>u.active&&isEarlierHandler(u,r)).map(u=>u.id) }
-const faq=[{id:'FAQ-1',question:'How do I book an appointment?',answer:'Open Appointments, pick one of your professors, choose what the appointment is for, and request an open time. The professor confirms or declines.',href:'/consultations',roles:['student']},{id:'FAQ-2',question:'What does anonymous reporting mean?',answer:'Your report stays linked to your verified account. Handlers see an alias until you choose to share your name with their office.',href:'/reports/new',roles:['student']},{id:'FAQ-3',question:'How are reports routed?',answer:'A report goes to the student\'s adviser first. If the report involves that adviser, it goes to the program chair instead. The program chair and the Dean can read every report in their scope, unless the adviser marks it confidential; then they see only its status. Each office decides the next step.',href:'/cases',roles:['professor','chair','dean','guidance','osas']},{id:'FAQ-4',question:'What can the assistant do?',answer:'It explains ACCS pages, your schedule, and the milestones on your own reports. It cannot decide cases or restrictions. Staff do that.',href:'/assistant',roles:roles as readonly string[]},{id:'FAQ-5',question:'Where do I find official contact details?',answer:'The directory lists faculty and staff offices and their QCU email addresses.',href:'/directory',roles:roles as readonly string[]},{id:'FAQ-6',question:'What still works when features are paused?',answer:'You can still read announcements and class information, use the assistant, and message your professors.',href:'/standing',roles:['student']},{id:'FAQ-7',question:'What does a moderation flag mean?',answer:'A flag asks a moderator to read the post in context. It does not mean anyone did something wrong, and it does not restrict anyone.',href:'/admin/moderation',roles:['administrator']},{id:'FAQ-8',question:'How are roles assigned?',answer:'The CCS Secretary creates student and faculty accounts and names the advisers and Program Chairs. The Dean activates the Secretary account, and the System Administrator manages other roles. A student account has the student role only; faculty and staff have at most two roles, like Dean and professor.',href:'/help',roles:['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary']}]
+const faq=[{id:'FAQ-1',question:'How do I book an appointment?',answer:'Open Appointments, pick one of your professors, choose what the appointment is for, and request an open time. The professor confirms or declines.',href:'/consultations',roles:['student']},{id:'FAQ-2',question:'What does anonymous reporting mean?',answer:'Your report stays linked to your verified account. Handlers see an alias until you choose to share your name with their office.',href:'/reports/new',roles:['student']},{id:'FAQ-3',question:'How are reports routed?',answer:'A report goes to the student\'s adviser first. If the report involves that adviser, it goes to the program chair instead. The program chair and the Dean can read every report in their scope, unless the adviser marks it confidential; then they see only its status. Each office decides the next step.',href:'/cases',roles:['professor','chair','dean','guidance','osas']},{id:'FAQ-4',question:'What can the assistant do?',answer:'It explains ACCS pages, your schedule, and the milestones on your own reports. It cannot decide cases or restrictions. Staff do that.',href:'/assistant',roles:roles as readonly string[]},{id:'FAQ-5',question:'Where do I find official contact details?',answer:'The directory lists faculty and staff offices and their QCU email addresses.',href:'/directory',roles:roles as readonly string[]},{id:'FAQ-6',question:'What still works when features are paused?',answer:'You can still read announcements and class information, use the assistant, and message your professors.',href:'/standing',roles:['student']},{id:'FAQ-7',question:'What does a moderation flag mean?',answer:'A flag asks a moderator to read the post in context. It does not mean anyone did something wrong, and it does not restrict anyone.',href:'/admin/moderation',roles:['administrator']},{id:'FAQ-8',question:'How are roles assigned?',answer:'The CCS Secretary creates student and faculty accounts and names the advisers and Program Chairs. The Dean activates the Secretary account. The Secretary and the System Administrator change roles: each person holds at most two, like Dean and professor, and a student can only add CCS student organization representative.',href:'/help',roles:['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary']}]
 function notificationCategories(user:User){return ['announcement',...(hasRole(user,'student')?['class']:[]),...(hasPermission(user,'message.send')?['message']:[]),...(hasRole(user,'student','professor')?['consultation']:[]),...(hasRole(user,'student','professor','chair','dean','guidance','osas')?['report','case']:[]),...(hasPermission(user,'evaluation.fill')||hasPermission(user,'evaluation.configure')?['evaluation']:[]),...(hasRole(user,'administrator')||hasPermission(user,'moderation.referral')?['moderation']:[])]}
 function filteredFaq(user:User){return faq.filter(entry=>entry.roles.some(role=>user.roles.includes(role as User['roles'][number])))}
 // Three unsettled strikes hold a student's clearance until OSAS records the settlement (#34). Settled strikes stay on the
@@ -403,6 +406,24 @@ function restrictionViews(db:Database,user:User,studentId?:string) {
 // Entries whose actor is the reporting student, who may be anonymous to the people reading the trail.
 const studentActions=['Identity disclosed','Report submitted','Report consent recorded','Talk consent recorded','Reporter message sent']
 /** Audit entries as staff see them, newest first (QA 17 November: the oldest came first in every list). The trail is kept in the order things happened. */
+/** A stored permission change; a proposal saved before approvals existed (a bare boolean) reads as waiting. */
+function overrideOf(value: PermissionOverride | boolean | undefined): PermissionOverride {
+  if (typeof value === 'boolean') return { proposal: { allowed: value, by: '', at: '' }, decisions: [] }
+  return value ? { ...value, decisions: value.decisions ?? [] } : { decisions: [] }
+}
+/** The approved permission changes in force, "role:permission" -> allowed (access.ts applies them). */
+export function approvedOverrides(db: Pick<Database, 'permissionOverrides'>) {
+  return Object.fromEntries(Object.entries(db.permissionOverrides ?? {}).flatMap(([key, value]) => {
+    const override = overrideOf(value)
+    return override.approved === undefined ? [] : [[key, override.approved] as const]
+  }))
+}
+/** Who decides a request from this person: the Secretary, or the administrator when the Secretary asked (decided 20 November 2026). */
+function permissionDeciders(db: Database, proposer: User) {
+  const deciders = db.users.filter(u => u.active && u.id !== proposer.id && hasPermission(u, 'permission.review'))
+  const secretaries = deciders.filter(u => hasRole(u, 'secretary'))
+  return secretaries.length ? secretaries : deciders
+}
 function safeAudit(db:Database,entries:Database['audit']) {return [...entries].reverse().map(entry=>{const confidentialStudent=studentActions.includes(entry.action);return {...entry,actorId:confidentialStudent?undefined:entry.actorId,reason:['cases','reports','records'].includes(entry.module)?undefined:entry.reason,actor:confidentialStudent?{name:'Verified student',roles:['student']}:author(db,entry.actorId)}})}
 function defaultSettings(user: User) {
   const compactRoles: User['roles'] = ['administrator', 'chair', 'dean', 'guidance', 'osas']
@@ -979,7 +1000,21 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
     case'P45':data.stats=[{label:'Active accounts',value:db.users.filter(u=>u.active).length,note:'Can sign in'},{label:'Pending reviews',value:db.moderation.filter(m=>m.status==='Pending').length,note:'Waiting for a moderator'},{label:'Active restrictions',value:db.restrictions.filter(r=>r.active&&r.until>=now().slice(0,10)).length,note:'Features currently paused'},{label:'Assistant sessions',value:db.telemetry.length,note:'Questions are not stored'}];data.moderation=db.moderation.slice(0,5).map(m=>({id:m.id,itemType:m.itemType,source:m.source,status:m.status,at:m.at}));data.audit=safeAudit(db,db.audit.slice(-5));data.systemStatus={api:'Operational',assistant:'Built-in help assistant',storage:'Application store'};data.adoption=roles.map(role=>({label:roleLabels[role],value:db.users.filter(u=>u.roles.includes(role)).length}));break
     case'P46':data.users=db.users.filter(u=>match(`${u.name} ${u.email} ${u.id}`)).map(u=>({...person(refreshRestrictions(db,u)),active:u.active}));break
     case'P47':{const u=pick(db.users,query.id);if(u){data.record={...person(refreshRestrictions(db,u)),active:u.active};data.audit=safeAudit(db,db.audit.filter(a=>a.reference===u.id))}data.roles=roles.map(role=>({id:role,label:roleLabels[role]}));break}
-    case'P48':data.permissionMatrix=Object.entries(permissionRoles).map(([key,grantedRoles])=>({key,roles:grantedRoles}));data.permissionProposals=db.permissionOverrides;data.roles=roles.map(role=>({id:role,label:roleLabels[role]}));break
+    case'P48':{
+      // The matrix shows what is in force (approved changes included); waiting proposals show beside it.
+      data.permissionMatrix=Object.keys(permissionRoles).map(key=>({key,roles:roles.filter(role=>roleHas(role,key)),locked:lockedPermissions.includes(key)}))
+      const overrides=Object.entries(db.permissionOverrides).map(([key,value])=>({key,override:overrideOf(value)}))
+      data.permissionProposals=Object.fromEntries(overrides.flatMap(({key,override})=>override.proposal?[[key,override.proposal.allowed]]:[]))
+      const nameOf=(id:string)=>db.users.find(u=>u.id===id)?.name??'Earlier request'
+      data.permissionRequests=overrides.flatMap(({key,override})=>{
+        if(!override.proposal)return []
+        const role=key.slice(0,key.indexOf(':')),permission=key.slice(key.indexOf(':')+1)
+        return [{key,role,permission,allowed:override.proposal.allowed,proposedBy:nameOf(override.proposal.by),proposedAt:override.proposal.at,reason:override.proposal.reason,
+          canDecide:hasPermission(user,'permission.review')&&override.proposal.by!==user.id}]
+      })
+      data.permissionDecisions=overrides.flatMap(({key,override})=>override.decisions.map(d=>({key,...d,by:nameOf(d.by)}))).sort((a,b)=>b.at.localeCompare(a.at)).slice(0,20)
+      data.canReviewPermissions=hasPermission(user,'permission.review')
+      data.roles=roles.map(role=>({id:role,label:roleLabels[role]}));break}
     case'P49':data.moderation=db.moderation.filter(m=>canSeeModeration(user,m)&&(!query.status||m.status===query.status)).map(m=>({...m,authorId:undefined,reporterId:undefined}));break
     case'P50':{const m=pick(db.moderation.filter(item=>canSeeModeration(user,item)),query.id);if(m){data.record={...m,authorId:undefined,reporterId:undefined,reporter:m.reporterId?{name:'Verified community member'}:undefined};data.decisions=moderationDecisions(user,m);const p=db.posts.find(p=>p.id===m.parentId);if(p)data.post=postView(db,p,user);// The flagged message with up to three before and two after it, so the reviewer reads it in context (QA 17 November).
 if(m.itemType==='message'){const thread=db.threads.find(t=>t.id===m.parentId);const at=thread?thread.messages.findIndex(message=>message.id===m.itemId):-1;data.messages=thread&&at>=0?thread.messages.slice(Math.max(0,at-3),at+3).map(message=>({...messageView(db,message),flagged:message.id===m.itemId})):[]}}break}
@@ -1095,6 +1130,7 @@ const actionPages: Record<string, string[]> = {
   saveNotificationPreferences: ['P44'],
   updateRoles: ['P46', 'P47'],
   updatePermission: ['P48'],
+  decidePermission: ['P48'],
   moderate: ['P50'],
 }
 /** The fields `updateRoles` changes, as the auth store keeps them. */
@@ -1187,9 +1223,9 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       message = 'Post deleted.'
       break
     }
-    case'comment':{if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();if(user.restrictions.includes('post.comment'))throw deny();const p=actionPayloads.comment.parse(request.payload);const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'comment'))throw deny();if(p.anonymous&&!hasRole(user,'student'))throw deny();const added={...addMessage([],p.body),anonymous:p.anonymous};post.comments.push(added);autoFlag(repo,{itemType:'comment',itemId:added.id,parentId:post.id,authorId:user.id,text:p.body});record=postView(db,post,user);message='Comment added.';break}
-    case'react':{const p=actionPayloads.react.parse(request.payload);if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'react'))throw deny();toggleReaction(post,user.id,p.reaction);record=postView(db,post,user);message='Reaction updated.';break}
-    case'reactComment':{const p=actionPayloads.reactComment.parse(request.payload);if(!permissionRoles['post.create']!.some(role=>user.roles.includes(role)))throw deny();const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'react'))throw deny();const comment=post.comments.find(c=>c.id===p.commentId);if(!comment||!canSeeItem(db,user,'comment',comment.id,comment.authorId))throw unavailable();toggleReaction(comment,user.id,p.reaction);record=postView(db,post,user);message='Reaction updated.';break}
+    case'comment':{if(!user.roles.some(role=>roleHas(role,'post.create')))throw deny();if(user.restrictions.includes('post.comment'))throw deny();const p=actionPayloads.comment.parse(request.payload);const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'comment'))throw deny();if(p.anonymous&&!hasRole(user,'student'))throw deny();const added={...addMessage([],p.body),anonymous:p.anonymous};post.comments.push(added);autoFlag(repo,{itemType:'comment',itemId:added.id,parentId:post.id,authorId:user.id,text:p.body});record=postView(db,post,user);message='Comment added.';break}
+    case'react':{const p=actionPayloads.react.parse(request.payload);if(!user.roles.some(role=>roleHas(role,'post.create')))throw deny();const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'react'))throw deny();toggleReaction(post,user.id,p.reaction);record=postView(db,post,user);message='Reaction updated.';break}
+    case'reactComment':{const p=actionPayloads.reactComment.parse(request.payload);if(!user.roles.some(role=>roleHas(role,'post.create')))throw deny();const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private)||!canSeeItem(db,user,'post',post.id,post.authorId)||post.removed)throw unavailable();if(!canPublish(db,user,post.audience,false,'react'))throw deny();const comment=post.comments.find(c=>c.id===p.commentId);if(!comment||!canSeeItem(db,user,'comment',comment.id,comment.authorId))throw unavailable();toggleReaction(comment,user.id,p.reaction);record=postView(db,post,user);message='Reaction updated.';break}
     case'flag':{const p=actionPayloads.flag.parse(request.payload);let authorId:string,body:string,parentId:string,itemId:string;if(p.itemType==='message'){const thread=find(db.threads,id);if(!canThread(db,user,thread))throw unavailable();const m=find(thread.messages,p.itemId);authorId=m.authorId;body=m.body;parentId=thread.id;itemId=m.id}else{const post=find(db.posts,id);if(!canAudience(db,user,post.audience,post.private))throw unavailable();const item=p.itemType==='comment'?find(post.comments,p.itemId):post;authorId=item.authorId;body=item.body;parentId=post.id;itemId=item.id}if(authorId===user.id)throw new ApiError(400,'You cannot report your own post, comment or message.','VALIDATION_ERROR');const mod={id:repo.nextId('MOD'),itemType:p.itemType,itemId,parentId,authorId,reporterId:user.id,source:'User' as const,reason:p.reason,excerpt:body.slice(0,160),status:'Pending',at:now(),history:[]};db.moderation.push(mod);if(p.itemType==='message')redactNotices(db,itemId);audit(repo,user,'Content reported','moderation',mod.id);record={id:mod.id,status:mod.status};message='Sent to a moderator.';break}
     case 'reportStudent': {
       requirePermission(user, 'student.report')
@@ -1697,8 +1733,39 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
       else{const p=actionPayloads.setMemberPosition.parse(request.payload);if(!organization.memberIds.includes(p.memberId))throw unavailable();const{[p.memberId]:_old,...rest}=organization.positions??{};organization.positions=p.position?{...rest,[p.memberId]:p.position}:rest;message=p.position?`Position set to ${p.position}.`:'Position cleared.'}
       audit(repo,user,request.action==='addOrganizationMember'?'Organization member added':request.action==='removeOrganizationMember'?'Organization member removed':'Organization position changed','community',organization.id)
       record={id:organization.id,memberIds:organization.memberIds,positions:organization.positions??{}};break}
-    case'updateRoles':{requirePermission(user,'role.manage');const p=actionPayloads.updateRoles.parse(request.payload);reasonOf(request);const account=find(db.users,id);const roleProblem=rolesProblem(p.roles,p.section);if(roleProblem)throw new ApiError(400,roleProblem,'VALIDATION_ERROR');if(p.roles.some(r=>['student','chair'].includes(r))&&!p.program&&!account.program)throw new ApiError(400,'Choose a program for that role.','VALIDATION_ERROR');account.roles=p.roles;if(p.program)account.program=p.program;if(p.section)account.section=p.section.trim().toUpperCase();if(p.active!==undefined)account.active=p.active;audit(repo,user,'Role assignment changed','identity',account.id,undefined,reasonOf(request));notify(repo,account.id,'role','P43');record={...person(account),active:account.active};message='Assignment saved. The new roles apply to the user right away.';break}
-    case'updatePermission':{requirePermission(user,'role.manage');const p=actionPayloads.updatePermission.parse(request.payload);reasonOf(request);if(!permissionRoles[p.permission])throw new ApiError(400,'That permission does not exist.','VALIDATION_ERROR');/* TBD(D-06): approval workflow is undefined; save proposed cells without granting new runtime powers. */db.permissionOverrides[`${p.role}:${p.permission}`]=p.allowed;audit(repo,user,'Permission change proposed','identity',`${p.role}:${p.permission}`,undefined,reasonOf(request));record={...p,status:'Pending CCS approval'};message='Permission change saved for review.';break}
+    case'updateRoles':{requirePermission(user,'role.manage');const p=actionPayloads.updateRoles.parse(request.payload);reasonOf(request);const account=find(db.users,id);const roleProblem=rolesProblem(p.roles,p.section);if(roleProblem)throw new ApiError(400,roleProblem,'VALIDATION_ERROR');if(p.roles.some(r=>['student','chair'].includes(r))&&!p.program&&!account.program)throw new ApiError(400,'Choose a program for that role.','VALIDATION_ERROR');if(p.year!==undefined){if(!p.roles.includes('student'))throw new ApiError(400,'Only students have a year level.','VALIDATION_ERROR');const yearIssue=campusYearProblem(account.campus??mainCampus,p.year);if(yearIssue)throw new ApiError(400,yearIssue,'VALIDATION_ERROR');account.year=p.year}account.roles=p.roles;if(p.program)account.program=p.program;if(p.section)account.section=p.section.trim().toUpperCase();if(p.active!==undefined)account.active=p.active;audit(repo,user,'Role assignment changed','identity',account.id,undefined,reasonOf(request));notify(repo,account.id,'role','P43');record={...person(account),active:account.active};message='Assignment saved. The new roles apply to the user right away.';break}
+    case'updatePermission':{
+      // A request, not the change itself: it takes effect once the Secretary approves it (decided 20 November 2026).
+      requirePermission(user,'role.manage');const p=actionPayloads.updatePermission.parse(request.payload);const reason=reasonOf(request)
+      if(!permissionRoles[p.permission])throw new ApiError(400,'That permission does not exist.','VALIDATION_ERROR')
+      if(lockedPermissions.includes(p.permission))throw new ApiError(400,'Who manages roles, accounts, approvals and the audit trail cannot be changed by a request.','VALIDATION_ERROR')
+      const key=`${p.role}:${p.permission}`
+      const current=overrideOf(db.permissionOverrides[key])
+      if(roleHas(p.role,p.permission)===p.allowed&&!current.proposal)throw conflict(p.allowed?'That role already has this permission.':'That role already does not have this permission.')
+      db.permissionOverrides[key]={...current,proposal:{allowed:p.allowed,by:user.id,at:now(),reason}}
+      audit(repo,user,'Permission change proposed','identity',key,undefined,reason)
+      const deciders=permissionDeciders(db,user)
+      for(const decider of deciders)notify(repo,decider.id,'permission','P48',key,{body:`${user.name} asked to ${p.allowed?'give':'take'} "${p.permission}" ${p.allowed?'to':'from'} ${roleLabels[p.role]}. Approve or reject it under Permissions.`})
+      record={...p,status:'Waiting for approval'}
+      message=deciders.some(d=>hasRole(d,'secretary'))?'Sent to the CCS Secretary for approval.':'Sent for approval.'
+      break}
+    case'decidePermission':{
+      requirePermission(user,'permission.review');const p=actionPayloads.decidePermission.parse(request.payload);const reason=reasonOf(request)
+      const current=db.permissionOverrides[p.key]===undefined?undefined:overrideOf(db.permissionOverrides[p.key])
+      if(!current?.proposal)throw conflict('There is no request waiting for that permission.')
+      // Nobody approves their own request: the administrator decides the Secretary's.
+      if(current.proposal.by===user.id)throw new ApiError(403,'Someone else has to decide your own request.','FORBIDDEN')
+      const permission=p.key.slice(p.key.indexOf(':')+1)
+      if(lockedPermissions.includes(permission))throw new ApiError(400,'Who manages roles, accounts, approvals and the audit trail cannot be changed by a request.','VALIDATION_ERROR')
+      const approve=p.decision==='approve'
+      const allowed=current.proposal.allowed
+      db.permissionOverrides[p.key]={...(approve?{approved:allowed}:current.approved===undefined?{}:{approved:current.approved}),decisions:[...current.decisions,{at:now(),by:user.id,decision:approve?'Approved':'Rejected',allowed,reason}]}
+      setApprovedOverrides(approvedOverrides(db))
+      audit(repo,user,approve?'Permission change approved':'Permission change rejected','identity',p.key,undefined,reason)
+      if(current.proposal.by)notify(repo,current.proposal.by,'permission','P48',p.key,{body:`Your request to ${allowed?'give':'take'} "${permission}" was ${approve?'approved. It applies at each person\'s next page load.':'rejected.'} Reason: ${reason}`})
+      record={key:p.key,decision:approve?'Approved':'Rejected'}
+      message=approve?'Approved. The change is now in force.':'Rejected. Nothing changed.'
+      break}
     case'moderate':{const reviewer=hasPermission(user,'moderation.review');if(!reviewer&&!hasPermission(user,'moderation.referral')&&!hasPermission(user,'moderation.osas'))throw deny();const p=actionPayloads.moderate.parse(request.payload);const reason=reasonOf(request);const m=find(db.moderation,id);if(!canSeeModeration(user,m))throw unavailable()
       // D-04 (decided 2026-11-10): a moderator refers user-reported content to the CCS Secretary, who makes the final decision on it.
       if(m.status===referredStatus){if(!hasPermission(user,'moderation.referral'))throw conflict('This item was referred to the CCS Secretary.');if(!['dismiss','osas'].includes(p.decision))throw conflict('The CCS Secretary dismisses the flag or sends it to OSAS.')}
