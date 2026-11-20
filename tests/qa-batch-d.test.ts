@@ -87,18 +87,19 @@ describe('to-dos for every role', () => {
 })
 
 describe('case status', () => {
-  it('says where a case is escalated to, and "Case File at Guidance" once a case file is open', async () => {
+  // 20 November 2026: the status is the step (Submitted, Read, Escalated, Resolved, Closed); the office is given apart.
+  it('is one of the five steps, with the office given separately, also for a case file', async () => {
     const student = await login('QCU-STU-IT-A')
-    const reports = (await student.get('/api/pages/P18')).body.data.reports as { id: string; stage: string; status: string }[]
+    const reports = (await student.get('/api/pages/P18')).body.data.reports as { id: string; stage: string; status: string; office: string }[]
     for (const report of reports) {
-      expect(report.status).not.toMatch(/^With /)
-      if (!['Resolved', 'Closed', 'Draft', 'Case File at Guidance'].includes(report.status)) expect(report.status).toMatch(/^Escalated to /)
+      expect(['Submitted', 'Read', 'Escalated', 'Resolved', 'Closed', 'Draft']).toContain(report.status)
+      expect(report.office).toBeTruthy()
     }
     const filed = await repo.transact((unit) => unit.read().reports.find((r) => r.stage === 'guidance' && r.caseFileId))
-    if (filed) {
-      const guidance = await login('QCU-GUIDANCE')
-      expect((await guidance.get(`/api/pages/P22?id=${filed.id}`)).body.data.record.status).toBe('Case File at Guidance')
-    }
+    expect(filed).toBeTruthy()
+    const guidance = await login('QCU-GUIDANCE')
+    const record = (await guidance.get(`/api/pages/P22?id=${filed!.id}`)).body.data.record
+    expect(record).toMatchObject({ status: 'Escalated', office: 'Guidance Office', type: 'Case File' })
   })
 })
 

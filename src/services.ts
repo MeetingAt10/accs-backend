@@ -30,10 +30,11 @@ const isPastMoment = (value: string) => {
 const dateIssue = (path: string, message: string) => new z.ZodError([{ code: 'custom', path: [path], message, input: undefined }])
 const offices: Record<Stage,string> = { adviser:'Adviser',chair:'Program Chair',dean:'Dean',guidance:'Guidance Office',osas:'OSAS' }
 const stageRoles: Record<Stage,string> = { adviser:'professor',chair:'chair',dean:'dean',guidance:'guidance',osas:'osas' }
-// A case's status says where it is going or how it ended (decided 16 November 2026): "Escalated to <office>", "Resolved"
-// or "Closed", and "Case File at Guidance" once Guidance opens a case file. The office alone is the stage, so the status
-// no longer repeats it as "With Adviser".
-const statusFor = (report: Report) => ['Resolved','Closed','Draft'].includes(report.status) ? report.status : report.stage === 'guidance' && report.caseFileId ? 'Case File at Guidance' : `Escalated to ${offices[report.stage]}`
+// A case's status is its step (decided 20 November 2026, replacing "Escalated to <office>" of 16 November): Submitted,
+// Read, Escalated, Resolved or Closed, the same five steps the student's progress shows. The office is given separately
+// (`office`), so a report at Submitted no longer reads "Escalated to Adviser". A case file shows as one by its type and
+// CF reference.
+const statusFor = (report: Report): string => report.status === 'Draft' ? 'Draft' : progressSteps[progressFor(report).step]
 const daysBetween = (from: string, to: string) => Math.max(0, (Date.parse(to) - Date.parse(from)) / 86400000)
 /** When the report entered its current stage: the first entry of the last unbroken run of history entries in that stage. */
 function stageEnteredAt(report: Report) {
