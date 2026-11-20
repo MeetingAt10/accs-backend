@@ -22,13 +22,19 @@ const now = () => new Date().toISOString()
 export const campusNow = () => { const t = new Date(Date.now() + 8 * 3_600_000).toISOString(); return { date: t.slice(0, 10), time: t.slice(11, 16) } }
 /** True when a campus date (and start time) has already begun. */
 const hasBegun = (date: string, start = '00:00') => { const n = campusNow(); return date < n.date || date === n.date && start <= n.time }
+/** A date and time someone picked has already come; one written without an offset is campus time. */
+const isPastMoment = (value: string) => {
+  const at = Date.parse(/(Z|[+-]\d\d:\d\d)$/.test(value) ? value : value + '+08:00')
+  return at <= Date.now()
+}
 const dateIssue = (path: string, message: string) => new z.ZodError([{ code: 'custom', path: [path], message, input: undefined }])
 const offices: Record<Stage,string> = { adviser:'Adviser',chair:'Program Chair',dean:'Dean',guidance:'Guidance Office',osas:'OSAS' }
 const stageRoles: Record<Stage,string> = { adviser:'professor',chair:'chair',dean:'dean',guidance:'guidance',osas:'osas' }
-// A case's status says where it is going or how it ended (decided 16 November 2026): "Escalated to <office>", "Resolved"
-// or "Closed", and "Case File at Guidance" once Guidance opens a case file. The office alone is the stage, so the status
-// no longer repeats it as "With Adviser".
-const statusFor = (report: Report) => ['Resolved','Closed','Draft'].includes(report.status) ? report.status : report.stage === 'guidance' && report.caseFileId ? 'Case File at Guidance' : `Escalated to ${offices[report.stage]}`
+// A case's status is its step (decided 20 November 2026, replacing "Escalated to <office>" of 16 November): Submitted,
+// Read, Escalated, Resolved or Closed, the same five steps the student's progress shows. The office is given separately
+// (`office`), so a report at Submitted no longer reads "Escalated to Adviser". A case file shows as one by its type and
+// CF reference.
+const statusFor = (report: Report): string => report.status === 'Draft' ? 'Draft' : progressSteps[progressFor(report).step]
 const daysBetween = (from: string, to: string) => Math.max(0, (Date.parse(to) - Date.parse(from)) / 86400000)
 /** When the report entered its current stage: the first entry of the last unbroken run of history entries in that stage. */
 function stageEnteredAt(report: Report) {
@@ -694,7 +700,10 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
     }
     case 'P11':
     case 'P12': {
-      const threads = db.threads.filter(thread => canThread(db, user, thread))
+      // Most recent conversation first, direct and group alike (QA 17 November, V3: direct messages came first even when
+      // a group had the newest message).
+      const lastAt = (thread: Thread) => thread.messages.at(-1)?.at ?? ''
+      const threads = db.threads.filter(thread => canThread(db, user, thread)).sort((a, b) => lastAt(b).localeCompare(lastAt(a)))
       data.threads = threads
         .filter(thread => match(threadTitle(db, thread, user)))
         .map(thread => ({
@@ -967,7 +976,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
       data.requiredCategories = notificationCategories(user).filter(category => requiredNotificationCategories.includes(category))
       break
     }
-    case'P45':data.stats=[{label:'Active accounts',value:db.users.filter(u=>u.active).length,note:'Can sign in'},{label:'Pending reviews',value:db.moderation.filter(m=>m.status==='Pending').length,note:'Waiting for a moderator'},{label:'Active restrictions',value:db.restrictions.filter(r=>r.active&&r.until>=now().slice(0,10)).length,note:'Features currently paused'},{label:'Assistant sessions',value:db.telemetry.length,note:'Questions are not stored'}];data.moderation=db.moderation.slice(0,5).map(m=>({id:m.id,itemType:m.itemType,source:m.source,status:m.status,at:m.at}));data.audit=safeAudit(db,db.audit.slice(-5).reverse());data.systemStatus={api:'Operational',assistant:'Built-in help assistant',storage:'Application store'};data.adoption=roles.map(role=>({label:roleLabels[role],value:db.users.filter(u=>u.roles.includes(role)).length}));break
+    case'P45':data.stats=[{label:'Active accounts',value:db.users.filter(u=>u.active).length,note:'Can sign in'},{label:'Pending reviews',value:db.moderation.filter(m=>m.status==='Pending').length,note:'Waiting for a moderator'},{label:'Active restrictions',value:db.restrictions.filter(r=>r.active&&r.until>=now().slice(0,10)).length,note:'Features currently paused'},{label:'Assistant sessions',value:db.telemetry.length,note:'Questions are not stored'}];data.moderation=db.moderation.slice(0,5).map(m=>({id:m.id,itemType:m.itemType,source:m.source,status:m.status,at:m.at}));data.audit=safeAudit(db,db.audit.slice(-5));data.systemStatus={api:'Operational',assistant:'Built-in help assistant',storage:'Application store'};data.adoption=roles.map(role=>({label:roleLabels[role],value:db.users.filter(u=>u.roles.includes(role)).length}));break
     case'P46':data.users=db.users.filter(u=>match(`${u.name} ${u.email} ${u.id}`)).map(u=>({...person(refreshRestrictions(db,u)),active:u.active}));break
     case'P47':{const u=pick(db.users,query.id);if(u){data.record={...person(refreshRestrictions(db,u)),active:u.active};data.audit=safeAudit(db,db.audit.filter(a=>a.reference===u.id))}data.roles=roles.map(role=>({id:role,label:roleLabels[role]}));break}
     case'P48':data.permissionMatrix=Object.entries(permissionRoles).map(([key,grantedRoles])=>({key,roles:grantedRoles}));data.permissionProposals=db.permissionOverrides;data.roles=roles.map(role=>({id:role,label:roleLabels[role]}));break
@@ -1328,6 +1337,8 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
     }
     case 'chooseTalkMode': {
       const p = actionPayloads.chooseTalkMode.parse(request.payload)
+      // A preferred time is still to come (QA 17 November, V3: past dates could be picked).
+      if (p.preferredAt && isPastMoment(p.preferredAt)) throw dateIssue('preferredAt', 'Choose a date and time that has not passed yet.')
       const r = getOwnReport(p.reportId)
       if (['Resolved', 'Closed'].includes(r.status)) throw conflict('This concern is closed.')
       const call = p.mode === 'video' || p.mode === 'voice'
@@ -1368,6 +1379,9 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
     case 'setTalkDetails': {
       const p = actionPayloads.setTalkDetails.parse(request.payload)
       const r = getCase(p.reportId)
+      // A new time is still to come; a time already saved may stay when only the link or place changes.
+      const kept = [r.talk?.scheduledAt, r.talk?.preferredAt].some(saved => saved && Date.parse(saved) === Date.parse(p.scheduledAt ?? ''))
+      if (p.scheduledAt && !kept && isPastMoment(p.scheduledAt)) throw dateIssue('scheduledAt', 'Choose a date and time that has not passed yet.')
       if (['Resolved', 'Closed'].includes(r.status)) throw conflict('This concern is closed.')
       if (!r.talk) throw conflict('The student has not chosen how to talk yet.')
       if (p.meetingLink && r.talk.mode !== 'video' && r.talk.mode !== 'voice') throw conflict('A meeting link only applies to video and voice calls.')
@@ -1838,5 +1852,14 @@ export async function materialDownloadUrl(repo:Repository,user:User,id:string,st
 export interface AssistantProvider { answer(db:Database,user:User,question:string):{reply:string;sources:{title:string;href:string}[]} }
 // Writing help is matched before report status, because a request for help writing a report says "report" too; status
 // answers name a report by category and filing date, and by its ID only when the question gave it.
-export const demoAssistant:AssistantProvider={answer(db,user,question){const q=question.toLowerCase();const fallback={reply:'I can explain ACCS pages, your schedule, and the milestones on your own reports. I cannot answer that one. Please ask the office that handles it.',sources:[{title:'Help',href:'/help'}]};if(/guilt|guilty|verdict|punish|decide|restrict|another student|reveal|identity|who reported/.test(q))return fallback;if(/^\s*(hi|hello|hey|good (morning|afternoon|evening)|kumusta|musta)\b/.test(q)&&q.trim().split(/\s+/).length<=4)return{reply:`Hello, ${user.name.split(' ')[0]}! I can explain ACCS pages and how appointments, reports and evaluations work. Try one of the suggestions below, or ask your own question.`,sources:[{title:'Help',href:'/help'}]};const mentioned:string[]=question.match(/RPT-[0-9A-Z]+/g)??[];if(mentioned.some(id=>!db.reports.some(r=>r.id===id&&r.ownerId===user.id)))return fallback;if(/schedule|calendar|appointment|consultation/.test(q)){if(!canPage(user,'P13'))return fallback;const own=visibleConsultations(db,user);const tasks=db.todos.filter(t=>t.ownerId===user.id);return {reply:`Your calendar has ${visibleEvents(db,user).length} college events${hasRole(user,'student')?`, ${tasks.length} to-do${tasks.length===1?"":"s"}`:''} and ${own.length} appointment request${own.length===1?'':'s'}. Open the calendar or Consultations for dates and status.`,sources:[{title:'Calendar',href:'/calendar'},...(canPage(user,'P14')?[{title:'Appointments',href:'/consultations'}]:[])]}}if(/draft|write|word|organi[sz]e|phrase/.test(q)){return{reply:'Say what happened, when, and where, and what you want the office to look at. Name only the people the office needs to know about. Read it over before you submit. The assistant does not decide what happened.',sources:[{title:'Help',href:'/help'}]}}if(/report|milestone|stage/.test(q)&&hasRole(user,'student')){const reports=db.reports.filter(r=>r.ownerId===user.id&&(!mentioned.length||mentioned.includes(r.id)));return {reply:reports.length?reports.map(r=>`${mentioned.includes(r.id)?r.id:`${r.category}, filed ${r.createdAt.slice(0,10)}`}: ${statusFor(r)}. ${r.history.filter(h=>h.public).at(-1)?.update??'No update yet.'}`).join('\n'):'You have not filed a report yet. File one from My reports.',sources:[{title:'My reports',href:'/reports'}]}}const entry=filteredFaq(user).find(f=>f.question.toLowerCase().split(/\W+/).filter(w=>w.length>4).some(w=>q.includes(w)));if(entry)return{reply:entry.answer,sources:[{title:entry.question,href:entry.href}]};if(/help|can you|what can/.test(q))return{reply:'I can explain ACCS pages and how reports, appointments, and evaluations work. Staff decide case outcomes and restrictions.',sources:[{title:'Help',href:'/help'}]};return fallback}}
+export const demoAssistant:AssistantProvider={answer(db,user,question){const q=question.toLowerCase();const fallback={reply:'I can explain ACCS pages, your schedule, and the milestones on your own reports. I cannot answer that one. Please ask the office that handles it.',sources:[{title:'Help',href:'/help'}]};if(/guilt|guilty|verdict|punish|decide|restrict|another student|reveal|identity|who reported/.test(q))return fallback;if(/^\s*(hi|hello|hey|good (morning|afternoon|evening)|kumusta|musta)\b/.test(q)&&q.trim().split(/\s+/).length<=4)return{reply:`Hello, ${user.name.split(' ')[0]}! I can explain ACCS pages and how appointments, reports and evaluations work. Try one of the suggestions below, or ask your own question.`,sources:[{title:'Help',href:'/help'}]};const mentioned:string[]=question.match(/RPT-[0-9A-Z]+/g)??[];
+// A how, what, where or why question goes to the matching help answer before any summary of the person's own data (QA 17
+// November, V3: "What does anonymous reporting mean?" listed the student's reports, and "How do I book" the calendar).
+// Question words ("where", "which") say nothing about the topic, so they never make a match; a question about "my" own
+// things is answered from the person's data below.
+const faqStopWords=new Set(['where','which','there','about','would','could','should','their'])
+const entry=filteredFaq(user).find(f=>f.question.toLowerCase().split(/\W+/).filter(w=>w.length>4&&!faqStopWords.has(w)).some(w=>q.includes(w)));
+if(entry&&!/\bmy\b/.test(q)&&/^\s*(how|what|where|why|who|can|does|do|is)\b/.test(q))return{reply:entry.answer,sources:[{title:entry.question,href:entry.href}]};
+// Evaluation dates come from the cycles themselves (QA 17 November, V3: "When is the next evaluation?" got the fallback).
+if(/evaluat/.test(q)&&/when|next|open|close|due|deadline|until/.test(q)){const day=(d:string)=>new Date(d+'T00:00:00Z').toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric',timeZone:'UTC'});const today=campusNow().date;const open=db.cycles.find(c=>c.status==='Published'&&c.opens<=today&&c.closes>=today);const next=db.cycles.filter(c=>c.status!=='Closed'&&c.opens>today).sort((a,b)=>a.opens.localeCompare(b.opens))[0];return{reply:open?`${open.title} is open until ${day(open.closes)}.${next?` The next one, ${next.title}, opens on ${day(next.opens)}.`:''}`:next?`The next evaluation, ${next.title}, opens on ${day(next.opens)}.`:'No evaluation is scheduled yet. The Dean opens each one, and you get a notification when it starts.',sources:[{title:'Evaluations',href:'/evaluations'}]}}if(mentioned.some(id=>!db.reports.some(r=>r.id===id&&r.ownerId===user.id)))return fallback;if(/schedule|calendar|appointment|consultation/.test(q)){if(!canPage(user,'P13'))return fallback;const own=visibleConsultations(db,user);const tasks=db.todos.filter(t=>t.ownerId===user.id);return {reply:`Your calendar has ${visibleEvents(db,user).length} college events${hasRole(user,'student')?`, ${tasks.length} to-do${tasks.length===1?"":"s"}`:''} and ${own.length} appointment request${own.length===1?'':'s'}. Open the calendar or Consultations for dates and status.`,sources:[{title:'Calendar',href:'/calendar'},...(canPage(user,'P14')?[{title:'Appointments',href:'/consultations'}]:[])]}}if(/draft|write|word|organi[sz]e|phrase/.test(q)){return{reply:'Say what happened, when, and where, and what you want the office to look at. Name only the people the office needs to know about. Read it over before you submit. The assistant does not decide what happened.',sources:[{title:'Help',href:'/help'}]}}if(/report|milestone|stage/.test(q)&&hasRole(user,'student')){const reports=db.reports.filter(r=>r.ownerId===user.id&&(!mentioned.length||mentioned.includes(r.id)));return {reply:reports.length?reports.map(r=>`${mentioned.includes(r.id)?r.id:`${r.category}, filed ${r.createdAt.slice(0,10)}`}: ${statusFor(r)}. ${r.history.filter(h=>h.public).at(-1)?.update??'No update yet.'}`).join('\n'):'You have not filed a report yet. File one from My reports.',sources:[{title:'My reports',href:'/reports'}]}}if(entry)return{reply:entry.answer,sources:[{title:entry.question,href:entry.href}]};if(/help|can you|what can/.test(q))return{reply:'I can explain ACCS pages and how reports, appointments, and evaluations work. Staff decide case outcomes and restrictions.',sources:[{title:'Help',href:'/help'}]};return fallback}}
 function assistantAnswer(db:Database,user:User,question:string){return demoAssistant.answer(db,user,question)}

@@ -167,7 +167,7 @@ describe('escalation through the API', () => {
     const { agent: student } = await signIn(app, 'QCU-STU-CS')
     const filed = await file(student, 'Hinipuan ako ni sir sa faculty room.')
     expect(filed.status).toBe(200)
-    expect(filed.body.record).toMatchObject({ stage: 'guidance', office: 'Guidance Office', status: 'Escalated to Guidance Office', severity: 'low' })
+    expect(filed.body.record).toMatchObject({ stage: 'guidance', office: 'Guidance Office', status: 'Submitted', severity: 'low' })
     const id = filed.body.record.id as string
     expect(repo.read().reports.find((r) => r.id === id)).toMatchObject({ stage: 'guidance', bypassed: true, routing: { rule: 'critical', severityHint: 'critical' } })
     const { agent: guidance } = await signIn(app, 'QCU-GUIDANCE')
@@ -228,7 +228,7 @@ describe('escalation edge cases through the API', () => {
     const { agent } = await signIn(app, 'QCU-STU-CS')
     const filed = await file(agent, 'Hinipuan ako ni sir sa faculty room.')
     expect(filed.status).toBe(200)
-    expect(filed.body.record).toMatchObject({ stage: 'chair', office: 'Program Chair', status: 'Escalated to Program Chair' })
+    expect(filed.body.record).toMatchObject({ stage: 'chair', office: 'Program Chair', status: 'Submitted' })
     const id = filed.body.record.id as string
     const stored = repo.read().reports.find((r) => r.id === id)!
     expect(stored).toMatchObject({ stage: 'chair', bypassed: true, routing: { rule: 'critical-no-guidance', severityHint: 'critical' } })
