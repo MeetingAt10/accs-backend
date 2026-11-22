@@ -220,6 +220,31 @@ describe('an approved permission change on every instance', () => {
   })
 })
 
+describe('faculty review before publishing', () => {
+  it('names as many waiting professors as the cycle page lists as not yet reviewed', async () => {
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
+    const page = (await dean.get('/api/pages/P31?id=CYCLE-2026-2')).body.data
+    const waiting = (page.facultyReviews as { status: string }[]).filter((review) => review.status === 'Not yet').length
+    expect(waiting).toBeGreaterThan(0)
+    const publish = await act(dean, 'P31', 'cycleAction', { status: 'Published' }, 'CYCLE-2026-2')
+    expect(publish.status).toBe(409)
+    expect(publish.body.error).toMatch(new RegExp(`^${waiting} faculty`))
+  })
+})
+
+describe('office hours', () => {
+  it('belong to faculty and offices, not students', async () => {
+    const student = await login('QCU-STU-IT-A')
+    const saved = await act(student, 'P39', 'saveProfile', { title: 'CCS student', bio: 'Hello', education: '', officeHours: 'Mondays' })
+    expect(saved.status).toBe(400)
+    expect(saved.body.error).toBe('Students have no office hours.')
+    expect((await act(student, 'P39', 'saveProfile', { title: 'CCS student', bio: 'Hello', education: '', officeHours: '' })).status).toBe(200)
+    expect((await student.get('/api/pages/P39')).body.data.record).not.toHaveProperty('officeHours')
+    const professor = await login('QCU-PROF-IT')
+    expect((await professor.get('/api/pages/P39')).body.data.record.officeHours).toBeTruthy()
+  })
+})
+
 describe('adding people to a group', () => {
   const startGroup = async () => {
     const professor = await login('QCU-PROF-IT')

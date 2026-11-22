@@ -52,6 +52,7 @@ export async function secretarySession(app: App, username = 'ccs.secretary') {
 export function reviewAll(repo: { read(): Database }, cycleId: string) {
   const db = repo.read()
   const cycle = db.cycles.find((c) => c.id === cycleId)!
-  for (const facultyId of new Set(db.assignments.filter((a) => a.cycleId === cycleId).map((a) => a.facultyId)))
+  // Every active professor reviews the questions (QA 19 November), and publishing waits for all of them (QA 17 November, V3).
+  for (const facultyId of db.users.filter((u) => u.active && u.roles.includes('professor')).map((u) => u.id))
     if (!cycle.reviews.some((r) => r.userId === facultyId)) cycle.reviews.push({ userId: facultyId, decision: 'reviewed', note: '', at: new Date().toISOString() })
 }
