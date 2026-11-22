@@ -244,3 +244,56 @@ describe('office hours', () => {
     expect((await professor.get('/api/pages/P39')).body.data.record.officeHours).toBeTruthy()
   })
 })
+
+describe('adding people to a group', () => {
+  const startGroup = async () => {
+    const professor = await login('QCU-PROF-IT')
+    const started = await act(professor, 'P11', 'createGroupThread', { title: 'Capstone team', body: 'Hello team', memberIds: ['QCU-STU-IT-A', 'QCU-STU-RESTRICTED'] })
+    expect(started.status, JSON.stringify(started.body)).toBe(200)
+    return { professor, id: started.body.record.id as string }
+  }
+
+  it('lets a member add people they can message, who then see the whole conversation', async () => {
+    const { professor, id } = await startGroup()
+    const added = await act(professor, 'P12', 'addGroupMembers', { memberIds: ['QCU-CHAIR-IT'] }, id)
+    expect(added.status, JSON.stringify(added.body)).toBe(200)
+    const chair = await login('QCU-CHAIR-IT')
+    const page = (await chair.get(`/api/pages/P12?id=${id}`)).body.data.record
+    expect(page.members.map((m: { id: string }) => m.id)).toContain('QCU-CHAIR-IT')
+    expect(page.messages.map((m: { body: string }) => m.body)).toContain('Hello team')
+    expect(page.unread).toBe(0)
+    expect(repo.read().notifications.some((n) => n.recipientId === 'QCU-CHAIR-IT' && n.recordId === id)).toBe(true)
+  })
+
+  it('refuses people the member cannot message, people already in it, and direct conversations', async () => {
+    const { professor, id } = await startGroup()
+    expect((await act(professor, 'P12', 'addGroupMembers', { memberIds: ['QCU-STU-CS'] }, id)).status).toBe(404)
+    expect((await act(professor, 'P12', 'addGroupMembers', { memberIds: ['QCU-STU-IT-A'] }, id)).status).toBe(409)
+    const student = await login('QCU-STU-IT-A')
+    expect((await act(student, 'P12', 'addGroupMembers', { memberIds: ['QCU-STU-RESTRICTED'] }, 'THREAD-DIRECT-1')).status).toBe(409)
+  })
+})
+
+describe('unsent messages', () => {
+  it('keeps a draft per conversation on the server until it is sent', async () => {
+    const student = await login('QCU-STU-IT-A')
+    expect((await act(student, 'P12', 'saveMessageDraft', { body: 'Half a thought' }, 'THREAD-IT-A')).status).toBe(200)
+    // Another device sees the same draft.
+    const elsewhere = await login('QCU-STU-IT-A')
+    expect((await elsewhere.get('/api/pages/P12?id=THREAD-IT-A')).body.data.record.draft).toMatchObject({ body: 'Half a thought', attachments: [] })
+    // Other people never see it.
+    const professor = await login('QCU-PROF-IT')
+    expect((await professor.get('/api/pages/P12?id=THREAD-IT-A')).body.data.record.draft).toBeUndefined()
+    expect((await act(elsewhere, 'P12', 'sendMessage', { body: 'Half a thought, finished.' }, 'THREAD-IT-A')).status).toBe(200)
+    expect((await student.get('/api/pages/P12?id=THREAD-IT-A')).body.data.record.draft).toBeUndefined()
+  })
+
+  it('forgets a draft that is emptied, and refuses a conversation the person is not in', async () => {
+    const student = await login('QCU-STU-IT-A')
+    await act(student, 'P12', 'saveMessageDraft', { body: 'Something' }, 'THREAD-IT-A')
+    expect((await act(student, 'P12', 'saveMessageDraft', { body: '   ' }, 'THREAD-IT-A')).status).toBe(200)
+    expect((await student.get('/api/pages/P12?id=THREAD-IT-A')).body.data.record.draft).toBeUndefined()
+    const outsider = await login('QCU-STU-CS')
+    expect((await act(outsider, 'P12', 'saveMessageDraft', { body: 'Hi' }, 'THREAD-IT-A')).status).toBe(404)
+  })
+})
