@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createApp } from '../src/app.js'
 import { createMemoryRepository } from '../src/store.js'
-import { seedPassword, secretarySession, setUpAuthStore } from './helpers.js'
+import { seedPassword, secretaryPassword, secretarySession, setUpAuthStore, signIn } from './helpers.js'
 
 let repo: ReturnType<typeof createMemoryRepository>
 let app: ReturnType<typeof createApp>
@@ -191,6 +191,17 @@ describe('role changes by the Secretary', () => {
     expect(repo.read().users.find((u) => u.id === 'QCU-PROF-IT')!.roles).toEqual(['professor', 'chair'])
   })
 
+  it('keeps the Secretary off her own roles and off the administrator, Dean and Secretary accounts (code review, 23 November 2026)', async () => {
+    const secretary = await secretarySession(app)
+    const self = await act(secretary, 'P47', 'updateRoles', { roles: ['secretary', 'administrator'] }, 'QCU-SECRETARY', 'More access')
+    expect(self.status).toBe(403)
+    expect((await act(secretary, 'P47', 'updateRoles', { roles: ['staff'], active: false }, 'ACCS-ADMIN', 'Lock out')).status).toBe(403)
+    expect((await act(secretary, 'P47', 'updateRoles', { roles: ['professor', 'dean'] }, 'QCU-PROF-IT', 'Promote')).status).toBe(403)
+    expect(repo.read().users.find((u) => u.id === 'QCU-SECRETARY')!.roles).toEqual(['secretary'])
+    expect(repo.read().users.find((u) => u.id === 'ACCS-ADMIN')!).toMatchObject({ roles: ['administrator'], active: true })
+    expect(repo.read().users.find((u) => u.id === 'QCU-PROF-IT')!.roles).toEqual(['professor'])
+  })
+
   it('sets a student\'s year level, within what the campus teaches', async () => {
     const admin = await login('ACCS-ADMIN')
     expect((await act(admin, 'P47', 'updateRoles', { roles: ['student'], year: 4, section: 'B' }, 'QCU-STU-IT-A', 'Moved up')).status).toBe(200)
@@ -217,6 +228,27 @@ describe('an approved permission change on every instance', () => {
     expect((await act(secretary, 'P48', 'decidePermission', { key: 'osas:post.create', decision: 'approve' }, undefined, 'Agreed')).status).toBe(200)
     const osasElsewhere = await signInTo(second, 'QCU-OSAS')
     expect((await osasElsewhere.get('/api/session')).body.permissions).not.toContain('post.create')
+  })
+
+  it('keeps a decision made on another instance when this one decides a different permission (code review, 23 November 2026)', async () => {
+    const authStore = setUpAuthStore()
+    // Separate record copies: each instance sees only its own decision, like two instances that read before the other wrote.
+    const first = createApp(createMemoryRepository(), { authStore })
+    const second = createApp(createMemoryRepository(), { authStore })
+    const signInTo = async (instance: typeof first, id: string) => {
+      const agent = request.agent(instance)
+      expect((await agent.post('/api/auth/sign-in').send({ emailOrId: id, password: seedPassword })).status).toBe(200)
+      return agent
+    }
+    const adminA = await signInTo(first, 'ACCS-ADMIN')
+    const secretaryA = await secretarySession(first)
+    expect((await act(adminA, 'P48', 'updatePermission', { role: 'staff', permission: 'calendar.view', allowed: true }, undefined, 'QA check')).status).toBe(200)
+    expect((await act(secretaryA, 'P48', 'decidePermission', { key: 'staff:calendar.view', decision: 'approve' }, undefined, 'Agreed')).status).toBe(200)
+    const { agent: secretaryB } = await signIn(second, 'ccs.secretary', secretaryPassword)
+    const adminB = await signInTo(second, 'ACCS-ADMIN')
+    expect((await act(secretaryB, 'P48', 'updatePermission', { role: 'secretary', permission: 'analytics.view', allowed: true }, undefined, 'QA check')).status).toBe(200)
+    expect((await act(adminB, 'P48', 'decidePermission', { key: 'secretary:analytics.view', decision: 'approve' }, undefined, 'Agreed')).status).toBe(200)
+    expect((await authStore.load()).permissionGrants).toEqual({ 'staff:calendar.view': true, 'secretary:analytics.view': true })
   })
 })
 
@@ -295,5 +327,16 @@ describe('unsent messages', () => {
     expect((await student.get('/api/pages/P12?id=THREAD-IT-A')).body.data.record.draft).toBeUndefined()
     const outsider = await login('QCU-STU-CS')
     expect((await act(outsider, 'P12', 'saveMessageDraft', { body: 'Hi' }, 'THREAD-IT-A')).status).toBe(404)
+  })
+})
+
+describe('record access history after the student ID format change', () => {
+  it('still lists openings logged under the old QCU-2024-0101 form (code review, 23 November 2026)', async () => {
+    await repo.transact((unit) => { unit.read().audit.push({ id: 'AUDIT-OLD-0101', at: '2026-11-10T08:00:00.000Z', actorId: 'QCU-GUIDANCE', action: 'Record opened', module: 'records', reference: 'QCU-2024-0101', result: 'Recorded' }) })
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
+    const page = await dean.get('/api/pages/P34?id=QCU-STU-IT-A&purpose=Case%20handling')
+    expect(page.status, JSON.stringify(page.body).slice(0, 400)).toBe(200)
+    const history = page.body.data.record.accessHistory as { id: string }[]
+    expect(history.map((entry) => entry.id)).toContain('AUDIT-OLD-0101')
   })
 })

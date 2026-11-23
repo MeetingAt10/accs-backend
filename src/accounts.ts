@@ -452,6 +452,8 @@ export function accountRouter({ repository, authStore, sessions, mailer }: Accou
     if (organizations.some((organization) => organization.name.toLowerCase() === body.name.toLowerCase())) throw fieldProblem('name', 'An organization with this name already exists.')
     const password = temporaryPassword()
     const hash = hashPassword(password)
+    // The account belongs to its organization from the start, so it posts and sees events there (code review, 23 November 2026).
+    const organizationId = `ORG-${ulid()}`
     let account: User | undefined
     let username = ''
     await authStore.update((data) => {
@@ -459,16 +461,27 @@ export function accountRouter({ repository, authStore, sessions, mailer }: Accou
       const taken = takenBy(merged(all, data).values())
       if (taken.has(body.email)) return
       username = temporaryUsername(body.name, taken)
-      account = newUser(`USR-${ulid()}`, body.name, ['organization'], { email: body.email, active: true, username, mustChangeCredentials: true })
+      account = newUser(`USR-${ulid()}`, body.name, ['organization'], { email: body.email, active: true, username, mustChangeCredentials: true, organizationId, organizationIds: [organizationId] })
       data.users.push(account)
       data.credentials[account.id] = hash
     })
     if (!account) throw fieldProblem('email', 'An account with this email already exists.')
     const created = account
-    const organization = { id: `ORG-${ulid()}`, name: body.name, description: body.description, representativeId: created.id, memberIds: [president.id], positions: { [president.id]: 'President' } }
-    await repository.transact((unit) => {
-      unit.read().organizations.push(organization)
-    }, ['organizations'])
+    const organization = { id: organizationId, name: body.name, description: body.description, representativeId: created.id, memberIds: [president.id], positions: { [president.id]: 'President' } }
+    try {
+      await repository.transact((unit) => {
+        // Checked again inside the write: two requests with the same name can both pass the check above.
+        if (unit.read().organizations.some((existing) => existing.name.toLowerCase() === body.name.toLowerCase())) throw fieldProblem('name', 'An organization with this name already exists.')
+        unit.read().organizations.push(organization)
+      }, ['organizations'])
+    } catch (error) {
+      // No organization, so no account for it either: an account without its organization would be left signed up for nothing.
+      await authStore.update((data) => {
+        data.users = data.users.filter((stored) => stored.id !== created.id)
+        delete data.credentials[created.id]
+      }).catch((cleanup) => console.error(JSON.stringify({ level: 'error', message: 'Organization account not removed after a failed create', accountId: created.id, error: cleanup instanceof Error ? cleanup.name : 'Unknown' })))
+      throw error
+    }
     await audit(user, [{ action: 'Organization account created', reference: created.id }, { action: 'Organization created', reference: organization.id }])
     const url = signInUrl(req)
     const { sent } = await sendInvite({ accountId: created.id, to: created.email, name: created.name, signInUrl: url, username, temporaryPassword: password }, mailer)

@@ -50,6 +50,8 @@ export function canPage(user: User, pageId: string) {
 }
 export function allowedPages(user: User) { return Object.keys(pagePermissions).filter(pageId => canPage(user,pageId)) }
 export function canSpace(user: User, space: Space) { return hasRole(user,'dean') || hasRole(user,'chair') && user.program === space.program || hasRole(user,'professor') && space.professorIds.includes(user.id) || hasRole(user,'student') && space.studentIds.includes(user.id) }
+/** The organization an organization account runs. Accounts created before 23 November 2026 carry no organizationId, so the organization it represents counts too. */
+export function ownOrganizationId(db: Database, user: User) { return user.organizationId ?? db.organizations.find(org => org.representativeId === user.id)?.id }
 export function isOrganizationMember(db: Database, user: User, organizationId: string) { return db.organizations.some(org => org.id === organizationId && (org.representativeId === user.id || org.memberIds.includes(user.id))) }
 export function canAudience(db: Database, user: User, audience: string, privateContent = false) {
   if (audience === 'college') return true
@@ -73,7 +75,7 @@ export function canPublish(db: Database, user: User, audience: string, announcem
   if (!announcement) {
     const space = db.spaces.find(s => audience === `space:${s.id}`)
     if (hasRole(user,'student') && (audience === 'college' || audience === `program:${user.program}` || !!space?.studentIds.includes(user.id) || audience.startsWith('organization:') && isOrganizationMember(db,user,audience.split(':')[1]!))) return true
-    if (hasRole(user,'organization') && audience === `organization:${user.organizationId}`) return true
+    if (hasRole(user,'organization') && audience === `organization:${ownOrganizationId(db,user)}`) return true
     if (hasRole(user,'professor') && (audience === 'faculty' || !!space?.professorIds.includes(user.id))) return true
     if (hasRole(user,'chair') && (audience === 'faculty' || audience === `program:${user.program}`)) return true
     if (hasRole(user,'dean','secretary') && ['college','faculty'].includes(audience)) return true
@@ -82,13 +84,14 @@ export function canPublish(db: Database, user: User, audience: string, announcem
   if (hasRole(user,'dean') && audience === 'college') return true
   if (hasRole(user,'secretary') && ['college','faculty'].includes(audience)) return true
   if (hasRole(user,'chair') && audience === `program:${user.program}`) return true
-  if (hasRole(user,'organization') && audience === `organization:${user.organizationId}`) return true
+  if (hasRole(user,'organization') && audience === `organization:${ownOrganizationId(db,user)}`) return true
   const space = db.spaces.find(s => audience === `space:${s.id}`)
   return hasRole(user,'professor') && !!space?.professorIds.includes(user.id)
 }
 export function canReach(db: Database, user: User, target: User) {
   if (user.id === target.id || !hasPermission(user,'message.send') || !target.active) return false
-  // The Organization representative and the CCS Secretary message anyone, and anyone can answer them.
+  // The Organization representative and the CCS Secretary message anyone, and anyone who can message may write to them
+  // first as well as answer them (QA V3, 20 November 2026: a professor finds the Secretary among recipients).
   if (hasRole(user,'organization','secretary') || hasRole(target,'organization','secretary')) return true
   const targetFaculty = hasRole(target,'professor','chair','dean')
   const shared = db.spaces.some(space => (space.studentIds.includes(user.id) || space.professorIds.includes(user.id)) && (space.studentIds.includes(target.id) || space.professorIds.includes(target.id)))

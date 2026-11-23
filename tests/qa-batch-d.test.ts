@@ -113,6 +113,13 @@ describe('top search', () => {
     expect((await student.get('/api/search').query({ q: 'Charlie' })).body.groups.people.map((p: { id: string }) => p.id)).toContain('QCU-PROF-IT')
   })
 
+  it('shows the office under a person with no title (code review, 23 November 2026)', async () => {
+    await repo.transact((unit) => { unit.read().users.find((u) => u.id === 'QCU-GUIDANCE')!.title = '' })
+    const student = await login('QCU-STU-IT-A')
+    const people = (await student.get('/api/search').query({ q: 'Guidance Officer' })).body.groups.people as { id: string; sub: string }[]
+    expect(people.find((p) => p.id === 'QCU-GUIDANCE')?.sub).toBe('Guidance Office')
+  })
+
   it('finds cases by reference for a handler, and student records only where the role may open them', async () => {
     const theDean = await login(dean)
     const anyCase = (await theDean.get('/api/pages/P21')).body.data.cases[0] as { id: string }

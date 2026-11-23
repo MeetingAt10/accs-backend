@@ -42,6 +42,11 @@ describe('creating an organization', () => {
     expect(page.canManageMembers).toBe(true)
     expect(page.record.members.find((m: { id: string }) => m.id === 'QCU-STU-IT-B')).toMatchObject({ organizationRole: 'President' })
     expect((await dean.get('/api/pages/P09')).body.data.organizations.map((o: { name: string }) => o.name)).toContain('CCS Robotics Club')
+    // It really posts to its own organization, not only sees the composer (code review, 23 November 2026).
+    const p05 = (await club.get('/api/pages/P05')).body.data
+    expect(p05.audiences).toEqual([`organization:${organization.id}`])
+    const posted = await club.post('/api/pages/P05/actions').send({ action: 'createPost', payload: { title: 'First meeting', body: 'Friday at the lab.', audience: `organization:${organization.id}`, kind: 'announcement', priority: 'general', notifyMembers: false, eventDate: '2027-01-15', eventTime: '13:00', eventPlace: 'IC 305', eventContact: 'Robotics Club office' } })
+    expect(posted.status, JSON.stringify(posted.body)).toBe(200)
   })
 
   it('lets the Secretary create one too, and offers both a list of students to choose the President from', async () => {
@@ -67,6 +72,26 @@ describe('creating an organization', () => {
     const takenEmail = await create(dean, { ...newOrganization, email: 'stu.it.a@access-ccs.com' })
     expect([takenEmail.status, takenEmail.body.fields?.[0]?.path]).toEqual([400, 'email'])
     expect(repo.read().organizations).toHaveLength(1)
+  })
+
+  it('checks the name again inside the write, and removes the new account when the organization is not saved (code review, 23 November 2026)', async () => {
+    const inner = createMemoryRepository()
+    const authStore = setUpAuthStore()
+    // Another request saves an organization with the same name right after this one checked the name.
+    let armed = false
+    const racing: typeof inner = { ...inner, view: async (work, names) => {
+      const result = await inner.view(work, names)
+      if (armed && names?.includes('organizations')) { armed = false; inner.read().organizations.push({ id: 'ORG-OTHER', name: 'CCS Robotics Club', description: '', representativeId: 'QCU-ORG', memberIds: [], positions: {} }) }
+      return result
+    } }
+    app = createApp(racing, { authStore })
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
+    armed = true
+    const lost = await create(dean)
+    expect([lost.status, lost.body.fields?.[0]?.path]).toEqual([400, 'name'])
+    expect(inner.read().organizations.filter((o) => o.name === 'CCS Robotics Club')).toHaveLength(1)
+    const stored = await authStore.load()
+    expect(stored.users.some((u) => u.email === newOrganization.email)).toBe(false)
   })
 
   it('keeps a new organization in the shared record store, so every instance sees it', async () => {

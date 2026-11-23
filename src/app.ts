@@ -211,7 +211,11 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   app.post('/api/pages/:pageId/actions',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const body=actionRequestSchema.parse(req.body)
     const result=await performAction(repository,res.locals.user as User,pageId,body,saveAccount,saveProfile,sendMail,materialStorage)
     // A decided permission request changes what is in force: store the approved set beside the accounts for every instance.
-    if(body.action==='decidePermission'){const grants=approvedOverrides({permissionOverrides:await repository.view(unit=>unit.read().permissionOverrides,['permissionOverrides'])});await authStore.update(data=>{data.permissionGrants=grants});setApprovedOverrides(grants)}
+    // Only the decided key is written over what is stored, so a concurrent decision on another instance (another key) is
+    // kept, and a store write retried after a conflict runs on the newer copy. Approved keys this instance's records hold
+    // but the store lacks (an earlier write that failed after its decision was saved) are filled in too (code review, 23 November 2026).
+    if(body.action==='decidePermission'){const key=(result.record as {key:string}).key;const fresh=approvedOverrides({permissionOverrides:await repository.view(unit=>unit.read().permissionOverrides,['permissionOverrides'])});let grants:Record<string,boolean>={}
+      await authStore.update(data=>{const stored=data.permissionGrants??{};grants={...Object.fromEntries(Object.entries(fresh).filter(([k])=>!(k in stored))),...stored,...(key in fresh?{[key]:fresh[key]!}:{})};data.permissionGrants=grants});setApprovedOverrides(grants)}
     send(res,actionResponseSchema,result)})
   // Invites go out by email when MAIL_FROM is set (#36); otherwise the screen shows them once.
   app.use('/api/accounts',accountRouter({repository,authStore,sessions,mailer:options.mailer??(env.MAIL_FROM?createSesInviteMailer(env.MAIL_FROM):unsentMailer)}))
