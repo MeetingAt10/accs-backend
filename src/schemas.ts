@@ -16,7 +16,7 @@ export type TalkMode = (typeof talkModes)[number]
 export const userSchema = z.object({ id: z.string(), name: z.string(), email: z.email(), roles: z.array(roleSchema), program: z.string().optional(), section: z.string().optional(), campus: z.string().optional(), office: z.string().optional(), organizationId: z.string().optional(), restrictions: z.array(z.string()), title: z.string(), bio: z.string(), education: z.string(), photo: z.string().optional(), officeHours: z.string(), year: z.number().optional(), studentId: z.string().optional(), spaceIds: z.array(z.string()), organizationIds: z.array(z.string()), adviserId: z.string().optional(), active: z.boolean(), username: z.string().optional(), mustChangeCredentials: z.boolean().optional() })
 export type User = z.infer<typeof userSchema>
 export const pageIdSchema = z.string().regex(/^P(0[1-9]|[1-4][0-9]|5[0-4])$/)
-export const pageQuerySchema = z.object({ id: z.string().max(100).optional(), q: z.string().max(200).optional(), tab: z.string().max(50).optional(), status: z.string().max(50).optional(), program: z.string().max(20).optional(), year: z.string().max(4).optional(), section: z.string().max(20).optional(), clearance: z.enum(['clear','on_hold']).optional(), category: z.string().max(80).optional(), stage: z.string().max(40).optional(), period: z.string().max(40).optional(), from: z.string().max(40).optional(), to: z.string().max(40).optional(), severity: z.enum(['low','medium','high']).optional(), cycle: z.string().max(100).optional(), label: z.string().max(80).optional(), scope: z.string().max(100).optional(), space: z.string().max(100).optional(), priority: z.string().max(30).optional(), type: z.string().max(40).optional(), source: z.string().max(30).optional(), role: roleSchema.optional(), office: z.string().max(100).optional(), view: z.enum(['month','week','list']).optional(), date: z.string().max(40).optional(), layers: z.string().max(200).optional(), sort: z.string().max(40).optional(), received: z.string().max(40).optional(), unread: z.enum(['true','false']).optional(), standing: z.string().max(60).optional(), recipient: z.string().max(100).optional(), hasRestriction: z.enum(['true','false']).optional(), purpose: z.enum(['Case handling', 'Good Moral review', 'Restriction review', 'Program oversight']).optional(), page: z.coerce.number().int().min(1).max(10000).optional() }).strict()
+export const pageQuerySchema = z.object({ id: z.string().max(100).optional(), q: z.string().max(200).optional(), tab: z.string().max(50).optional(), status: z.string().max(50).optional(), program: z.string().max(20).optional(), year: z.string().max(4).optional(), section: z.string().max(20).optional(), clearance: z.enum(['clear','on_hold']).optional(), category: z.string().max(80).optional(), stage: z.string().max(40).optional(), period: z.string().max(40).optional(), from: z.string().max(40).optional(), to: z.string().max(40).optional(), severity: z.enum(['low','medium','high']).optional(), cycle: z.string().max(100).optional(), label: z.string().max(80).optional(), scope: z.string().max(100).optional(), space: z.string().max(100).optional(), priority: z.string().max(30).optional(), type: z.string().max(40).optional(), source: z.string().max(30).optional(), role: roleSchema.optional(), office: z.string().max(100).optional(), view: z.enum(['month','week','list']).optional(), date: z.string().max(40).optional(), layers: z.string().max(200).optional(), sort: z.string().max(40).optional(), received: z.string().max(40).optional(), unread: z.enum(['true','false']).optional(), standing: z.string().max(60).optional(), recipient: z.string().max(100).optional(), hasRestriction: z.enum(['true','false']).optional(), purpose: z.enum(['Case handling', 'Good Moral review', 'Restriction review', 'Program oversight']).optional(), page: z.coerce.number().int().min(1).max(10000).optional(), note: z.string().trim().max(500).optional() }).strict()
 export type PageQuery = z.infer<typeof pageQuerySchema>
 export const jsonObjectSchema = z.record(z.string(), z.json())
 export const pageResponseSchema = z.object({ pageId: pageIdSchema, title: z.string(), scope: z.string(), data: jsonObjectSchema })
@@ -51,10 +51,14 @@ export const facultyRowSchema = z.object({ name: fullName, email: accountEmail, 
 export const studentRowSchema = z.object({
   name: fullName,
   email: accountEmail,
-  studentId: z.string({ error: 'Enter the student ID.' }).trim().regex(/^[A-Za-z0-9][A-Za-z0-9-]{2,39}$/, 'Use letters, numbers, and dashes, like 24-1234.'),
+  // 00-0000: the first two digits are the enrollment year, so a 2026 enrollee is 26-xxxx and no ID is from a later year
+  // (decided 19 November 2026).
+  studentId: z.string({ error: 'Enter the student ID.' }).trim()
+    .regex(/^\d{2}-\d{4}$/, 'Use the format 00-0000, with the enrollment year first, like 26-0001.')
+    .refine((id) => !/^\d{2}-\d{4}$/.test(id) || Number(id.slice(0, 2)) <= new Date(Date.now() + 8 * 3_600_000).getUTCFullYear() % 100, 'The first two digits are the enrollment year; they cannot be a later year.'),
   program: accountProgram,
   year: z.coerce.number({ error: 'Choose a year level from 1 to 4.' }).int('Choose a year level from 1 to 4.').min(1, 'Choose a year level from 1 to 4.').max(4, 'Choose a year level from 1 to 4.'),
-  section: z.string({ error: 'Enter the section.' }).trim().toUpperCase().regex(/^[A-Z0-9]{1,10}$/, 'Use the section letter, like A.'),
+  section: z.string({ error: 'Enter the section.' }).trim().toUpperCase().regex(/^[A-Z]{1,3}$/, 'Use the section letter, like A.'),
   // SB, BAT or SF (src/sections.ts). Left out, the student is at San Bartolome, so the current import screen keeps working.
   campus: z.string().trim().toUpperCase().pipe(z.enum(campusCodes, { error: 'Choose SB (San Bartolome), BAT (Batasan) or SF (San Francisco).' })).default(mainCampus),
 }).superRefine((row, ctx) => {
@@ -63,6 +67,13 @@ export const studentRowSchema = z.object({
   const problem = campusYearProblem(row.campus, row.year)
   if (problem) ctx.addIssue({ code: 'custom', path: ['campus'], message: problem })
 })
+/** A new organization and its account (decided 19 November 2026): the Secretary or the Dean creates both, and names a student as its President. */
+export const createOrganizationSchema = z.object({
+  name: z.string({ error: 'Enter the organization name.' }).trim().min(2, 'Enter the organization name.').max(100, 'Use at most 100 characters.'),
+  description: z.string().trim().max(500, 'Use at most 500 characters.').default(''),
+  email: accountEmail,
+  presidentId: z.string({ error: 'Choose the President.' }).trim().min(1, 'Choose the President.'),
+}).strict()
 export const createFacultySchema = z.object({ faculty: z.array(z.unknown()).min(1).max(batchLimit).optional() }).catchall(z.unknown())
 export const importStudentsSchema = z.object({ students: z.array(z.unknown()).min(1).max(batchLimit) }).strict()
 export const accountIdParamsSchema = z.object({ id: z.string().trim().min(1).max(64) }).strict()
@@ -71,7 +82,8 @@ export const activateSecretarySchema = z.object({ name: fullName.optional(), ema
 /** The real Dean's name and email; both are required, so the account stops being a sample one. */
 export const setupDeanSchema = z.object({ name: fullName, email: accountEmail }).strict()
 export const yearLevelParamsSchema = z.object({ yearLevel: z.coerce.number().int().min(1).max(4) }).strict()
-export const setAdvisorsSchema = z.object({ facultyIds: z.array(z.string().trim().min(1).max(64)).max(50) }).strict()
+/** One adviser per year level (decided 19 November 2026); one person may advise several year levels. An empty list clears the year. */
+export const setAdvisorsSchema = z.object({ facultyIds: z.array(z.string().trim().min(1).max(64)).max(1, 'Choose one adviser for each year level.') }).strict()
 export const programParamsSchema = z.object({ program: z.enum(programs) }).strict()
 export const setChairSchema = z.object({ facultyId: z.string().trim().min(1).max(64) }).strict()
 export const accountsQuerySchema = z.object({ role: roleSchema.optional(), q: z.string().max(200).optional() }).strict()
@@ -224,7 +236,13 @@ export const actionPayloads = {
   deleteTodo: z.object({}).strict(),
   createThread: messageContent.extend({ recipientId: z.string().min(1) }).strict().refine(hasMessageContent, noMessageContent),
   sendMessage: messageContent.strict().refine(hasMessageContent, noMessageContent),
+  createGroupThread: messageContent.extend({ title: z.string().trim().min(1, 'Name the group.').max(80, 'Use at most 80 characters.'), memberIds: z.array(z.string().min(1)).min(2, 'Add at least two people.').max(49, 'A group can have at most 50 people.') }).strict().refine(hasMessageContent, noMessageContent),
   muteThread: z.object({ muted: z.boolean() }).strict(),
+  editMessage: z.object({ messageId: z.string().min(1).max(100), body: z.string().trim().min(1, 'Write the message.').max(4000) }).strict(),
+  // QA 17 November, V3 (decided 20 November 2026): people join an existing group, and an unsent message is kept on the server.
+  addGroupMembers: z.object({ memberIds: z.array(z.string().min(1).max(64)).min(1, 'Choose at least one person.').max(48) }).strict(),
+  saveMessageDraft: z.object({ body: z.string().max(4000).default(''), attachments: z.array(messageAttachment).max(5, 'Send at most 5 files at a time.').default([]) }).strict(),
+  deleteMessage: z.object({ messageId: z.string().min(1).max(100) }).strict(),
   markThreadRead: z.object({}).strict(),
   markNotification: z.object({ read: z.boolean().default(true) }).strict(),
   markAllNotifications: z.object({}).strict(),
@@ -238,7 +256,9 @@ export const actionPayloads = {
   saveFollowUp: z.object({ note: text }).strict(),
   openRecord: z.object({ purpose: z.enum(['Case handling', 'Good Moral review', 'Restriction review', 'Program oversight']), note: z.string().max(500).optional() }).strict(),
   reviewGoodMoral: z.object({ status: z.enum(['Pending QCU review', 'Prerequisites reviewed', 'Further review needed']), decisionSource: text.max(200), notes: z.string().max(2000).default('') }).strict(),
-  applyRestriction: z.object({ studentId: z.string(), features: z.array(z.enum(['post.create', 'post.comment', 'report.anonymous'])).min(1), basis: text.max(500), until: date, decisionReference: text.max(100) }).strict(),
+  applyRestriction: z.object({ studentId: z.string(), features: z.array(z.enum(['post.create', 'post.comment', 'report.anonymous'])).min(1), basis: text.max(500), until: date, decisionReference: text.max(100), notifyStudent: z.boolean().default(true) }).strict(),
+  changeRestrictionEnd: z.object({ until: date }).strict(),
+  declineReferral: z.object({}).strict(),
   liftRestriction: z.object({}).strict(),
   // The Dean recommends a strike on a case with the Dean; OSAS confirms or rejects it on the case at OSAS.
   recommendStrike: z.object({ studentId: z.string().min(1), reportId: z.string().min(1), note: text.max(1000) }).strict(),
@@ -247,11 +267,17 @@ export const actionPayloads = {
   referRestriction: z.object({ studentId: z.string(), change: z.enum(['Lift', 'Shorten', 'Extend', 'Review']), decisionReference: z.string().max(100).optional() }).strict(),
   // A profile photo (#85): a square JPEG, PNG or WebP the browser has already resized, sent as a data URL. null removes it.
   setProfilePhoto: z.object({ photo: z.string().max(110_000, 'Use a smaller image (at most 80 KB).').regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/, 'Use a JPEG, PNG or WebP image.').nullable() }).strict(),
-  saveProfile: z.object({ title: z.string().max(100), bio: z.string().max(1000), education: z.string().max(500), officeHours: z.string().max(200) }).strict(),
+  // At least one field: an all-blank profile was saved (QA 17 November).
+  saveProfile: z.object({ title: z.string().trim().max(100), bio: z.string().trim().max(1000), education: z.string().trim().max(500), officeHours: z.string().trim().max(200) }).strict().refine((p) => Object.values(p).some(Boolean), { message: 'Fill in at least one field.', path: ['title'] }),
   saveSettings: z.object({ theme: z.enum(['system', 'light', 'dark']), density: z.enum(['comfortable', 'compact']) }).strict(),
   saveNotificationPreferences: z.object({ priorities: z.record(z.string(), z.enum(['high', 'normal', 'muted'])) }).strict(),
-  updateRoles: z.object({ roles: z.array(roleSchema).min(1), program: z.enum(programs).optional(), section: z.string().max(50).optional(), active: z.boolean().optional() }).strict(),
+  // A position is the member's title in the organization, like VP for Information; empty clears it (19 November 2026).
+  addOrganizationMember: z.object({ studentId: z.string().min(1), position: z.string().trim().max(60, 'Use at most 60 characters.').optional() }).strict(),
+  removeOrganizationMember: z.object({ studentId: z.string().min(1) }).strict(),
+  setMemberPosition: z.object({ memberId: z.string().min(1), position: z.string().trim().max(60, 'Use at most 60 characters.') }).strict(),
+  updateRoles: z.object({ roles: z.array(roleSchema).min(1), program: z.enum(programs).optional(), year: z.number().int().min(1).max(4).optional(), section: z.string().max(50).optional(), active: z.boolean().optional() }).strict(),
   updatePermission: z.object({ role: roleSchema, permission: z.string().min(1), allowed: z.boolean() }).strict(),
-  moderate: z.object({ decision: z.enum(['keep', 'remove', 'warn', 'refer']), notifyAuthor: z.boolean().default(true) }).strict(),
+  decidePermission: z.object({ key: z.string().min(3).max(120), decision: z.enum(['approve', 'reject']) }).strict(),
+  moderate: z.object({ decision: z.enum(['keep', 'remove', 'warn', 'refer', 'dismiss', 'osas']), notifyAuthor: z.boolean().default(true) }).strict(),
 } satisfies Record<string, z.ZodType>
 export type ActionName = keyof typeof actionPayloads

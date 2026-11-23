@@ -3,11 +3,11 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { createApp } from '../src/app.js'
 import { createMemoryRepository } from '../src/store.js'
-import { seedPassword } from './helpers.js'
+import { seedPassword, setUpAuthStore, reviewAll } from './helpers.js'
 
 let repo: ReturnType<typeof createMemoryRepository>
 let app: ReturnType<typeof createApp>
-beforeEach(() => { repo = createMemoryRepository(); app = createApp(repo) })
+beforeEach(() => { repo = createMemoryRepository(); app = createApp(repo, { authStore: setUpAuthStore() }) })
 
 async function login(id: string) {
   const agent = request.agent(app)
@@ -57,7 +57,8 @@ describe('urgent announcements', () => {
     expect(noticesFor(member, 'announcement').at(-1)!.priority).toBe('high')
   })
 
-  it('still respect the author: an urgent announcement without notifyMembers notifies nobody', async () => {
+  // Changed 19 November 2026: an urgent announcement reaches its whole audience, ticked or not.
+  it('reach the members even when the author did not tick Notify members', async () => {
     const organization = await login('QCU-ORG')
     const before = repo.read().notifications.length
     const response = await organization.post('/api/pages/P05/actions').send({
@@ -68,7 +69,9 @@ describe('urgent announcements', () => {
       },
     })
     expect(response.status).toBe(200)
-    expect(repo.read().notifications).toHaveLength(before)
+    const sent = repo.read().notifications.slice(before)
+    expect(sent.map((n) => n.recipientId)).toContain('QCU-STU-IT-A')
+    expect(sent.map((n) => n.recipientId)).not.toContain('QCU-ORG')
   })
 })
 
@@ -140,6 +143,7 @@ describe('case and evaluation updates are required', () => {
     repo.read().settings[member] = { theme: 'system', density: 'comfortable', priorities: { evaluation: 'muted' } }
     const dean = await login('QCU-FAC-PAULA-DELACRUZ')
     const before = noticesFor(member, 'evaluation').length
+    reviewAll(repo, 'CYCLE-2026-2')
     const published = await dean.post('/api/pages/P31/actions').send({ action: 'cycleAction', recordId: 'CYCLE-2026-2', payload: { status: 'Published' } })
     expect(published.status, JSON.stringify(published.body)).toBe(200)
     expect(noticesFor(member, 'evaluation')).toHaveLength(before + 1)

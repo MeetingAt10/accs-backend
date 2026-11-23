@@ -5,16 +5,15 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { applyAccounts } from '../src/accounts.js'
 import { createApp } from '../src/app.js'
-import { createMemoryAuthStore } from '../src/auth.js'
 import { createRecordRepository } from '../src/persist.js'
 import { createMemoryRecordStore } from '../src/records.js'
 import { roles, type User } from '../src/schemas.js'
 import { createMemoryRepository, type Report } from '../src/store.js'
-import { seedPassword } from './helpers.js'
+import { seedPassword, setUpAuthStore } from './helpers.js'
 
 let repo: ReturnType<typeof createMemoryRepository>
 let app: ReturnType<typeof createApp>
-beforeEach(() => { repo = createMemoryRepository(); app = createApp(repo) })
+beforeEach(() => { repo = createMemoryRepository(); app = createApp(repo, { authStore: setUpAuthStore() }) })
 
 async function login(id: string) {
   const agent = request.agent(app)
@@ -120,11 +119,23 @@ describe('reports stored at the removed stage (issue #29)', () => {
     expect(stored.history.map((h) => h.stage)).not.toContain('executive')
     expect(stored.disclosedTo).toEqual(['osas'])
 
-    app = createApp(fresh, { authStore: createMemoryAuthStore() })
+    app = createApp(fresh, { authStore: setUpAuthStore() })
     const osas = await login('QCU-OSAS')
     const view = await osas.get('/api/pages/P22?id=RPT-0246')
     expect(view.status).toBe(200)
-    expect(view.body.data.record.status).toBe('With OSAS')
+    expect(view.body.data.record).toMatchObject({ status: 'Escalated', office: 'OSAS' })
     expect((await act(osas, 'RPT-0246', 'resolve')).status).toBe(200)
+  })
+})
+
+describe('student IDs stored in the old format (19 November 2026)', () => {
+  it('reads QCU-2024-0101 as 24-0101 and leaves a new-format ID alone', () => {
+    const db = repo.read()
+    const base = db.users.find((u) => u.id === 'QCU-STU-IT-A')!
+    const old = { ...structuredClone(base), id: 'OLD-ID-STUDENT', email: 'old.id@example.com', studentId: 'QCU-2023-0456' }
+    const current = { ...structuredClone(base), id: 'NEW-ID-STUDENT', email: 'new.id@example.com', studentId: '25-0999' }
+    applyAccounts(db, [old, current])
+    expect(db.users.find((u) => u.id === 'OLD-ID-STUDENT')!.studentId).toBe('23-0456')
+    expect(db.users.find((u) => u.id === 'NEW-ID-STUDENT')!.studentId).toBe('25-0999')
   })
 })

@@ -334,7 +334,8 @@ describe('reset code limits and office-assisted reset', () => {
       expect([refused.status, refused.body]).toEqual([200, unknown.body])
       expect(log).toHaveBeenCalledTimes(resetPolicy.maxPerWindow)
 
-      vi.setSystemTime(start + resetPolicy.windowMs)
+      // A second past the window: the suite clock keeps moving (tests/setup-clock.ts), so the exact boundary can still be inside it.
+      vi.setSystemTime(start + resetPolicy.windowMs + 1000)
       expect((await forgot('QCU-STU-IT-A')).status).toBe(200)
       expect(log).toHaveBeenCalledTimes(resetPolicy.maxPerWindow + 1)
     } finally {

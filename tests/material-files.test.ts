@@ -6,10 +6,9 @@ import request from 'supertest'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { createApp } from '../src/app.js'
-import { createMemoryAuthStore } from '../src/auth.js'
 import { createMemoryMaterialStorage, createS3MaterialStorage, safeFileName } from '../src/material-storage.js'
 import { createMemoryRepository } from '../src/store.js'
-import { seedPassword } from './helpers.js'
+import { seedPassword, setUpAuthStore } from './helpers.js'
 
 let repo: ReturnType<typeof createMemoryRepository>
 let app: ReturnType<typeof createApp>
@@ -17,7 +16,7 @@ let storage: ReturnType<typeof createMemoryMaterialStorage>
 beforeEach(() => {
   repo = createMemoryRepository()
   storage = createMemoryMaterialStorage()
-  app = createApp(repo, { authStore: createMemoryAuthStore(), materialStorage: storage })
+  app = createApp(repo, { authStore: setUpAuthStore(), materialStorage: storage })
 })
 
 async function login(id: string) {
@@ -130,7 +129,7 @@ describe('uploading a class material file', () => {
   })
 
   it('says files are not set up when there is no bucket, and links still work', async () => {
-    app = createApp(repo, { authStore: createMemoryAuthStore() })
+    app = createApp(repo, { authStore: setUpAuthStore() })
     const professor = await login('QCU-PROF-IT')
     const refused = await start(professor)
     expect([refused.status, refused.body.error]).toEqual([409, 'File uploads are not set up yet. Share a link instead.'])

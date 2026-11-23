@@ -30,10 +30,11 @@ describe('CCS personnel seed', () => {
     expect(accounts.every((u) => u.active && u.email.endsWith('@access-ccs.com'))).toBe(true)
   })
 
-  it('never emails them, signs them in with the seed password, and gives them no advisees', () => {
+  // Real people: anyone who guessed a name could sign in as them with the shared password (reported 17 November 2026).
+  it('never emails them, never signs them in with the seed password, and gives them no advisees', () => {
     for (const u of accounts) {
       expect(isSampleAddress(u.id, u.email), u.id).toBe(true)
-      expect(demoUserIds.has(u.id), u.id).toBe(true)
+      expect(demoUserIds.has(u.id), u.id).toBe(false)
     }
     expect(withRoster.users.some((u) => u.adviserId && rosterIds.has(u.adviserId))).toBe(false)
     expect(withRoster.spaces.some((s) => s.professorIds.some((id) => rosterIds.has(id)))).toBe(false)
@@ -65,7 +66,8 @@ describe('CCS personnel seed', () => {
     vi.stubEnv('SEED_ROSTER', seedRoster as never)
     const store = await import('../src/store.js')
     expect(store.seed().users.some((u) => u.id === 'QCU-FAC-PAULA-DELACRUZ')).toBe(included)
-    expect(store.demoUserIds.has('QCU-FAC-PAULA-DELACRUZ')).toBe(included)
+    // Seeded or not, the real Dean never signs in with the shared seed password.
+    expect(store.demoUserIds.has('QCU-FAC-PAULA-DELACRUZ')).toBe(false)
   })
 })
 afterEach(() => vi.unstubAllEnvs())

@@ -5,13 +5,12 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { isEarlierHandler } from '../src/access.js'
 import { createApp } from '../src/app.js'
-import { createMemoryAuthStore } from '../src/auth.js'
 import { createMemoryRepository } from '../src/store.js'
-import { concernChoices, seedPassword } from './helpers.js'
+import { concernChoices, seedPassword, setUpAuthStore } from './helpers.js'
 
 let repo: ReturnType<typeof createMemoryRepository>
 let app: ReturnType<typeof createApp>
-beforeEach(() => { repo = createMemoryRepository(); app = createApp(repo, { authStore: createMemoryAuthStore() }) })
+beforeEach(() => { repo = createMemoryRepository(); app = createApp(repo, { authStore: setUpAuthStore() }) })
 
 async function login(id: string) {
   const agent = request.agent(app)
@@ -38,7 +37,7 @@ describe('status timeline for offices the case moved past (issue #30)', () => {
     expect((await act(chair!, id, 'recordAction', 'The chair met the student.')).status).toBe(200)
 
     const seen = await view(adviser!, id)
-    expect(seen).toMatchObject({ statusOnly: true, stage: 'chair', office: 'Program Chair', status: 'With Program Chair', statusNotice: 'This concern is now with Program Chair. You can follow its status here.' })
+    expect(seen).toMatchObject({ statusOnly: true, stage: 'chair', office: 'Program Chair', status: 'Escalated', statusNotice: 'This concern is now with Program Chair. You can follow its status here.' })
     expect(seen.timeline.map((t: { action: string; office: string }) => [t.action, t.office])).toEqual([['Submitted', 'Adviser'], ['Transferred', 'Program Chair'], ['Action recorded', 'Program Chair']])
     const text = JSON.stringify(seen)
     for (const secret of [statement.narrative, 'Please help me.', 'Chair private note', 'Demo Student Hotel']) expect(text).not.toContain(secret)

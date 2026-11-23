@@ -1,6 +1,6 @@
 import { randomInt } from 'node:crypto'
 import express, { type Request, type Response } from 'express'
-import type { ZodError, ZodType } from 'zod'
+import { ZodError, type ZodType } from 'zod'
 
 import { hasPermission } from './access.js'
 import { hashPassword, passwordProblem, type AuthData, type AuthStore } from './auth.js'
@@ -10,7 +10,7 @@ import { ulid } from './ids.js'
 import { renameAccountIds, renamedAccountIds } from './renames.js'
 import {
   accountIdParamsSchema, accountListResponseSchema, accountsQuerySchema, accountTypesResponseSchema, actionResponseSchema, activateSecretarySchema, setupDeanSchema,
-  advisorsResponseSchema, createFacultySchema, facultyListResponseSchema, facultyQuerySchema, facultyRowSchema, importStudentsSchema, programParamsSchema,
+  advisorsResponseSchema, createFacultySchema, createOrganizationSchema, facultyListResponseSchema, facultyQuerySchema, facultyRowSchema, importStudentsSchema, programParamsSchema,
   roles, setActiveSchema, setAdvisorsSchema, setChairSchema, studentRowSchema, yearLevelParamsSchema, type Role, type User,
 } from './schemas.js'
 import { ApiError, deny, unavailable, type AccountChange, type ProfileChange } from './services.js'
@@ -126,7 +126,10 @@ export function applyAccounts(db: Database, accounts: User[]) {
     // A role that no longer exists (the President's Office, removed on 2026-11-10) is dropped; an account left with no
     // role cannot sign in.
     const knownRoles = stored.roles.filter((role) => (roles as readonly string[]).includes(role))
-    const account = knownRoles.length === stored.roles.length ? stored : { ...stored, roles: knownRoles, active: stored.active && knownRoles.length > 0 }
+    let account = knownRoles.length === stored.roles.length ? stored : { ...stored, roles: knownRoles, active: stored.active && knownRoles.length > 0 }
+    // Student IDs are 00-0000 (19 November 2026): a stored QCU-2024-0101 reads as 24-0101.
+    const oldId = account.studentId ? /^QCU-\d{2}(\d{2})-(\d{4})$/.exec(account.studentId) : null
+    if (oldId) account = { ...account, studentId: `${oldId[1]}-${oldId[2]}` }
     const position = index.get(account.id)
     if (position === undefined) index.set(account.id, db.users.push(structuredClone(account)) - 1)
     // Stored profile text wins; a stored account without any keeps what this instance has.
@@ -432,6 +435,60 @@ export function accountRouter({ repository, authStore, sessions, mailer }: Accou
   router.post('/students', async (req, res) => {
     need(actor(res), 'account.provision')
     await create(req, res, 'student', importStudentsSchema.parse(req.body).students)
+  })
+
+  /**
+   * Creates an organization and the account that runs it (decided 19 November 2026). The account signs in with temporary
+   * details like any new account; the chosen student joins as the organization's President.
+   */
+  router.post('/organizations', async (req, res) => {
+    const user = actor(res)
+    need(user, 'organization.create')
+    const body = createOrganizationSchema.parse(req.body ?? {})
+    const fieldProblem = (path: string, message: string) => new ZodError([{ code: 'custom', path: [path], message, input: undefined }])
+    const { all, organizations } = await repository.view((unit) => ({ all: unit.read().users, organizations: unit.read().organizations }), ['organizations'])
+    const president = all.find((account) => account.id === body.presidentId && account.active && account.roles.includes('student'))
+    if (!president) throw fieldProblem('presidentId', 'Choose an active student as the President.')
+    if (organizations.some((organization) => organization.name.toLowerCase() === body.name.toLowerCase())) throw fieldProblem('name', 'An organization with this name already exists.')
+    const password = temporaryPassword()
+    const hash = hashPassword(password)
+    // The account belongs to its organization from the start, so it posts and sees events there (code review, 23 November 2026).
+    const organizationId = `ORG-${ulid()}`
+    let account: User | undefined
+    let username = ''
+    await authStore.update((data) => {
+      account = undefined
+      const taken = takenBy(merged(all, data).values())
+      if (taken.has(body.email)) return
+      username = temporaryUsername(body.name, taken)
+      account = newUser(`USR-${ulid()}`, body.name, ['organization'], { email: body.email, active: true, username, mustChangeCredentials: true, organizationId, organizationIds: [organizationId] })
+      data.users.push(account)
+      data.credentials[account.id] = hash
+    })
+    if (!account) throw fieldProblem('email', 'An account with this email already exists.')
+    const created = account
+    const organization = { id: organizationId, name: body.name, description: body.description, representativeId: created.id, memberIds: [president.id], positions: { [president.id]: 'President' } }
+    try {
+      await repository.transact((unit) => {
+        // Checked again inside the write: two requests with the same name can both pass the check above.
+        if (unit.read().organizations.some((existing) => existing.name.toLowerCase() === body.name.toLowerCase())) throw fieldProblem('name', 'An organization with this name already exists.')
+        unit.read().organizations.push(organization)
+      }, ['organizations'])
+    } catch (error) {
+      // No organization, so no account for it either: an account without its organization would be left signed up for nothing.
+      await authStore.update((data) => {
+        data.users = data.users.filter((stored) => stored.id !== created.id)
+        delete data.credentials[created.id]
+      }).catch((cleanup) => console.error(JSON.stringify({ level: 'error', message: 'Organization account not removed after a failed create', accountId: created.id, error: cleanup instanceof Error ? cleanup.name : 'Unknown' })))
+      throw error
+    }
+    await audit(user, [{ action: 'Organization account created', reference: created.id }, { action: 'Organization created', reference: organization.id }])
+    const url = signInUrl(req)
+    const { sent } = await sendInvite({ accountId: created.id, to: created.email, name: created.name, signInUrl: url, username, temporaryPassword: password }, mailer)
+    done(res, 'Organization created. Give the organization its sign-in details; they are not shown again.', {
+      organization: { id: organization.id, name: organization.name, president: { id: president.id, name: president.name } },
+      account: summary(created), credentials: { username, temporaryPassword: password }, invite: { sent, signInUrl: url },
+    })
   })
 
   router.get('/advisors', async (_req, res) => {

@@ -3,13 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { canActCase, canCountCase, canReadCase, overseesCase } from '../src/access.js'
 import { createApp } from '../src/app.js'
-import { createMemoryAuthStore } from '../src/auth.js'
 import { consentWording } from '../src/consent.js'
 import { createRecordRepository } from '../src/persist.js'
 import { createMemoryRecordStore, type RecordStore } from '../src/records.js'
 import { createMemorySessionStore } from '../src/sessions.js'
 import { createMemoryRepository, seed, type MemoryRepository, type Report, type Repository } from '../src/store.js'
-import { concernChoices, secretarySession, signIn } from './helpers.js'
+import { concernChoices, secretarySession, signIn, setUpAuthStore } from './helpers.js'
 
 type Agent = ReturnType<typeof request.agent>
 type Body = Record<string, any>
@@ -30,7 +29,7 @@ describe('the concern flow', () => {
   let app: ReturnType<typeof createApp>
   beforeEach(() => {
     repo = createMemoryRepository()
-    app = createApp(repo, { authStore: createMemoryAuthStore() })
+    app = createApp(repo, { authStore: setUpAuthStore() })
   })
   const login = async (id: string) => {
     const { agent, response } = await signIn(app, id)
@@ -83,7 +82,8 @@ describe('the concern flow', () => {
       await write(student, 'P20', id, 'A first message')
       await write(await login('QCU-PROF-CS'), 'P22', id, 'A reply')
       const trail = (await (await login('ACCS-ADMIN')).get('/api/pages/P51')).body.data.audit as Body[]
-      const mine = trail.filter((entry) => entry.reference === id)
+      // Newest first on the page; read it in the order it happened.
+      const mine = trail.filter((entry) => entry.reference === id).reverse()
       expect(mine.map((entry) => entry.action)).toEqual(['Report submitted', 'Report consent recorded', 'Talk consent recorded', 'Reporter message sent', 'Handler message sent'])
       // The reporter stays unnamed; the office that answered is named.
       for (const entry of mine.slice(0, 4)) expect(entry).toMatchObject({ actor: { name: 'Verified student' } })
@@ -162,7 +162,8 @@ describe('the concern flow', () => {
         expect(repo.read().notifications.some((notice) => notice.recipientId === 'QCU-PROF-CS' && notice.recordId === filed.body.record.id)).toBe(false)
       }
       // The Program Chair reads each one: it handles every concern that goes around the adviser.
-      expect((await listed(await login('QCU-CHAIR-CS'))).length).toBe(1 + 3)
+      // Three seeded BSCS reports at the chair (RPT-0248, RPT-0249, RPT-0250) and the three filed here.
+      expect((await listed(await login('QCU-CHAIR-CS'))).length).toBe(3 + 3)
     })
 
     it('keeps the adviser out of later steps too', async () => {
@@ -565,7 +566,7 @@ describe('the concern flow', () => {
 describe('over a record store that instances share', () => {
   function instances() {
     const store = createMemoryRecordStore()
-    const authStore = createMemoryAuthStore()
+    const authStore = setUpAuthStore()
     const sessionStore = createMemorySessionStore()
     return { store, instance: () => createApp(createRecordRepository(store), { authStore, sessionStore }) }
   }
@@ -619,7 +620,7 @@ describe('over a record store that instances share', () => {
     const store = createMemoryRecordStore()
     const lists: string[] = []
     const watched: RecordStore = { list: (table, collection) => { lists.push(`${table}/${collection}`); return store.list(table, collection) }, write: (writes) => store.write(writes) }
-    const app = createApp(createRecordRepository(watched), { authStore: createMemoryAuthStore(), sessionStore: createMemorySessionStore(), stack: { tablePrefix: 'accs-dev-', nodeEnv: 'production' } })
+    const app = createApp(createRecordRepository(watched), { authStore: setUpAuthStore(), sessionStore: createMemorySessionStore(), stack: { tablePrefix: 'accs-dev-', nodeEnv: 'production' } })
     // Signing in, and reading the session, touch accounts and the account's restrictions only.
     const restrictions = 'ccs_discipline/restrictions'
     const besides = () => lists.filter((list) => list !== restrictions)
@@ -663,7 +664,7 @@ describe.each(backends)('the first concern, start to finish, %s', (name, backend
   // Hashes several passwords along the way: about 2 seconds alone, more when the whole suite runs in parallel.
   it('runs from the secretary account to a chat in both directions', async () => {
     const newRepository = backend()
-    const authStore = createMemoryAuthStore()
+    const authStore = setUpAuthStore()
     const sessionStore = createMemorySessionStore()
     const app = createApp(newRepository(), { authStore, sessionStore })
 

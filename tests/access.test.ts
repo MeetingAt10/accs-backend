@@ -1,18 +1,20 @@
 import request from 'supertest'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.js'
-import { createMemoryAuthStore, hashPassword } from '../src/auth.js'
+import { hashPassword } from '../src/auth.js'
 import { createMemoryRepository } from '../src/store.js'
+import { setUpAuthStore } from './helpers.js'
 
 const accounts={student:'QCU-STU-IT-A',organization:'QCU-ORG',professor:'QCU-PROF-IT',chair:'QCU-CHAIR-CS',dean:'QCU-FAC-PAULA-DELACRUZ',administrator:'ACCS-ADMIN',guidance:'QCU-GUIDANCE',osas:'QCU-OSAS',secretary:'QCU-SECRETARY'}
 const all=Object.keys(accounts)
 // The Dean account on non-production stacks (Dr. Paula Joy L. Dela Cruz) is also a professor, so it reaches the professor pages too.
 const may=(allowed:string[],role:string)=>allowed.includes(role)||role==='dean'&&allowed.includes('professor')
+// 16 November 2026: the Secretary posts (P05) and the Organization representative messages (P11, P12); 20 November 2026: the Secretary messages too.
 const grants:Record<string,string[]>={
- P01:all,P02:all,P03:all,P04:all,P05:['student','organization','professor','chair','dean','guidance','osas'],P06:all,P07:['student','professor','chair','dean'],P08:['student','professor','chair','dean'],P09:all,P10:all,P11:['student','professor','chair','dean','guidance','osas'],P12:['student','professor','chair','dean','guidance','osas'],P13:['student','organization','professor','chair','dean','guidance','osas'],P14:['student','professor'],P15:['student'],P16:['student','professor'],P17:['professor'],P18:['student'],P19:['student'],P20:['student'],P21:['professor','chair','dean','guidance','osas'],P22:['professor','chair','dean','guidance','osas'],P23:['chair'],P24:['chair'],P25:['chair','dean'],P26:['student','professor','chair','dean'],P27:['student','professor'],P28:['professor','chair','dean'],P29:['professor','chair','dean'],P30:['dean'],P31:['dean'],P32:['professor'],P33:['chair','dean','guidance','osas'],P34:['chair','dean','guidance','osas'],P35:['administrator','guidance','osas'],P36:['student'],P37:all,P38:all,P39:all,P40:all,P41:all,P42:all,P43:all,P44:all,P45:['administrator'],P46:['administrator'],P47:['administrator'],P48:['administrator'],P49:['administrator','secretary'],P50:['administrator','secretary'],P51:['administrator'],P52:['administrator'],P53:['secretary','chair','dean','osas'],P54:['secretary'],
+ P01:all,P02:all,P03:all,P04:all,P05:['student','organization','professor','chair','dean','guidance','osas','secretary'],P06:all,P07:['student','professor','chair','dean'],P08:['student','professor','chair','dean'],P09:all,P10:all,P11:['student','organization','professor','chair','dean','guidance','osas','secretary'],P12:['student','organization','professor','chair','dean','guidance','osas','secretary'],P13:['student','organization','professor','chair','dean','guidance','osas','secretary'],P14:['student','professor'],P15:['student'],P16:['student','professor'],P17:['professor'],P18:['student'],P19:['student'],P20:['student'],P21:['professor','chair','dean','guidance','osas'],P22:['professor','chair','dean','guidance','osas'],P23:['chair'],P24:['chair'],P25:['chair','dean'],P26:['student','professor','chair','dean'],P27:['student','professor'],P28:['professor','chair','dean'],P29:['professor','chair','dean'],P30:['dean'],P31:['dean'],P32:['professor'],P33:['chair','dean','guidance','osas'],P34:['chair','dean','guidance','osas'],P35:['administrator','guidance','osas'],P36:['student'],P37:all,P38:all,P39:all,P40:all,P41:all,P42:all,P43:all,P44:all,P45:['administrator'],P46:['administrator','secretary'],P47:['administrator','secretary'],P48:['administrator','secretary'],P49:['administrator','secretary','osas'],P50:['administrator','secretary','osas'],P51:['administrator'],P52:['administrator'],P53:['secretary','chair','dean','osas'],P54:['secretary'],
 }
-let repo=createMemoryRepository();let authStore=createMemoryAuthStore();let app=createApp(repo,{authStore})
-beforeEach(()=>{repo=createMemoryRepository();authStore=createMemoryAuthStore();app=createApp(repo,{authStore})})
+let repo=createMemoryRepository();let authStore=setUpAuthStore();let app=createApp(repo,{authStore})
+beforeEach(()=>{repo=createMemoryRepository();authStore=setUpAuthStore();app=createApp(repo,{authStore})})
 async function login(id:string){
  // The seeded secretary stays inactive until the Dean activates it (see accounts.test.ts). Switch it on with a stored password here so this matrix stays quick.
  if(id==='QCU-SECRETARY'){repo.read().users.find(u=>u.id===id)!.active=true;await authStore.update(data=>{data.credentials[id]=hashPassword('Accs@Qcu2026!')})}

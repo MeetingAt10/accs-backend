@@ -9,16 +9,16 @@ import { env, onLambda, tableName } from './env.js'
 import { actionRequestSchema, actionResponseSchema, changePasswordSchema, completeFirstLoginSchema, emptyBodySchema, errorResponseSchema, forgotPasswordSchema, healthResponseSchema, idParamsSchema, pageQuerySchema, pageResponseSchema, resetPasswordSchema, sessionResponseSchema, signInSchema, type User } from './schemas.js'
 import { createNewConcernMailer, createResetMailer, createSesInviteMailer, type NewConcernMailer, type ResetCodeMailer } from './mail.js'
 import { accountRouter, applyAccounts, recordAudit, saveAccountChange, saveProfileChange, setOwnCredentials, unsentMailer, type InviteMailer } from './accounts.js'
-import { hasPermission } from './access.js'
+import { hasPermission, setApprovedOverrides } from './access.js'
 import { devRouter, devToolboxEnabled, isDevToolboxCall, type Stack } from './dev.js'
 import { send } from './http.js'
 import { createRepository } from './persist.js'
-import { ApiError, completeMaterialUpload, getPage, materialDownloadUrl, performAction, refreshRestrictions, sessionView, startMaterialUpload, unavailable, type AccountChange, type AfterCommit, type ProfileChange, startMessageUpload, messageFileUrl, postFileUrl } from './services.js'
+import { ApiError, approvedOverrides, completeMaterialUpload, getPage, materialDownloadUrl, performAction, refreshRestrictions, sessionView, startMaterialUpload, unavailable, type AccountChange, type AfterCommit, type ProfileChange, startMessageUpload, messageFileUrl, postFileUrl, search } from './services.js'
 import { createS3MaterialStorage, type MaterialStorage } from './material-storage.js'
 import { createResetStore, resetPolicy, type ResetStore } from './resets.js'
 import { createThrottleStore, type ThrottleStore } from './throttle.js'
 import { createSessionStore, isWellFormedToken, newSessionToken, sessionIdOf, sessionPolicy, sessionState, type SessionStore } from './sessions.js'
-import { demoUserIds, isSampleAddress, type Repository } from './store.js'
+import { demoUserIds, isSampleAddress, rosterUserIds, type Repository } from './store.js'
 import { recordException, requestTelemetry } from './telemetry.js'
 import { currentAccountId, formerAccountIds } from './renames.js'
 
@@ -42,6 +42,9 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     const sessionId=sessionIdOf(token);const session=await sessions.get(sessionId);const now=Date.now()
     if(!session||sessionState(session,now)!=='live')return undefined
     const user=await repository.view(unit=>{const db=unit.read();const account=db.users.find(u=>u.id===currentAccountId(session.userId)&&u.active);return account&&refreshRestrictions(db,account)},['restrictions']);if(!user)return undefined
+    // A real person's account opened with the shared seed password, before that stopped working, is not a session: it has no credential of its own.
+    // Not where the dev toolbox exists: there any signed-in tester may become any account (the Dean included), so a switch to a real person's account stays.
+    if(!devToolbox&&rosterUserIds.has(user.id)&&!credentialFor(user,await authStore.load()))return undefined
     if(now-Date.parse(session.lastSeenAt)>=sessionPolicy.touchIntervalMs)await sessions.touch(sessionId,new Date(now).toISOString())
     res.locals.sessionId=sessionId;return user
   }
@@ -55,7 +58,10 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   // nothing new costs no repository work.
   let synced:AuthData|undefined
   const syncUsers=async()=>{
-    const data=await authStore.load();if(data===synced)return
+    const data=await authStore.load()
+    // Approved permission changes travel with the accounts, so every instance applies them before any permission check.
+    setApprovedOverrides(data.permissionGrants??{})
+    if(data===synced)return
     await repository.transact(unit=>applyAccounts(unit.read(),data.users),[]);synced=data
   }
   // An old account ID (QCU-DEAN) signs in as the renamed account (CCS-DEAN).
@@ -188,6 +194,8 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     send(res,actionResponseSchema,{ok:true,message:'Reset code issued. Give it to the account holder; it expires in 15 minutes and is not shown again.',record:{code,expiresAt:new Date(now+resetPolicy.codeTtlMs).toISOString()}})
   })
   app.get('/api/session',(_req,res)=>send(res,sessionResponseSchema,sessionView(res.locals.user as User)))
+  // The top search: what this person may open, a few of each kind (services.ts search).
+  app.get('/api/search',async(req,res)=>{const q=z.object({q:z.string().trim().min(2,'Type at least two letters.').max(100)}).parse(req.query).q;res.json(await search(repository,res.locals.user as User,q))})
   app.get('/api/pages/:pageId',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const query=pageQuerySchema.parse(req.query);send(res,pageResponseSchema,await getPage(repository,res.locals.user as User,pageId,query))})
   // Class material files (#44): a signed upload straight to S3, a confirmation, and a download that checks access first.
   const materialId=z.string().trim().min(1).max(64)
@@ -200,7 +208,15 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   app.get('/api/posts/:postId/files/:fileId',async(req,res)=>{const url=await postFileUrl(repository,res.locals.user as User,materialId.parse(req.params.postId),materialId.parse(req.params.fileId),req.query.inline==='1',materialStorage);if(req.query.format==='json'){send(res,actionResponseSchema,{ok:true,message:'File link ready.',record:{url}});return}res.redirect(302,url)})
   app.post('/api/messages/uploads',async(req,res)=>{send(res,actionResponseSchema,{ok:true,message:'Upload the file to the address given, then send the message.',record:await startMessageUpload(res.locals.user as User,req.body,materialStorage)})})
   app.get('/api/threads/:threadId/messages/:messageId/files/:fileId',async(req,res)=>{const url=await messageFileUrl(repository,res.locals.user as User,materialId.parse(req.params.threadId),materialId.parse(req.params.messageId),materialId.parse(req.params.fileId),req.query.inline==='1',materialStorage);if(req.query.format==='json'){send(res,actionResponseSchema,{ok:true,message:'File link ready.',record:{url}});return}res.redirect(302,url)})
-  app.post('/api/pages/:pageId/actions',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const body=actionRequestSchema.parse(req.body);send(res,actionResponseSchema,await performAction(repository,res.locals.user as User,pageId,body,saveAccount,saveProfile,sendMail,materialStorage))})
+  app.post('/api/pages/:pageId/actions',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const body=actionRequestSchema.parse(req.body)
+    const result=await performAction(repository,res.locals.user as User,pageId,body,saveAccount,saveProfile,sendMail,materialStorage)
+    // A decided permission request changes what is in force: store the approved set beside the accounts for every instance.
+    // Only the decided key is written over what is stored, so a concurrent decision on another instance (another key) is
+    // kept, and a store write retried after a conflict runs on the newer copy. Approved keys this instance's records hold
+    // but the store lacks (an earlier write that failed after its decision was saved) are filled in too (code review, 23 November 2026).
+    if(body.action==='decidePermission'){const key=(result.record as {key:string}).key;const fresh=approvedOverrides({permissionOverrides:await repository.view(unit=>unit.read().permissionOverrides,['permissionOverrides'])});let grants:Record<string,boolean>={}
+      await authStore.update(data=>{const stored=data.permissionGrants??{};grants={...Object.fromEntries(Object.entries(fresh).filter(([k])=>!(k in stored))),...stored,...(key in fresh?{[key]:fresh[key]!}:{})};data.permissionGrants=grants});setApprovedOverrides(grants)}
+    send(res,actionResponseSchema,result)})
   // Invites go out by email when MAIL_FROM is set (#36); otherwise the screen shows them once.
   app.use('/api/accounts',accountRouter({repository,authStore,sessions,mailer:options.mailer??(env.MAIL_FROM?createSesInviteMailer(env.MAIL_FROM):unsentMailer)}))
   if(devToolbox)app.use('/api/dev',devRouter({repository,sessions,start:startSession,out:sessionOut}))

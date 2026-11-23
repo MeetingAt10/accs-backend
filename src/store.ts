@@ -10,7 +10,8 @@ import type { ReactionKind, Role, TalkMode, User } from './schemas.js'
 export type Stage = 'adviser' | 'chair' | 'dean' | 'guidance' | 'osas'
 /** A file sent with a message. It lives in the files bucket under `key`, which only the server knows. */
 export type Attachment = { id: string; fileName: string; contentType: string; size: number; key: string }
-export type Message = { id: string; authorId: string; body: string; at: string; attachments?: Attachment[] }
+/** `editedAt` and `deleted`: the author changed or took back the message (decided 19 November 2026). */
+export type Message = { id: string; authorId: string; body: string; at: string; attachments?: Attachment[]; editedAt?: string; deleted?: boolean }
 export type History = { id: string; at: string; actorId: string; actorRole: string; action: string; reason: string; update: string; public: boolean; stage: Stage }
 /** The student's agreement to send a concern, stamped by the server with the exact wording they were shown. */
 export type ReportConsent = { readStatement: true; at: string; userId: string; version: string; wording: string }
@@ -30,7 +31,8 @@ export type Talk = { mode: TalkMode; consents: TalkConsent[]; slotId?: string; c
  * and there is no consent or talk mode. Stored reports without `source` are students' concerns.
  * `routing` is the escalation engine's record of why the concern went where it did. Handlers see it; the student does not.
  */
-export type Report = { routing?: Decision['trace']; id: string; ownerId: string; program: string; adviserId?: string; stage: Stage; status: string; narrative: string; category: string; subcategory?: string; categoryDetail?: string; severity: 'low' | 'medium' | 'high'; identity: 'named' | 'anonymous'; alias: string; disclosedTo: string[]; involvedUserIds: string[]; bypassed: boolean; aboutAdvisor: boolean; allowChair?: boolean; allowDean?: boolean; confidential?: boolean; consent?: ReportConsent; source?: 'student' | 'faculty'; reportedStudentId?: string; talk?: Talk; createdAt: string; updatedAt: string; caseFileId?: string; sourcePostId?: string; location?: string; occurredOn?: string; history: History[]; notes: Message[]; messages: Message[] }
+/** `readAt`: when an office handling the report first opened it (the "Read" step the student sees). */
+export type Report = { routing?: Decision['trace']; readAt?: string; id: string; ownerId: string; program: string; adviserId?: string; stage: Stage; status: string; narrative: string; category: string; subcategory?: string; categoryDetail?: string; severity: 'low' | 'medium' | 'high'; identity: 'named' | 'anonymous'; alias: string; disclosedTo: string[]; involvedUserIds: string[]; bypassed: boolean; aboutAdvisor: boolean; allowChair?: boolean; allowDean?: boolean; confidential?: boolean; consent?: ReportConsent; source?: 'student' | 'faculty'; reportedStudentId?: string; talk?: Talk; createdAt: string; updatedAt: string; caseFileId?: string; sourcePostId?: string; location?: string; occurredOn?: string; history: History[]; notes: Message[]; messages: Message[] }
 export type Post = {
   id: string
   authorId: string
@@ -76,24 +78,29 @@ export type Event = {
 }
 /** A section space carries its campus and year (#46); its title is the section name, like SBIT3A. Subject spaces may too. */
 export type Space = { id: string; title: string; program: string; section: string; campus?: string; year?: number; subject: string; professorIds: string[]; studentIds: string[] }
-export type Organization = { id: string; name: string; description: string; representativeId: string; memberIds: string[] }
+/** `positions` holds each member's title in the organization, like President or VP for Information, set by the organization account. */
+export type Organization = { id: string; name: string; description: string; representativeId: string; memberIds: string[]; positions?: Record<string, string> }
 export type Thread = {
   id: string
   title: string
   memberIds: string[]
   spaceId?: string
+  /** A group conversation someone started from Messages, with the name they gave it (decided 16 November 2026). */
+  group?: boolean
   messages: Message[]
   mutedBy: string[]
   readMessageCounts: Record<string, number>
 }
 /** `reason` is set when the faculty member marks the time not available (#32); entries stored before that have none. */
 export type Slot = { id: string; facultyId: string; date: string; start: string; end: string; state: 'open' | 'requested' | 'booked' | 'unavailable'; reason?: string }
-export type Consultation = { id: string; studentId: string; facultyId: string; slotId: string; /** The concern this time is for, when the student booked it to talk about one. */ reportId?: string; purpose: string; category?: string; subcategory?: string; details?: string; status: 'Requested' | 'Approved' | 'Booked' | 'Completed' | 'Declined' | 'Cancelled'; createdAt: string; updatedAt: string; history: { at: string; status: string; note: string; actorId: string }[] }
+/** `slotDate`/`slotStart`/`slotEnd` copy the booked time, so the appointment still says when it was if that time is later changed or removed. */
+export type Consultation = { id: string; studentId: string; facultyId: string; slotId: string; slotDate?: string; slotStart?: string; slotEnd?: string; /** The concern this time is for, when the student booked it to talk about one. */ reportId?: string; purpose: string; category?: string; subcategory?: string; details?: string; status: 'Requested' | 'Approved' | 'Booked' | 'Completed' | 'Declined' | 'Cancelled'; createdAt: string; updatedAt: string; history: { at: string; status: string; note: string; actorId: string }[] }
 export type Question = { id: string; criterion: string; text: string; type: 'rating' | 'text'; required: boolean }
 export type Cycle = { id: string; title: string; term: string; opens: string; closes: string; status: 'Draft' | 'In review' | 'Published' | 'Closed'; instructions: string; questions: Question[]; forms: string[]; resultsPublished: boolean; reviews: { userId: string; decision: string; note: string; at: string }[] }
 export type Assignment = { id: string; evaluatorId: string; facultyId: string; cycleId: string; relation: string; subject: string; answers?: Record<string, string | number>; comment?: string; submittedAt?: string }
 export type Restriction = { id: string; studentId: string; features: string[]; basis: string; decisionReference: string; starts: string; until: string; actorId: string; active: boolean }
-export type Referral = { id: string; studentId: string; change: string; decisionReference: string; reason: string; actorId: string; at: string; status: string }
+/** A change request to a student's restrictions. `handledAt`/`handledBy` are set when the administrator acts on that student's restrictions. */
+export type Referral = { id: string; studentId: string; change: string; decisionReference: string; reason: string; actorId: string; at: string; status: string; handledAt?: string; handledBy?: string }
 /**
  * A strike against a reported student (#34, decided 11 November 2026). The Dean recommends it while the case is with the
  * Dean (`actorId`, `at`, `note`); OSAS confirms or rejects it once the case reaches OSAS. Only a confirmed strike counts.
@@ -109,7 +116,7 @@ export type Audit = { id: string; at: string; actorId: string; action: string; m
 export type Moderation = { id: string; itemType: 'post' | 'comment' | 'message'; itemId: string; parentId: string; authorId: string; reporterId?: string; source: 'Filter' | 'User'; reason: string; excerpt: string; status: string; at: string; history: { at: string; actorId: string; decision: string; reason: string }[] }
 export type Database = {
   users: User[]; spaces: Space[]; organizations: Organization[]; posts: Post[]; threads: Thread[]; slots: Slot[]; consultations: Consultation[]; reports: Report[]; drafts: Record<string, Record<string, unknown>>; todos: { id: string; ownerId: string; title: string; date: string; done: boolean }[];
-  events: Event[]; cycles: Cycle[]; assignments: Assignment[]; restrictions: Restriction[]; referrals: Referral[]; strikes: Strike[]; strikeSettlements: StrikeSettlement[]; materials: Material[]; loadSchedules: LoadEntry[]; offenses: { id: string; studentId: string; level: number; summary: string; decisionReference: string; actorRole: string; at: string; status: string }[]; goodMoral: { studentId: string; status: string; decisionSource: string; notes: string; actorId: string; at: string }[]; clusters: { id: string; program: string; title: string; reportIds: string[]; similarity: number; supporting: string; dissenting: string; phrases: string[]; status: string; history: { at: string; actorId: string; decision: string; reason: string }[] }[]; notifications: Notification[]; audit: Audit[]; moderation: Moderation[]; photos: Record<string, string>; settings: Record<string, { theme: string; density: string; priorities: Record<string, string> }>; permissionOverrides: Record<string, boolean>; telemetry: { id: string; at: string; category: string; durationMs: number; success: boolean }[]; followUps: { id: string; facultyId: string; actorId: string; note: string; at: string }[];
+  events: Event[]; cycles: Cycle[]; assignments: Assignment[]; restrictions: Restriction[]; referrals: Referral[]; strikes: Strike[]; strikeSettlements: StrikeSettlement[]; materials: Material[]; loadSchedules: LoadEntry[]; offenses: { id: string; studentId: string; level: number; summary: string; decisionReference: string; actorRole: string; at: string; status: string }[]; goodMoral: { studentId: string; status: string; decisionSource: string; notes: string; actorId: string; at: string }[]; clusters: { id: string; program: string; title: string; reportIds: string[]; similarity: number; supporting: string; dissenting: string; phrases: string[]; status: string; history: { at: string; actorId: string; decision: string; reason: string }[] }[]; notifications: Notification[]; audit: Audit[]; moderation: Moderation[]; photos: Record<string, string>; settings: Record<string, { theme: string; density: string; priorities: Record<string, string> }>; permissionOverrides: Record<string, PermissionOverride | boolean>; telemetry: { id: string; at: string; category: string; durationMs: number; success: boolean }[]; followUps: { id: string; facultyId: string; actorId: string; note: string; at: string }[];
 }
 /** What domain rules see while they run. They stay synchronous, so one unit of work is never interleaved with another. */
 export interface UnitOfWork { read(): Database; nextId(prefix: string): string }
@@ -131,7 +138,17 @@ export type Material = { id: string; spaceId: string; kind: 'link' | 'file'; tit
   fileName?: string; contentType?: string; size?: number; key?: string; status?: 'pending' | 'ready'
   /** Questions and replies from the subject's students and professors. */
   comments?: Message[] }
-export type Collection = 'reports' | 'consultations' | 'slots' | 'threads' | 'notifications' | 'audit' | 'posts' | 'moderation' | 'drafts' | 'events' | 'todos' | 'cycles' | 'assignments' | 'followUps' | 'restrictions' | 'referrals' | 'strikes' | 'strikeSettlements' | 'materials' | 'loadSchedules' | 'goodMoral' | 'clusters' | 'settings' | 'photos' | 'permissionOverrides' | 'telemetry'
+/**
+ * A permission change for one role ("role:permission"), decided 20 November 2026: proposed by someone who manages roles,
+ * approved or rejected by the Secretary (or the administrator, for the Secretary's own requests). `approved` is the value
+ * in force; a new proposal waits beside it. A bare boolean is a proposal stored before approvals existed.
+ */
+export type PermissionOverride = {
+  approved?: boolean
+  proposal?: { allowed: boolean; by: string; at: string; reason?: string }
+  decisions: { at: string; by: string; decision: 'Approved' | 'Rejected'; allowed: boolean; reason?: string }[]
+}
+export type Collection = 'reports' | 'consultations' | 'slots' | 'threads' | 'notifications' | 'audit' | 'posts' | 'moderation' | 'drafts' | 'events' | 'todos' | 'cycles' | 'assignments' | 'followUps' | 'restrictions' | 'referrals' | 'strikes' | 'strikeSettlements' | 'materials' | 'loadSchedules' | 'goodMoral' | 'clusters' | 'settings' | 'photos' | 'permissionOverrides' | 'telemetry' | 'organizations'
 /**
  * The storage boundary. A backend does its I/O around the work: it loads, runs the work, then commits.
  * - `view`: read-only. Anything the work changes is discarded, and what it returns is detached from the store.
@@ -180,10 +197,10 @@ export const seedRoster = env.SEED_ROSTER === 'true'
 const deanRosterId = 'QCU-FAC-PAULA-DELACRUZ'
 export function seed(includeRoster = seedRoster): Database {
   const users: User[] = [
-    user('QCU-STU-IT-A', 'Demo Student Foxtrot', ['student'], { campus: 'SB', program: 'BSIT', section: 'A', year: 3, studentId: 'QCU-2024-0101', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], organizationIds: ['ORG-COMPUTING'] }),
-    user('QCU-STU-IT-B', 'Demo Student Golf', ['student'], { campus: 'SB', program: 'BSIT', section: 'B', year: 3, studentId: 'QCU-2024-0102', adviserId: 'QCU-PROF-OTHER', spaceIds: ['SPACE-IT-B'] }),
-    user('QCU-STU-CS', 'Demo Student Hotel', ['student'], { campus: 'SB', program: 'BSCS', section: 'A', year: 2, studentId: 'QCU-2025-0201', adviserId: 'QCU-PROF-CS', spaceIds: ['SPACE-CS-A'] }),
-    user('QCU-STU-RESTRICTED', 'Demo Student India', ['student'], { campus: 'SB', program: 'BSIT', section: 'A', year: 3, studentId: 'QCU-2024-0103', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], restrictions: ['post.create', 'post.comment', 'report.anonymous'] }),
+    user('QCU-STU-IT-A', 'Demo Student Foxtrot', ['student'], { campus: 'SB', program: 'BSIT', section: 'A', year: 3, studentId: '24-0101', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], organizationIds: ['ORG-COMPUTING'] }),
+    user('QCU-STU-IT-B', 'Demo Student Golf', ['student'], { campus: 'SB', program: 'BSIT', section: 'B', year: 3, studentId: '24-0102', adviserId: 'QCU-PROF-OTHER', spaceIds: ['SPACE-IT-B'] }),
+    user('QCU-STU-CS', 'Demo Student Hotel', ['student'], { campus: 'SB', program: 'BSCS', section: 'A', year: 2, studentId: '25-0201', adviserId: 'QCU-PROF-CS', spaceIds: ['SPACE-CS-A'] }),
+    user('QCU-STU-RESTRICTED', 'Demo Student India', ['student'], { campus: 'SB', program: 'BSIT', section: 'A', year: 3, studentId: '24-0103', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], restrictions: ['post.create', 'post.comment', 'report.anonymous'] }),
     user('QCU-ORG', 'Demo Organization Rep', ['organization'], { organizationId: 'ORG-COMPUTING', organizationIds: ['ORG-COMPUTING'], office: 'CCS Organizations', title: 'Organization representative' }),
     user('QCU-PROF-IT', 'Demo Professor Charlie', ['professor'], { program: 'BSIT', office: 'CCS Faculty Room', title: 'Faculty, BSIT adviser', bio: 'Teaches Data Structures and advises BSIT 3A.', officeHours: 'Thursdays, 10:00 AM to 12:00 PM, CCS Faculty Room', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'] }),
     user('QCU-PROF-OTHER', 'Demo Professor Delta', ['professor'], { program: 'BSIT', office: 'CCS Faculty Room', title: 'Faculty, BSIT', bio: 'Advises BSIT 3B.', officeHours: 'Thursdays, 9:00 AM to 11:00 AM, CCS Faculty Room', spaceIds: ['SPACE-IT-B'] }),
@@ -220,6 +237,14 @@ export function seed(includeRoster = seedRoster): Database {
   }
   const reports = [report('RPT-0241', 'QCU-STU-IT-A', 'adviser'), report('RPT-0242', 'QCU-STU-IT-A', 'chair', true), report('RPT-0243', 'QCU-STU-IT-B', 'dean'), report('RPT-0244', 'QCU-STU-RESTRICTED', 'guidance'), report('RPT-0245', 'QCU-STU-IT-A', 'guidance', false, true), report('RPT-0246', 'QCU-STU-IT-A', 'osas', false, true), report('RPT-0247', 'QCU-STU-IT-B', 'osas', false, true), report('RPT-0248', 'QCU-STU-CS', 'chair')]
   reports[0]!.sourcePostId = 'POST-0102'
+  // For testers (QA 17 November 2026): a BSCS report that skipped the adviser because the adviser may be involved, so the
+  // Program Chair sees the conflict notice, and a second BSCS report so the BSCS chair has a group of similar reports.
+  const conflicted = report('RPT-0249', 'QCU-STU-CS', 'chair', true)
+  conflicted.narrative = 'Our adviser keeps cancelling consultations at the last minute and then marks us absent. Please check how absences are recorded.'
+  conflicted.routing = { engineVersion: 'escalation-0.2.0', lexiconVersion: 'lexicon-2026-11-11', rule: 'adviser-conflict', scope: 'individual', mentions: [], heldBack: ['The adviser was not sent this report because the report may be about them.'], thresholds: { bypass: 0.75, triage: 0.45 } }
+  const similar = report('RPT-0250', 'QCU-STU-CS', 'chair', true)
+  similar.narrative = 'The BSCS lab schedule changed again this week and the notice came after our class had started.'
+  reports.push(conflicted, similar)
   const questions: Question[] = [{ id: 'Q1', criterion: 'Clarity', text: 'Explains concepts and requirements clearly.', type: 'rating', required: true }, { id: 'Q2', criterion: 'Support', text: 'Helps students who ask for support.', type: 'rating', required: true }, { id: 'Q3', criterion: 'Fairness', text: 'Explains how work will be graded and grades it the same way each time.', type: 'rating', required: true }]
   const cycles: Cycle[] = [{ id: 'CYCLE-2026-1', title: '1st Semester AY 2026-2027', term: '1st Semester', opens: '2026-10-01', closes: '2026-11-30', status: 'Published', instructions: 'Rate each statement from 1 to 5 based on this semester.', questions, forms: ['student'], resultsPublished: true, reviews: [{ userId: 'QCU-PROF-IT', decision: 'reviewed', note: 'Questions fit the listed duties.', at }] }, { id: 'CYCLE-2026-2', title: '2nd Semester AY 2026-2027 draft', term: '2nd Semester', opens: '2027-01-10', closes: '2027-03-30', status: 'In review', instructions: 'Read the proposed questions. Tell the Dean\'s Office if any do not fit your duties.', questions: structuredClone(questions), forms: ['student'], resultsPublished: false, reviews: [] }]
   const assignments: Assignment[] = [
@@ -267,14 +292,21 @@ export function seed(includeRoster = seedRoster): Database {
     slots: [{ id: 'SLOT-0101', facultyId: 'QCU-PROF-IT', date: '2026-10-29', start: '10:00', end: '10:30', state: 'open' }, { id: 'SLOT-0102', facultyId: 'QCU-PROF-IT', date: '2026-10-29', start: '10:30', end: '11:00', state: 'requested' }, { id: 'SLOT-0103', facultyId: 'QCU-PROF-IT', date: '2026-10-30', start: '13:00', end: '14:00', state: 'unavailable' }, { id: 'SLOT-0104', facultyId: 'QCU-PROF-OTHER', date: '2026-10-29', start: '09:00', end: '09:30', state: 'open' }, { id: 'SLOT-0105', facultyId: 'QCU-PROF-CS', date: '2026-10-29', start: '11:00', end: '11:30', state: 'open' }, { id: 'SLOT-0106', facultyId: 'QCU-CHAIR-IT', date: '2026-10-30', start: '10:00', end: '10:30', state: 'open' }],
     consultations: [{ id: 'CONSULT-0101', studentId: 'QCU-STU-IT-A', facultyId: 'QCU-PROF-IT', slotId: 'SLOT-0102', purpose: 'Clarify the Data Structures project rubric', status: 'Requested', createdAt: at, updatedAt: at, history: [{ at, status: 'Requested', note: 'Request received', actorId: 'QCU-STU-IT-A' }] }],
     todos: [{ id: 'TODO-0101', ownerId: 'QCU-STU-IT-A', title: 'Prepare appointment questions', date: '2026-10-29', done: false }], events: [{ id: 'EVENT-0101', title: 'CCS appointment week', date: '2026-10-29', start: '08:00', end: '17:00', type: 'CCS', description: 'Faculty hold open appointment times. Request a time under Appointments.', contactId: 'QCU-SECRETARY' }, { id: 'EVENT-0102', title: 'Intro to Git workshop', date: '2026-11-05', start: '13:00', end: '15:00', type: 'Organization', description: 'Open to all CCS students. Bring your laptop.', contactId: 'QCU-ORG', organizationId: 'ORG-COMPUTING', place: 'IC 305' }, { id: 'EVENT-0103', title: 'Midterm grade submission', date: '2026-11-09', start: '08:00', end: '09:00', type: 'Academic year', description: 'Faculty submit midterm grades to the Dean\'s Office.', contactId: 'CCS-DEAN' }], cycles, assignments, restrictions, referrals: [], offenses: [{ id: 'OFF-0101', studentId: 'QCU-STU-RESTRICTED', level: 1, summary: 'Unauthorized use of a lab computer. First offense, decision recorded by OSAS.', decisionReference: 'QCU-DEC-001', actorRole: 'osas', at, status: 'Recorded' }], strikes: [], strikeSettlements: [], materials: [], loadSchedules: [], goodMoral: [],
-    clusters: [{ id: 'CLUSTER-0101', program: 'BSIT', title: 'Lab schedule changes', reportIds: ['RPT-0241', 'RPT-0242', 'RPT-0243'], similarity: 86, supporting: 'Reports say students could not plan their lab work after the timetable changed.', dissenting: 'One report says a corrected notice was posted later.', phrases: ['lab timetable', 'schedule changes'], status: 'To review', history: [] }],
+    clusters: [{ id: 'CLUSTER-0101', program: 'BSIT', title: 'Lab schedule changes', reportIds: ['RPT-0241', 'RPT-0242', 'RPT-0243'], similarity: 86, supporting: 'Reports say students could not plan their lab work after the timetable changed.', dissenting: 'One report says a corrected notice was posted later.', phrases: ['lab timetable', 'schedule changes'], status: 'To review', history: [] }, { id: 'CLUSTER-0102', program: 'BSCS', title: 'BSCS lab schedule notices', reportIds: ['RPT-0248', 'RPT-0250'], similarity: 81, supporting: 'Both reports say lab schedule changes were announced late.', dissenting: 'The reports are about different weeks.', phrases: ['lab schedule', 'notice'], status: 'To review', history: [] }],
     notifications: users.map((u, index) => ({ id: `NOTIF-${index + 1}`, recipientId: u.id, kind: 'announcement', title: 'New college announcement', body: 'Open the feed to read it.', priority: 'normal', pageId: 'P04', at, read: false })),
     audit: [{ id: 'AUDIT-QCU-1', at, actorId: 'ACCS-ADMIN', action: 'Accounts loaded', module: 'identity', reference: 'QCU-ACCOUNTS', result: 'Recorded' }],
     moderation: [{ id: 'MOD-0101', itemType: 'comment', itemId: 'COMMENT-0101', parentId: 'POST-0102', authorId: 'QCU-STU-IT-B', reporterId: 'QCU-STU-IT-A', source: 'User', reason: 'Reported by a classmate as off-topic', excerpt: 'Same problem in BSIT 3B. A posted lab schedule would help us plan.', status: 'Pending', at, history: [] }], settings: {}, photos: {}, permissionOverrides: {}, telemetry: [], followUps: [],
   }
 }
-/** The seeded accounts that sign in with the shared seed password until they set their own. Inactive ones (the secretary) never do. */
-export const demoUserIds: ReadonlySet<string> = new Set(seed().users.filter(u => u.active).map(u => u.id))
+/** The real CCS personnel (src/faculty-roster.ts). Their accounts belong to real people. */
+export const rosterUserIds: ReadonlySet<string> = new Set(facultyRoster.map(person => person.id))
+/**
+ * The made-up demo accounts that sign in with the shared seed password until they set their own. Inactive ones (the
+ * secretary) never do, and neither does any real person on the roster: anyone who guessed a name could otherwise sign in
+ * as them with the shared password. A roster account signs in only with credentials set up for it (the Dean through the
+ * administrator's setup, everyone else through an invite or an issued reset code).
+ */
+export const demoUserIds: ReadonlySet<string> = new Set(seed().users.filter(u => u.active && !rosterUserIds.has(u.id)).map(u => u.id))
 const sampleEmails = new Map(seed().users.map(u => [u.id, u.email.toLowerCase()]))
 /**
  * The qcu.edu.ph addresses a seeded account had before #69, under its current ID and any former one (QCU-DEAN was

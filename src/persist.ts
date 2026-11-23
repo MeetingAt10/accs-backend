@@ -22,6 +22,8 @@ export const persisted: Record<Collection, DomainTable> = {
   settings: 'ccs_notification',
   audit: 'ccs_audit',
   posts: 'ccs_community',
+  // Organizations are created and their members changed in the app since 19 November 2026; before, they were seed only.
+  organizations: 'ccs_community',
   moderation: 'ccs_moderation',
   cycles: 'ccs_evaluation',
   assignments: 'ccs_evaluation',
@@ -68,7 +70,7 @@ const keyOf = (name: Collection, row: Row) => String(name === 'goodMoral' ? row.
 /**
  * A `Repository` for several instances that share a record store. The seed is the base: each stored record replaces the
  * seeded record with the same ID, a stored deletion hides it, and new records follow in ID order. Collections outside
- * `persisted` (`users`, `spaces`, `organizations`, `offenses`) stay per instance, as they are in memory.
+ * `persisted` (`users`, `spaces`, `offenses`) stay per instance, as they are in memory.
  * Each unit of work runs on a private copy; `transact` then writes only the records it changed, each conditioned on the
  * version it read, in one DynamoDB transaction per `writeLimit` writes. Conflicting units run again.
  * ponytail: write-write conflicts only. A unit that reads a record and acts on it without changing it is not validated.

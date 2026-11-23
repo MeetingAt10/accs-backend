@@ -4,20 +4,45 @@ import { consentWording } from './consent.js'
 
 export const permissionRoles: Record<string, Role[]> = {
   'feed.read': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'],
-  'post.create': ['student','organization','professor','chair','dean','guidance','osas'], 'post.anonymous': ['student'], 'announcement.publish': ['organization','professor','chair','dean'],
-  'message.send': ['student','professor','chair','dean','guidance','osas'], 'roster.view': ['student','organization','professor','chair','dean'], 'calendar.view': ['student','organization','professor','chair','dean','guidance','osas'], 'todo.manage': ['student'], 'consultation.request': ['student'], 'consultation.decide': ['professor'],
+  // The Secretary posts too, announcements included: she is in charge of the college's announcements (decided 16 November 2026).
+  'post.create': ['student','organization','professor','chair','dean','guidance','osas','secretary'], 'post.anonymous': ['student'], 'announcement.publish': ['organization','professor','chair','dean','secretary'],
+  // The Organization representative (decided 16 November 2026) and the CCS Secretary (decided 20 November 2026) message
+  // anyone; to-dos are for every role that has a calendar.
+  'message.send': ['student','organization','professor','chair','dean','guidance','osas','secretary'], 'roster.view': ['student','organization','professor','chair','dean'], 'calendar.view': ['student','organization','professor','chair','dean','guidance','osas','secretary'], 'todo.manage': ['student','organization','professor','chair','dean','guidance','osas','secretary'], 'consultation.request': ['student'], 'consultation.decide': ['professor'],
   'report.create': ['student'], 'report.viewOwn': ['student'], 'case.view': ['professor','chair','dean','guidance','osas'], 'case.act': ['professor','chair','dean','guidance','osas'], 'case.convert': ['guidance'], 'cluster.review': ['chair'], 'analytics.view': ['chair','dean'],
-  'evaluation.fill': ['student','professor'], 'evaluation.review': ['professor'], 'evaluation.configure': ['dean'], 'evaluation.results': ['professor','chair','dean'], 'offense.view': ['chair','dean','guidance','osas'], 'goodmoral.review': ['guidance','osas'], 'restriction.manage': ['administrator','guidance','osas'], 'strike.recommend': ['dean'], 'student.report': ['professor','chair'], 'clearance.view': ['secretary','chair','dean','osas'], 'load.manage': ['secretary'], 'strike.record': ['osas'], 'standing.viewOwn': ['student'], 'moderation.review': ['administrator'], 'moderation.referral': ['secretary'], 'role.manage': ['administrator'], 'audit.view': ['administrator'],
+  'evaluation.fill': ['student','professor'], 'evaluation.review': ['professor'], 'evaluation.configure': ['dean'], 'evaluation.results': ['professor','chair','dean'], 'offense.view': ['chair','dean','guidance','osas'], 'goodmoral.review': ['guidance','osas'], 'restriction.manage': ['administrator','guidance','osas'], 'strike.recommend': ['dean'], 'student.report': ['professor','chair'], 'clearance.view': ['secretary','chair','dean','osas'], 'load.manage': ['secretary'], 'strike.record': ['osas'], 'standing.viewOwn': ['student'], 'moderation.review': ['administrator'], 'moderation.referral': ['secretary'], 'moderation.osas': ['osas'], 'role.manage': ['administrator','secretary'], 'audit.view': ['administrator'],
   'directory.view': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'], 'self.manage': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'], 'assistant.use': ['student','organization','professor','chair','dean','administrator','guidance','osas','secretary'],
   // Account provisioning has no page; it is the /api/accounts routes. The Dean activates the secretary, who creates every other account.
   'account.activateSecretary': ['dean'], 'account.setupDean': ['administrator'], 'account.provision': ['secretary'],
+  // The Secretary and the Dean create organizations and their accounts (decided 19 November 2026).
+  'organization.create': ['secretary','dean'],
+  // Decided 20 November 2026: the Secretary and the System Administrator both change roles, and the Secretary approves
+  // permission change requests. Nobody approves their own request, so the administrator approves the Secretary's.
+  'permission.review': ['secretary','administrator'],
+}
+
+/**
+ * Permissions no request can change: who manages roles, accounts, approvals and the audit trail stays as coded, so an
+ * approved request can never hand out the power to approve or to grant more.
+ */
+export const lockedPermissions: readonly string[] = ['role.manage', 'permission.review', 'account.activateSecretary', 'account.setupDean', 'account.provision', 'audit.view']
+
+/** Approved permission changes, "role:permission" -> allowed. The API reloads them on every request (app.ts). */
+let approvedOverrides: Readonly<Record<string, boolean>> = {}
+export function setApprovedOverrides(overrides: Record<string, boolean>) {
+  approvedOverrides = Object.fromEntries(Object.entries(overrides).filter(([key]) => !lockedPermissions.includes(key.slice(key.indexOf(':') + 1))))
+}
+/** Whether a role holds a permission: an approved change where there is one, otherwise the coded matrix above. */
+export function roleHas(role: Role, permission: string) {
+  const key = `${role}:${permission}`
+  return key in approvedOverrides ? approvedOverrides[key]! : !!permissionRoles[permission]?.includes(role)
 }
 export const pagePermissions: Record<string, string[]> = {
-  P01: ['self.manage'], P02: ['self.manage'], P03: ['self.manage'], P04: ['feed.read'], P05: ['post.create'], P06: ['feed.read'], P07: ['roster.view'], P08: ['roster.view'], P09: ['directory.view'], P10: ['directory.view'], P11: ['message.send'], P12: ['message.send'], P13: ['calendar.view'], P14: ['consultation.request','consultation.decide'], P15: ['consultation.request'], P16: ['consultation.request','consultation.decide'], P17: ['consultation.decide'], P18: ['report.viewOwn'], P19: ['report.create'], P20: ['report.viewOwn'], P21: ['case.view'], P22: ['case.view'], P23: ['cluster.review'], P24: ['cluster.review'], P25: ['analytics.view'], P26: ['evaluation.fill','evaluation.results','evaluation.configure'], P27: ['evaluation.fill'], P28: ['evaluation.results'], P29: ['evaluation.results'], P30: ['evaluation.configure'], P31: ['evaluation.configure'], P32: ['evaluation.review'], P33: ['offense.view'], P34: ['offense.view'], P35: ['restriction.manage'], P36: ['standing.viewOwn'], P53: ['clearance.view'], P54: ['load.manage'], P37: ['directory.view'], P38: ['directory.view'], P39: ['self.manage'], P40: ['self.manage'], P41: ['assistant.use'], P42: ['self.manage'], P43: ['self.manage'], P44: ['self.manage'], P45: ['audit.view'], P46: ['role.manage'], P47: ['role.manage'], P48: ['role.manage'], P49: ['moderation.review','moderation.referral'], P50: ['moderation.review','moderation.referral'], P51: ['audit.view'], P52: ['audit.view'],
+  P01: ['self.manage'], P02: ['self.manage'], P03: ['self.manage'], P04: ['feed.read'], P05: ['post.create'], P06: ['feed.read'], P07: ['roster.view'], P08: ['roster.view'], P09: ['directory.view'], P10: ['directory.view'], P11: ['message.send'], P12: ['message.send'], P13: ['calendar.view'], P14: ['consultation.request','consultation.decide'], P15: ['consultation.request'], P16: ['consultation.request','consultation.decide'], P17: ['consultation.decide'], P18: ['report.viewOwn'], P19: ['report.create'], P20: ['report.viewOwn'], P21: ['case.view'], P22: ['case.view'], P23: ['cluster.review'], P24: ['cluster.review'], P25: ['analytics.view'], P26: ['evaluation.fill','evaluation.results','evaluation.configure'], P27: ['evaluation.fill'], P28: ['evaluation.results'], P29: ['evaluation.results'], P30: ['evaluation.configure'], P31: ['evaluation.configure'], P32: ['evaluation.review'], P33: ['offense.view'], P34: ['offense.view'], P35: ['restriction.manage'], P36: ['standing.viewOwn'], P53: ['clearance.view'], P54: ['load.manage'], P37: ['directory.view'], P38: ['directory.view'], P39: ['self.manage'], P40: ['self.manage'], P41: ['assistant.use'], P42: ['self.manage'], P43: ['self.manage'], P44: ['self.manage'], P45: ['audit.view'], P46: ['role.manage'], P47: ['role.manage'], P48: ['role.manage'], P49: ['moderation.review','moderation.referral','moderation.osas'], P50: ['moderation.review','moderation.referral','moderation.osas'], P51: ['audit.view'], P52: ['audit.view'],
 }
 export const pageTitles: Record<string, string> = { P01:'ACCS',P02:'Sign in',P03:'Home',P04:'Feed',P05:'New post',P06:'Discussion',P07:'Classes and sections',P08:'Class space',P09:'Organizations',P10:'Organization',P11:'Messages',P12:'Conversation',P13:'Calendar',P14:'Appointments',P15:'Faculty availability',P16:'Appointment request',P17:'My availability',P18:'My reports',P19:'New report',P20:'Report',P21:'Case queue',P22:'Case workspace',P23:'Similar reports',P24:'Group review',P25:'Analytics',P26:'Evaluations',P27:'Evaluation form',P28:'Evaluation results',P29:'Faculty results',P30:'Evaluation cycles',P31:'Cycle editor',P32:'Review questions',P33:'Student records',P34:'Student record',P35:'Restrictions',P36:'My standing',P37:'Personnel directory',P38:'Profile',P39:'My profile',P40:'Notifications',P41:'Assistant',P42:'Help',P43:'Settings',P44:'Notification priorities',P45:'Administration',P46:'Users and roles',P47:'User assignment',P48:'Permission matrix',P49:'Moderation',P50:'Moderation review',P51:'Audit trail',P52:'Monitoring',P53:'Clearance',P54:'Faculty load' }
 export function hasRole(user: User, ...roles: Role[]) { return user.roles.some(role => roles.includes(role)) }
-export function hasPermission(user: User, permission: string) { return !!permissionRoles[permission]?.some(role => user.roles.includes(role)) && !user.restrictions.includes(permission) }
+export function hasPermission(user: User, permission: string) { return !!permissionRoles[permission] && user.roles.some(role => roleHas(role, permission)) && !user.restrictions.includes(permission) }
 export function permissions(user: User) { return Object.keys(permissionRoles).filter(key => hasPermission(user,key)) }
 export function canPage(user: User, pageId: string) {
   if ((pageId === 'P07' || pageId === 'P08') && !hasRole(user,'student','professor','chair','dean')) return false
@@ -25,37 +50,49 @@ export function canPage(user: User, pageId: string) {
 }
 export function allowedPages(user: User) { return Object.keys(pagePermissions).filter(pageId => canPage(user,pageId)) }
 export function canSpace(user: User, space: Space) { return hasRole(user,'dean') || hasRole(user,'chair') && user.program === space.program || hasRole(user,'professor') && space.professorIds.includes(user.id) || hasRole(user,'student') && space.studentIds.includes(user.id) }
+/** The organization an organization account runs. Accounts created before 23 November 2026 carry no organizationId, so the organization it represents counts too. */
+export function ownOrganizationId(db: Database, user: User) { return user.organizationId ?? db.organizations.find(org => org.representativeId === user.id)?.id }
 export function isOrganizationMember(db: Database, user: User, organizationId: string) { return db.organizations.some(org => org.id === organizationId && (org.representativeId === user.id || org.memberIds.includes(user.id))) }
 export function canAudience(db: Database, user: User, audience: string, privateContent = false) {
   if (audience === 'college') return true
-  if (audience === 'faculty') return hasRole(user,'professor','chair','dean','administrator')
+  // The CCS Secretary reads and posts in the Feed like the Dean (QA 19 November), the faculty audience included.
+  if (audience === 'faculty') return hasRole(user,'professor','chair','dean','administrator','secretary')
   const [kind,id] = audience.split(':')
-  if (kind === 'program') return user.program === id || hasRole(user,'dean','administrator')
+  if (kind === 'program') return user.program === id || hasRole(user,'dean','administrator','secretary')
   if (kind === 'space') { const space = db.spaces.find(s => s.id === id); return !!space && (hasRole(user,'administrator') || canSpace(user,space)) }
   if (kind === 'organization') return !privateContent || isOrganizationMember(db,user,id!)
   return false
 }
 export function canPublish(db: Database, user: User, audience: string, announcement: boolean, operation: 'create' | 'comment' | 'react' = 'create') {
+  // Anyone who reads the post may react to it: the Dean, Chairs and professors could not react to college posts, because
+  // reacting followed the rules for starting a discussion there (QA 17 November). A restricted student still can't post.
+  if (operation === 'react') return hasPermission(user,'feed.read') && canAudience(db,user,audience,audience.startsWith('organization:'))
+  // Anyone who may post and reads the post may comment on it: professors and Chairs could not comment on college posts,
+  // because commenting followed the rules for starting a discussion there (QA 19 November). Comment restrictions still apply.
+  if (operation === 'comment') return !user.restrictions.includes('post.comment') && hasPermission({ ...user, restrictions: user.restrictions.filter(key => key !== 'post.create') },'post.create') && canAudience(db,user,audience,audience.startsWith('organization:'))
   const participant = operation === 'create' ? user : { ...user, restrictions: user.restrictions.filter(key => key !== 'post.create') }
-  if (operation === 'comment' && user.restrictions.includes('post.comment')) return false
   if (!hasPermission(participant, announcement ? 'announcement.publish' : 'post.create') || !canAudience(db,user,audience,audience.startsWith('organization:'))) return false
   if (!announcement) {
     const space = db.spaces.find(s => audience === `space:${s.id}`)
     if (hasRole(user,'student') && (audience === 'college' || audience === `program:${user.program}` || !!space?.studentIds.includes(user.id) || audience.startsWith('organization:') && isOrganizationMember(db,user,audience.split(':')[1]!))) return true
-    if (hasRole(user,'organization') && audience === `organization:${user.organizationId}`) return true
+    if (hasRole(user,'organization') && audience === `organization:${ownOrganizationId(db,user)}`) return true
     if (hasRole(user,'professor') && (audience === 'faculty' || !!space?.professorIds.includes(user.id))) return true
     if (hasRole(user,'chair') && (audience === 'faculty' || audience === `program:${user.program}`)) return true
-    if (hasRole(user,'dean') && ['college','faculty'].includes(audience)) return true
+    if (hasRole(user,'dean','secretary') && ['college','faculty'].includes(audience)) return true
     return hasRole(user,'guidance','osas') && audience === 'college'
   }
   if (hasRole(user,'dean') && audience === 'college') return true
+  if (hasRole(user,'secretary') && ['college','faculty'].includes(audience)) return true
   if (hasRole(user,'chair') && audience === `program:${user.program}`) return true
-  if (hasRole(user,'organization') && audience === `organization:${user.organizationId}`) return true
+  if (hasRole(user,'organization') && audience === `organization:${ownOrganizationId(db,user)}`) return true
   const space = db.spaces.find(s => audience === `space:${s.id}`)
   return hasRole(user,'professor') && !!space?.professorIds.includes(user.id)
 }
 export function canReach(db: Database, user: User, target: User) {
   if (user.id === target.id || !hasPermission(user,'message.send') || !target.active) return false
+  // The Organization representative and the CCS Secretary message anyone, and anyone who can message may write to them
+  // first as well as answer them (QA V3, 20 November 2026: a professor finds the Secretary among recipients).
+  if (hasRole(user,'organization','secretary') || hasRole(target,'organization','secretary')) return true
   const targetFaculty = hasRole(target,'professor','chair','dean')
   const shared = db.spaces.some(space => (space.studentIds.includes(user.id) || space.professorIds.includes(user.id)) && (space.studentIds.includes(target.id) || space.professorIds.includes(target.id)))
   if (hasRole(user,'student') && (hasRole(target,'student') || hasRole(target,'professor')) && shared) return true
@@ -71,6 +108,8 @@ export function canReach(db: Database, user: User, target: User) {
 export function canThread(db: Database, user: User, thread: Thread) {
   if (!hasPermission(user,'message.send') || !thread.memberIds.includes(user.id)) return false
   if (thread.spaceId) { const space = db.spaces.find(s=>s.id===thread.spaceId); return !!space && (hasRole(user,'student') && space.studentIds.includes(user.id) || hasRole(user,'professor') && space.professorIds.includes(user.id)) }
+  // A group conversation someone started (decided 16 November 2026: anyone may) is open to its members.
+  if (thread.group) return true
   const other = db.users.find(u => thread.memberIds.includes(u.id) && u.id !== user.id)
   return !!other && canReach(db,user,other)
 }

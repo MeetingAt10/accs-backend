@@ -50,6 +50,13 @@ describe('reactions (issue #86)', () => {
     expect((await view(b)).reactionCounts).toMatchObject({ like: 1, support: 1 })
   })
 
+  it('lets the System Administrator react, since P06 offers the buttons to anyone who reads the post (code review, 23 November 2026)', async () => {
+    const admin = await login('ACCS-ADMIN')
+    expect((await admin.get('/api/pages/P06?id=POST-0101')).body.data.canReact).toBe(true)
+    const reacted = await admin.post('/api/pages/P06/actions').send({ action: 'react', recordId: 'POST-0101', payload: { reaction: 'like' } })
+    expect(reacted.status, JSON.stringify(reacted.body)).toBe(200)
+  })
+
   it('reacts to a comment', async () => {
     const a = await login('QCU-STU-IT-A')
     const comment = await a.post('/api/pages/P06/actions').send({ action: 'comment', recordId: 'POST-0102', payload: { body: 'Same here, thanks for asking.' } })

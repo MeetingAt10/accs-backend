@@ -4,13 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { sendInvite, temporaryPassword, type Invite, type InviteMailer } from '../src/accounts.js'
 import { createApp } from '../src/app.js'
-import { createMemoryAuthStore, passwordProblem } from '../src/auth.js'
+import { passwordProblem } from '../src/auth.js'
 import { facultyRoster } from '../src/faculty-roster.js'
 import { createRecordRepository } from '../src/persist.js'
 import { createMemoryRecordStore } from '../src/records.js'
 import { createMemorySessionStore } from '../src/sessions.js'
 import { createMemoryRepository, type Database, type Repository } from '../src/store.js'
-import { activateSecretary, concernChoices, secretaryPassword, secretarySession, seedPassword, signIn } from './helpers.js'
+import { activateSecretary, concernChoices, secretaryPassword, secretarySession, seedPassword, signIn, setUpAuthStore } from './helpers.js'
 
 // The unsent-invite mailer logs once per account; the tests that look at the log spy on it again.
 beforeEach(() => { vi.spyOn(console, 'log').mockImplementation(() => {}) })
@@ -44,7 +44,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
   function setup(options: { mailer?: InviteMailer } = {}) {
     const newRepository = backend()
     const repository = newRepository()
-    const authStore = createMemoryAuthStore()
+    const authStore = setUpAuthStore()
     const sessionStore = createMemorySessionStore()
     return {
       repository,
@@ -188,7 +188,8 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       for (const module of modules.filter((entry) => entry.role === 'all')) expect(module.pages.some((page) => allowedPages.includes(page))).toBe(true)
       expect(permissions).toContain('account.provision')
       expect(permissions).not.toContain('account.activateSecretary')
-      expect(permissions).not.toContain('role.manage')
+      // 20 November 2026: the Secretary changes roles and approves permission requests, beside the administrator.
+      expect(permissions).toEqual(expect.arrayContaining(['role.manage', 'permission.review']))
       expect((await signIn(app, 'QCU-FAC-PAULA-DELACRUZ')).response.body.permissions).toContain('account.activateSecretary')
     })
   })
@@ -344,7 +345,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       const secretary = await secretarySession(app)
       const [csProf, itProf] = await createFaculty(secretary, [faculty(1, 'BSCS'), faculty(2, 'BSIT')])
       await secretary.put('/api/accounts/advisors/2').send({ facultyIds: [csProf!.account.id] })
-      await secretary.put('/api/accounts/advisors/4').send({ facultyIds: [csProf!.account.id, itProf!.account.id] })
+      await secretary.put('/api/accounts/advisors/4').send({ facultyIds: [csProf!.account.id] })
       const all = (await secretary.get('/api/accounts/faculty')).body.faculty as { id: string; program: string; advisorYears: number[]; chairProgram: string | null }[]
       expect(all.map((row) => row.id)).toEqual(expect.arrayContaining(['QCU-PROF-IT', 'QCU-PROF-OTHER', 'QCU-PROF-CS', 'QCU-CHAIR-IT', csProf!.account.id]))
       expect(all.find((row) => row.id === csProf!.account.id)).toMatchObject({ advisorYears: [2, 4], chairProgram: null })
@@ -405,8 +406,10 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
         student(8, { program: 'ABC' }),
         student(9),
       ])
-      expect(results.map((row) => [row.index, row.status, row.code])).toEqual([[0, 'created', undefined], [1, 'error', 'DUPLICATE_EMAIL'], [2, 'error', 'DUPLICATE_ID'], [3, 'error', 'INVALID_ROW'], [4, 'error', 'DUPLICATE_EMAIL'], [5, 'error', 'DUPLICATE_ID'], [6, 'error', 'INVALID_ROW'], [7, 'error', 'INVALID_ROW'], [8, 'created', undefined]])
-      expect(results[2]!.error).toBe('An account with this student ID already exists.')
+      expect(results.map((row) => [row.index, row.status, row.code])).toEqual([[0, 'created', undefined], [1, 'error', 'DUPLICATE_EMAIL'], [2, 'error', 'INVALID_ROW'], [3, 'error', 'INVALID_ROW'], [4, 'error', 'DUPLICATE_EMAIL'], [5, 'error', 'DUPLICATE_ID'], [6, 'error', 'INVALID_ROW'], [7, 'error', 'INVALID_ROW'], [8, 'created', undefined]])
+      // Student IDs are 00-0000 (19 November 2026); a duplicate ID is still refused (row 5).
+      expect(results[2]).toMatchObject({ fields: [{ path: 'studentId', message: 'Use the format 00-0000, with the enrollment year first, like 26-0001.' }] })
+      expect(results[5]!.error).toBe('An account with this student ID already exists.')
       expect(results[3]).toMatchObject({ fields: [{ path: 'year', message: 'Choose a year level from 1 to 4.' }] })
       expect(results[6]).toMatchObject({ fields: [{ path: 'email', message: 'Enter a valid email address.' }] })
       // Sending the same list again changes nothing: every row is a duplicate.
@@ -448,14 +451,23 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       return { ...context, secretary, it: it!.account.id, cs: cs!.account.id }
     }
 
-    it('resolves the adviser of a student from the year, preferring their program, then the first assigned', async () => {
-      const { secretary, it, cs } = await ready()
-      // The BSCS adviser is listed first, so the first-assigned fallback is observable.
-      const set = await secretary.put('/api/accounts/advisors/3').send({ facultyIds: [cs, it] })
-      expect([set.status, set.body.record]).toEqual([200, { yearLevel: 3, facultyIds: [cs, it], studentsUpdated: 0 }])
+    it("gives every student of a year level that year's one adviser, whatever their program", async () => {
+      const { secretary, cs } = await ready()
+      const set = await secretary.put('/api/accounts/advisors/3').send({ facultyIds: [cs] })
+      expect([set.status, set.body.record]).toEqual([200, { yearLevel: 3, facultyIds: [cs], studentsUpdated: 0 }])
       const results = await importStudents(secretary, [student(1), student(2, { program: 'BSCS' }), student(3, { program: 'BSIS' }), student(4, { year: 1 })])
-      const advisers = results.map((row) => row.account.adviserId)
-      expect(advisers).toEqual([it, cs, cs, undefined])
+      expect(results.map((row) => row.account.adviserId)).toEqual([cs, cs, cs, undefined])
+    })
+
+    it('takes one adviser per year level (QA 17 November: the secretary could tick several)', async () => {
+      const { secretary, it, cs } = await ready()
+      const two = await secretary.put('/api/accounts/advisors/3').send({ facultyIds: [it, cs] })
+      expect([two.status, two.body.code, JSON.stringify(two.body)]).toEqual([400, 'VALIDATION_ERROR', expect.stringContaining('Choose one adviser for each year level.')])
+      expect((await secretary.get('/api/accounts/advisors')).body.advisors.find((row: { yearLevel: number }) => row.yearLevel === 3).faculty).toEqual([])
+      // The setup in use today: one adviser for 1st and 2nd year, another for 3rd and 4th.
+      for (const [year, id] of [[1, it], [2, it], [3, cs], [4, cs]] as const) expect((await secretary.put(`/api/accounts/advisors/${year}`).send({ facultyIds: [id] })).status).toBe(200)
+      const listing = (await secretary.get('/api/accounts/advisors')).body.advisors as { yearLevel: number; faculty: { id: string }[] }[]
+      expect(listing.map((row) => [row.yearLevel, row.faculty.map((f) => f.id)])).toEqual([[1, [it]], [2, [it]], [3, [cs]], [4, [cs]]])
     })
 
     it('recomputes when the assignments change, and lets one person advise several years', async () => {
@@ -463,11 +475,11 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       const [a, b, c, d] = (await importStudents(secretary, [student(1), student(2, { program: 'BSCS' }), student(3, { year: 1 }), student(4, { year: 3 })])).map((row) => row.account.id) as [string, string, string, string]
       const adviser = async () => { const found = await studentsById(secretary, 'Number'); return [a, b, c, d].map((id) => found.get(id)?.adviserId) }
       expect(await adviser()).toEqual([undefined, undefined, undefined, undefined])
-      expect((await secretary.put('/api/accounts/advisors/3').send({ facultyIds: [it, cs] })).body.record.studentsUpdated).toBe(3)
-      expect(await adviser()).toEqual([it, cs, undefined, it])
-      // One person for two years; the BSCS student's year-3 choice falls back to the only one assigned.
+      expect((await secretary.put('/api/accounts/advisors/3').send({ facultyIds: [cs] })).body.record.studentsUpdated).toBe(3)
+      expect(await adviser()).toEqual([cs, cs, undefined, cs])
+      // One person for two years.
       expect((await secretary.put('/api/accounts/advisors/1').send({ facultyIds: [it] })).body.record.studentsUpdated).toBe(1)
-      await secretary.put('/api/accounts/advisors/3').send({ facultyIds: [it] })
+      expect((await secretary.put('/api/accounts/advisors/3').send({ facultyIds: [it] })).body.record.studentsUpdated).toBe(3)
       expect(await adviser()).toEqual([it, it, it, it])
       // Clearing a year takes the adviser away.
       expect((await secretary.put('/api/accounts/advisors/1').send({ facultyIds: [] })).status).toBe(200)
@@ -508,7 +520,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
     it('counts advisers in the account types', async () => {
       const { secretary, it, cs } = await ready()
       await secretary.put('/api/accounts/advisors/1').send({ facultyIds: [it] })
-      await secretary.put('/api/accounts/advisors/2').send({ facultyIds: [it, cs] })
+      await secretary.put('/api/accounts/advisors/2').send({ facultyIds: [cs] })
       const types = (await secretary.get('/api/accounts/types')).body.types as { type: string; active: number; inactive: number; canManage: boolean }[]
       expect(types.find((row) => row.type === 'advisor')).toMatchObject({ active: 2, inactive: 0, canManage: true })
       expect(types.find((row) => row.type === 'secretary')).toMatchObject({ active: 2, inactive: 0, canManage: false })  // the activated placeholder and the roster secretary

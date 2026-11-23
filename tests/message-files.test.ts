@@ -5,10 +5,9 @@ import request from 'supertest'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { createApp } from '../src/app.js'
-import { createMemoryAuthStore } from '../src/auth.js'
 import { createMemoryMaterialStorage } from '../src/material-storage.js'
 import { createMemoryRepository } from '../src/store.js'
-import { seedPassword } from './helpers.js'
+import { seedPassword, setUpAuthStore } from './helpers.js'
 
 let repo: ReturnType<typeof createMemoryRepository>
 let app: ReturnType<typeof createApp>
@@ -16,7 +15,7 @@ let storage: ReturnType<typeof createMemoryMaterialStorage>
 beforeEach(() => {
   repo = createMemoryRepository()
   storage = createMemoryMaterialStorage()
-  app = createApp(repo, { authStore: createMemoryAuthStore(), materialStorage: storage })
+  app = createApp(repo, { authStore: setUpAuthStore(), materialStorage: storage })
 })
 
 async function login(id: string) {
@@ -156,7 +155,7 @@ describe('files in messages', () => {
   })
 
   it('says files are not set up when there is no storage', async () => {
-    const plain = createApp(createMemoryRepository(), { authStore: createMemoryAuthStore() })
+    const plain = createApp(createMemoryRepository(), { authStore: setUpAuthStore() })
     const agent = request.agent(plain)
     await agent.post('/api/auth/sign-in').send({ emailOrId: 'QCU-STU-IT-A', password: seedPassword })
     expect((await agent.post('/api/messages/uploads').send(photo)).status).toBe(409)

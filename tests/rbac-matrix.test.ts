@@ -4,11 +4,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { canPage } from '../src/access.js'
 import { createApp } from '../src/app.js'
 import { createMemoryRepository } from '../src/store.js'
-import { secretarySession } from './helpers.js'
+import { secretarySession, setUpAuthStore } from './helpers.js'
 
 const accounts: Record<string, string> = { student: 'QCU-STU-IT-A', organization: 'QCU-ORG', professor: 'QCU-PROF-IT', chair: 'QCU-CHAIR-IT', dean: 'QCU-FAC-PAULA-DELACRUZ', administrator: 'ACCS-ADMIN', guidance: 'QCU-GUIDANCE', osas: 'QCU-OSAS', secretary: 'QCU-SECRETARY' }
 const pageIds = Array.from({ length: 50 }, (_, n) => `P${String(n + 3).padStart(2, '0')}`)
-const app = createApp(createMemoryRepository())
+const app = createApp(createMemoryRepository(), { authStore: setUpAuthStore() })
 // Activating the secretary logs that its invite was not sent.
 beforeAll(() => { vi.spyOn(console, 'log').mockImplementation(() => {}) })
 afterAll(() => vi.restoreAllMocks())

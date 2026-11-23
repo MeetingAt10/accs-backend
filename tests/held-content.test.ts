@@ -5,13 +5,12 @@ import request from 'supertest'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { createApp } from '../src/app.js'
-import { createMemoryAuthStore } from '../src/auth.js'
 import { createMemoryRepository } from '../src/store.js'
-import { secretarySession, seedPassword } from './helpers.js'
+import { secretarySession, seedPassword, setUpAuthStore } from './helpers.js'
 
 let repo: ReturnType<typeof createMemoryRepository>
 let app: ReturnType<typeof createApp>
-beforeEach(() => { repo = createMemoryRepository(); app = createApp(repo, { authStore: createMemoryAuthStore() }) })
+beforeEach(() => { repo = createMemoryRepository(); app = createApp(repo, { authStore: setUpAuthStore() }) })
 
 async function login(id: string) {
   const agent = request.agent(app)
@@ -81,7 +80,7 @@ describe('a flagged post', () => {
     expect((await moderate(await login('ACCS-ADMIN'), modId, 'refer')).status).toBe(200)
     expect(await feedIds(reader)).not.toContain('POST-0101')
     expect((await secretary.get('/api/pages/P06?id=POST-0101')).status).toBe(200)
-    expect((await moderate(secretary, modId, 'keep')).status).toBe(200)
+    expect((await moderate(secretary, modId, 'dismiss')).status).toBe(200)
     expect(await feedIds(reader)).toContain('POST-0101')
   })
 })

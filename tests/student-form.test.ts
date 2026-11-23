@@ -5,13 +5,12 @@ import request from 'supertest'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { createApp } from '../src/app.js'
-import { createMemoryAuthStore } from '../src/auth.js'
 import { createMemoryRepository } from '../src/store.js'
-import { seedPassword } from './helpers.js'
+import { seedPassword, setUpAuthStore, reviewAll } from './helpers.js'
 
 let repo: ReturnType<typeof createMemoryRepository>
 let app: ReturnType<typeof createApp>
-beforeEach(() => { repo = createMemoryRepository(); app = createApp(repo, { authStore: createMemoryAuthStore() }) })
+beforeEach(() => { repo = createMemoryRepository(); app = createApp(repo, { authStore: setUpAuthStore() }) })
 
 async function login(id: string) {
   const agent = request.agent(app)
@@ -63,6 +62,7 @@ describe('evaluation cycles use the student form only', () => {
     const expected = db.users.filter((u) => u.roles.includes('student')).flatMap((s) => [...new Set(db.spaces.filter((sp) => sp.studentIds.includes(s.id)).flatMap((sp) => sp.professorIds))].map((f) => `${s.id}>${f}`)).sort()
     expect(generated.map((a) => `${a.evaluatorId}>${a.facultyId}`).sort()).toEqual(expected)
     // Publishing does not add anything new or duplicate anything.
+    reviewAll(repo, id)
     expect((await move(dean, id, 'Published')).status).toBe(200)
     expect(repo.read().assignments.filter((a) => a.cycleId === id)).toHaveLength(generated.length)
   })

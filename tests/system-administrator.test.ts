@@ -5,14 +5,13 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { permissionRoles } from '../src/access.js'
 import { createApp } from '../src/app.js'
-import { createMemoryAuthStore } from '../src/auth.js'
 import { roleLabels } from '../src/schemas.js'
 import { createMemoryRepository } from '../src/store.js'
-import { seedPassword } from './helpers.js'
+import { seedPassword, setUpAuthStore } from './helpers.js'
 
 let repo: ReturnType<typeof createMemoryRepository>
 let app: ReturnType<typeof createApp>
-beforeEach(() => { repo = createMemoryRepository(); app = createApp(repo, { authStore: createMemoryAuthStore() }) })
+beforeEach(() => { repo = createMemoryRepository(); app = createApp(repo, { authStore: setUpAuthStore() }) })
 
 async function login(id: string) {
   const agent = request.agent(app)
@@ -37,7 +36,9 @@ describe('the System Administrator (issue #40)', () => {
   })
 
   it('alone holds the audit logs, monitoring and system tools; the Dean holds none of them', async () => {
-    for (const permission of ['audit.view', 'role.manage', 'moderation.review']) expect(permissionRoles[permission], permission).toEqual(['administrator'])
+    for (const permission of ['audit.view', 'moderation.review']) expect(permissionRoles[permission], permission).toEqual(['administrator'])
+    // Roles are changed by the administrator and, since 20 November 2026, the CCS Secretary; never the Dean.
+    expect(permissionRoles['role.manage']).toEqual(['administrator', 'secretary'])
     expect(permissionRoles['restriction.manage']).not.toContain('dean')
     const { agent: dean } = await login('QCU-FAC-PAULA-DELACRUZ')
     const { agent: admin } = await login('ACCS-ADMIN')

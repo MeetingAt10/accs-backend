@@ -8,7 +8,7 @@ import { createRecordRepository } from '../src/persist.js'
 import { createMemoryRecordStore } from '../src/records.js'
 import { createMemorySessionStore } from '../src/sessions.js'
 import { createMemoryRepository, seed, type MemoryRepository } from '../src/store.js'
-import { activateSecretary, secretaryPassword, seedPassword, secretarySession, signIn } from './helpers.js'
+import { activateSecretary, secretaryPassword, seedPassword, secretarySession, signIn, setUpAuthStore } from './helpers.js'
 
 type Body = Record<string, any>
 
@@ -19,7 +19,7 @@ const cookieOf = (response: request.Response) => String(response.headers['set-co
 const student = { name: 'Ben Student', email: 'ben.student@gmail.com', studentId: '26-1001', program: 'BSIT', year: 3, section: 'A' }
 
 function setup(stack: Stack, repository: MemoryRepository = createMemoryRepository()) {
-  const authStore = createMemoryAuthStore()
+  const authStore = setUpAuthStore()
   const sessionStore = createMemorySessionStore()
   return { repository, authStore, sessionStore, app: createApp(repository, { authStore, sessionStore, stack }) }
 }
@@ -80,6 +80,21 @@ describe.each<[string, Stack]>([
 })
 
 describe('on the development stack', () => {
+  it('switches to a real person on the roster who has no password of their own, and the session stays (signed out before)', async () => {
+    const authStore = createMemoryAuthStore()
+    const app = createApp(createMemoryRepository(), { authStore, sessionStore: createMemorySessionStore(), stack: dev })
+    const agent = request.agent(app)
+    expect((await agent.post('/api/auth/sign-in').send({ emailOrId: 'ACCS-ADMIN', password: seedPassword })).status).toBe(200)
+    const switched = await agent.post('/api/dev/switch-user').send({ userId: 'QCU-FAC-PAULA-DELACRUZ' })
+    expect(switched.status, JSON.stringify(switched.body)).toBe(200)
+    const session = await agent.get('/api/session')
+    expect(session.status).toBe(200)
+    expect(session.body.user.id).toBe('QCU-FAC-PAULA-DELACRUZ')
+    expect((await agent.get('/api/pages/P03')).status).toBe(200)
+    // The shared password still does not sign anyone in to that account.
+    expect((await request(app).post('/api/auth/sign-in').send({ emailOrId: 'QCU-FAC-PAULA-DELACRUZ', password: seedPassword })).status).toBe(401)
+  })
+
   it('needs a session', async () => {
     const { app } = setup(dev)
     expect((await request(app).get('/api/dev/users')).status).toBe(401)
@@ -227,7 +242,7 @@ describe('on the development stack', () => {
 
   it('records the switch in the audit table of a shared record store, and nothing else', async () => {
     const store = createMemoryRecordStore()
-    const authStore = createMemoryAuthStore()
+    const authStore = setUpAuthStore()
     const sessionStore = createMemorySessionStore()
     const app = createApp(createRecordRepository(store), { authStore, sessionStore, stack: dev })
     const { agent } = await signIn(app, 'QCU-FAC-PAULA-DELACRUZ')
