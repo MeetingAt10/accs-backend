@@ -256,7 +256,8 @@ export const actionPayloads = {
   markNotification: z.object({ read: z.boolean().default(true) }).strict(),
   markAllNotifications: z.object({}).strict(),
   openNotification: z.object({}).strict(),
-  assistantAsk: z.object({ question: text.max(2000) }).strict(),
+  // `draft`: the student's own report text, sent from the drafting panel for the assistant to reorganize.
+  assistantAsk: z.object({ question: text.max(2000), draft: z.string().trim().max(4000).optional() }).strict(),
   submitEvaluation: z.object({ answers: z.record(z.string(), z.union([z.number().int().min(1).max(5), z.string().max(1000)])), comment: z.string().max(1000).default('') }).strict(),
   createCycle: z.object({ title: text.max(160), term: text.max(100), opens: date, closes: date }).strict(),
   saveCycle: z.object({ title: text.max(160), instructions: text, opens: date, closes: date, questions: z.array(questionSchema).min(1), forms: z.array(z.literal('student', { error: 'Evaluation cycles use the student form only.' })).min(1).optional() }).strict(),
