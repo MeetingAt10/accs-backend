@@ -1,5 +1,9 @@
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2'
 
+import { inviteHtml, newConcernHtml, resetCodeHtml } from './email-template.js'
+
+export { inviteHtml, newConcernHtml, resetCodeHtml } from './email-template.js'
+
 // Password reset codes reach the account holder through one of these channels:
 // - `email`: Amazon SES, when MAIL_FROM is set (deployed stacks with a verified SES identity).
 // - `console`: local runs and tests without MAIL_FROM. The code is logged so a developer can use it.
@@ -25,7 +29,7 @@ export function resetCodeText(message: ResetCodeEmail) {
   ].join('\n')
 }
 
-/** Sends plain text only, so a name cannot inject markup. */
+/** Sends multipart HTML + plain text, with all dynamic fields HTML-escaped. */
 export function createSesResetMailer(from: string, ses: Pick<SESv2Client, 'send'> = new SESv2Client({})): ResetCodeMailer {
   return {
     channel: 'email',
@@ -36,7 +40,10 @@ export function createSesResetMailer(from: string, ses: Pick<SESv2Client, 'send'
         Content: {
           Simple: {
             Subject: { Data: 'Your ACCS password reset code', Charset: 'UTF-8' },
-            Body: { Text: { Data: resetCodeText(message), Charset: 'UTF-8' } },
+            Body: {
+              Text: { Data: resetCodeText(message), Charset: 'UTF-8' },
+              Html: { Data: resetCodeHtml(message), Charset: 'UTF-8' },
+            },
           },
         },
       }))
@@ -88,7 +95,7 @@ export function newConcernText(message: NewConcernEmail) {
   ].join('\n')
 }
 
-/** Sends plain text only, so a name cannot inject markup. */
+/** Sends multipart HTML + plain text, with all dynamic fields HTML-escaped. */
 export function createSesNewConcernMailer(from: string, ses: Pick<SESv2Client, 'send'> = new SESv2Client({})): NewConcernMailer {
   return {
     channel: 'email',
@@ -99,7 +106,10 @@ export function createSesNewConcernMailer(from: string, ses: Pick<SESv2Client, '
         Content: {
           Simple: {
             Subject: { Data: 'New concern in ACCS', Charset: 'UTF-8' },
-            Body: { Text: { Data: newConcernText(message), Charset: 'UTF-8' } },
+            Body: {
+              Text: { Data: newConcernText(message), Charset: 'UTF-8' },
+              Html: { Data: newConcernHtml(message), Charset: 'UTF-8' },
+            },
           },
         },
       }))
@@ -154,7 +164,10 @@ export function createSesInviteMailer(from: string, ses: Pick<SESv2Client, 'send
         Content: {
           Simple: {
             Subject: { Data: 'Your ACCS account', Charset: 'UTF-8' },
-            Body: { Text: { Data: inviteText(invite), Charset: 'UTF-8' } },
+            Body: {
+              Text: { Data: inviteText(invite), Charset: 'UTF-8' },
+              Html: { Data: inviteHtml(invite), Charset: 'UTF-8' },
+            },
           },
         },
       }))
