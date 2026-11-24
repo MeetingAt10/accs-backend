@@ -88,6 +88,20 @@ describe('times for talking about a concern are still to come', () => {
     const booked = await act(other, 'P15', 'createConsultation', { slotId: 'SLOT-0101', purpose: 'Academic question' })
     expect(booked.status, JSON.stringify(booked.body)).toBe(409)
   })
+
+  it.each(['escalate', 'close'])('C12: the blocked slot is freed when the case is %s', async (type) => {
+    const student = await login('QCU-STU-IT-A')
+    await act(student, 'P20', 'chooseTalkMode', { reportId: 'RPT-0241', mode: 'face_to_face', consent: { participate: true } })
+    const adviser = await login('QCU-PROF-IT')
+    await act(adviser, 'P22', 'setTalkDetails', { reportId: 'RPT-0241', scheduledAt: '2026-10-29T02:15:00.000Z', place: 'Faculty room' })
+    const slot = () => repo.read().slots.find((s) => s.id === 'SLOT-0101')!
+    expect(slot().state).toBe('unavailable')
+    if (type === 'close') expect((await act(adviser, 'P22', 'caseAction', { type: 'resolve', update: 'Settled.' }, 'RPT-0241', 'Done')).status).toBe(200)
+    const res = await act(adviser, 'P22', 'caseAction', { type, update: 'Moving on.' }, 'RPT-0241', 'Done')
+    expect(res.status, JSON.stringify(res.body)).toBe(200)
+    expect(slot()).toMatchObject({ state: 'open' })
+    expect(slot().reason).toBeUndefined()
+  })
 })
 
 describe('newest first', () => {
@@ -201,6 +215,25 @@ describe('permission change requests', () => {
     await propose(admin, 'osas', 'post.create', false)
     const dean = await login('QCU-FAC-PAULA-DELACRUZ')
     expect((await decide(dean, 'osas:post.create', 'approve')).status).toBe(403)
+  })
+
+  it('records a decision and tells the proposer when the Secretary edits a waiting request directly', async () => {
+    const secretary = await secretarySession(app)
+    const admin = await login('ACCS-ADMIN')
+    await propose(admin, 'osas', 'post.create', false)
+    expect((await propose(secretary, 'osas', 'post.create', true)).status).toBe(200)
+    const decisions = (await secretary.get('/api/pages/P48')).body.data.permissionDecisions
+    expect(decisions).toEqual(expect.arrayContaining([expect.objectContaining({ key: 'osas:post.create', decision: 'Rejected', allowed: false, reason: 'Changed directly by the CCS Secretary' })]))
+    expect(repo.read().notifications.some((n) => n.kind === 'permission' && n.recordId === 'osas:post.create' && n.body?.includes('rejected'))).toBe(true)
+    expect((await secretary.get('/api/pages/P48')).body.data.permissionRequests).toEqual([])
+  })
+
+  it('does not let the Secretary decide a request she filed herself', async () => {
+    const secretary = await secretarySession(app)
+    const me = repo.read().users.find((u) => u.roles.includes('secretary'))!
+    await repo.transact((unit) => { unit.read().permissionOverrides['osas:post.create'] = { decisions: [], proposal: { allowed: false, by: me.id, at: new Date().toISOString(), reason: 'Filed before deploy' } } })
+    expect((await decide(secretary, 'osas:post.create', 'approve')).status).toBe(403)
+    expect((await secretary.get('/api/pages/P48')).body.data.permissionRequests[0].canDecide).toBe(false)
   })
 })
 

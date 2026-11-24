@@ -67,7 +67,7 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   // An old account ID (QCU-DEAN) signs in as the renamed account (CCS-DEAN).
   const findUser=(ident:string)=>{const key=currentAccountId(ident.trim().toUpperCase()).toLowerCase();return repository.view(unit=>unit.read().users.find(u=>u.active&&(u.email.toLowerCase()===key||u.id.toLowerCase()===key||u.studentId?.toLowerCase()===key||u.username?.toLowerCase()===key)),[])}
   // A role change made on the administrator's pages is saved to the auth store too, so it holds on every instance.
-  const saveAccount=async(change:AccountChange)=>saveAccountChange(authStore,await repository.view(unit=>unit.read().users,[]),change)
+  const saveAccount=async(change:AccountChange)=>saveAccountChange(authStore,await repository.view(unit=>unit.read().users,[]),await repository.view(unit=>unit.read().spaces,[]),change)
   const saveProfile=async(id:string,change:ProfileChange)=>saveProfileChange(authStore,await repository.view(unit=>unit.read().users,[]),id,change)
   // Only the seeded demo accounts fall back to the shared seed password, until they set their own. Every other account has a stored credential.
   const credentialFor=(user:User,data:AuthData)=>data.credentials[user.id]??formerAccountIds(user.id).map(id=>data.credentials[id]).find(Boolean)??(demoUserIds.has(user.id)?defaultHash():undefined)

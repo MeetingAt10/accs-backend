@@ -55,4 +55,13 @@ describe('assistant help questions', () => {
       expect(reply).not.toContain('Open Appointments')
     }
   })
+
+  it('answers personal report questions with report status, not the anonymous-reporting FAQ', async () => {
+    const student = await login('QCU-STU-IT-A')
+    for (const text of ['What reports have I filed?', 'Is report RPT-0241 resolved?']) {
+      const reply = await ask(student, text)
+      expect(reply, text).not.toContain('alias')
+      expect(reply, text).toMatch(/filed|You have not filed|RPT-/)
+    }
+  })
 })

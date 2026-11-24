@@ -138,7 +138,10 @@ export function applyAccounts(db: Database, accounts: User[]) {
       db.users[position] = { ...structuredClone(account), title: account.title ?? title, bio: account.bio ?? bio, education: account.education ?? education, officeHours: account.officeHours ?? officeHours }
     }
     for (const space of db.spaces) {
-      if (!account.spaceIds.includes(space.id) || members.get(space.id)!.has(account.id)) continue
+      const joined = account.spaceIds.includes(space.id)
+      // A student moved to another section leaves the old section's spaces.
+      if (!joined && account.roles.includes('student') && members.get(space.id)!.delete(account.id)) space.studentIds = space.studentIds.filter((id) => id !== account.id)
+      if (!joined || members.get(space.id)!.has(account.id)) continue
       space.studentIds.push(account.id)
       members.get(space.id)!.add(account.id)
     }
@@ -151,6 +154,18 @@ export function applyAccounts(db: Database, accounts: User[]) {
 export function resolveAdviser(student: User, assignments: AuthData['advisorAssignments'], accounts: Map<string, User>) {
   const faculty = (assignments[String(student.year)] ?? []).map((id) => accounts.get(id)).filter((account): account is User => !!account?.roles.includes('professor'))
   return (faculty.find((account) => account.program === student.program) ?? faculty[0])?.id
+}
+
+type SpaceKey = { id: string; program: string; section: string; campus?: string; year?: number }
+
+/** The spaces of a section: same campus, program, year and letter (#46). A space stored without a campus or year is at San Bartolome and open to any year, as before. */
+function sectionSpaceIds(spaces: SpaceKey[], { program, section, campus, year }: { program?: string; section?: string; campus?: string; year?: number }) {
+  return spaces.filter((space) => space.program === program && space.section === section && (space.campus ?? mainCampus) === campus && (space.year === undefined || space.year === year)).map((space) => space.id)
+}
+
+/** A student whose program, section, or year level changed joins the spaces of the new section, as a new account does. */
+function moveSpaces(student: User, spaces: SpaceKey[]) {
+  if (student.roles.includes('student')) student.spaceIds = sectionSpaceIds(spaces, { ...student, campus: student.campus ?? mainCampus })
 }
 
 /** Recomputes the adviser of every stored student. The seeded demo students keep the adviser they were seeded with. Returns how many changed. */
@@ -182,10 +197,11 @@ export async function setOwnCredentials(authStore: AuthStore, users: User[], use
 }
 
 /** Saves a role, program, section, year level, irregular flag, or active change made on the administrator's pages, so every instance applies it. */
-export async function saveAccountChange(authStore: AuthStore, users: User[], { id, roles, active, program, section, year, irregular }: AccountChange) {
+export async function saveAccountChange(authStore: AuthStore, users: User[], spaces: SpaceKey[], { id, roles, active, program, section, year, irregular }: AccountChange) {
   await authStore.update((data) => {
     const accounts = merged(users, data)
-    Object.assign(edit(data, accounts, id), { roles, active, ...(program ? { program } : {}), ...(section ? { section } : {}), ...(year ? { year } : {}), ...(irregular === undefined ? {} : { irregular }) })
+    const record = Object.assign(edit(data, accounts, id), { roles, active, ...(program ? { program } : {}), ...(section ? { section } : {}), ...(year ? { year } : {}), ...(irregular === undefined ? {} : { irregular }) })
+    if (program || section || year) moveSpaces(record, spaces)
     // Advisers go by year level, so a student who moved up has the adviser of the new year.
     if (year) refreshAdvisers(data, accounts)
   })
@@ -402,9 +418,8 @@ export function accountRouter({ repository, authStore, sessions, mailer }: Accou
           taken.add(username)
           const account = newUser(`USR-${ulid()}`, row.name, [student ? 'student' : 'professor'], {
             email: row.email, program: row.program, active: true, username, mustChangeCredentials: true,
-            // A student joins the spaces of their section: same campus, program, year and letter (#46). A space stored without
-            // a campus or year is at San Bartolome and open to any year, as before.
-            ...(student ? { section: row.section, year: row.year, campus: row.campus, studentId: row.studentId, spaceIds: spaces.filter((space) => space.program === row.program && space.section === row.section && (space.campus ?? mainCampus) === row.campus && (space.year === undefined || space.year === row.year)).map((space) => space.id) } : {}),
+            // A student joins the spaces of their section.
+            ...(student ? { section: row.section, year: row.year, campus: row.campus, studentId: row.studentId, spaceIds: sectionSpaceIds(spaces, row) } : {}),
           })
           const adviserId = student ? resolveAdviser(account, data.advisorAssignments, accounts) : undefined
           if (adviserId) account.adviserId = adviserId
@@ -449,6 +464,7 @@ export function accountRouter({ repository, authStore, sessions, mailer }: Accou
     if (!hasPermission(user, 'account.provision') && !hasPermission(user, 'role.manage')) throw deny()
     const { ids, year, section } = enrollStudentsSchema.parse(req.body)
     const all = await users()
+    const spaces = await repository.view((unit) => unit.read().spaces.map(({ id, program, section, campus, year }) => ({ id, program, section, campus, year })), [])
     for (const id of new Set(ids)) {
       const account = all.find((candidate) => candidate.id === id)
       if (!account?.roles.includes('student')) throw unavailable()
@@ -458,7 +474,10 @@ export function accountRouter({ repository, authStore, sessions, mailer }: Accou
     const unique = [...new Set(ids)]
     await authStore.update((data) => {
       const accounts = merged(all, data)
-      for (const id of unique) Object.assign(edit(data, accounts, id), { ...(year !== undefined ? { year } : {}), ...(section ? { section: section.toUpperCase() } : {}) })
+      for (const id of unique) {
+        const student = Object.assign(edit(data, accounts, id), { ...(year !== undefined ? { year } : {}), ...(section ? { section: section.toUpperCase() } : {}) })
+        moveSpaces(student, spaces)
+      }
       if (year !== undefined) refreshAdvisers(data, accounts)
     })
     await audit(user, unique.map((id) => ({ action: 'Year level or section changed', reference: id })))

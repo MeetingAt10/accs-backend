@@ -129,6 +129,15 @@ describe('A2: one Program Chair per program', () => {
     expect(problem(await setRoles(admin, 'QCU-PROF-OTHER', { roles: ['professor', 'chair'] }))).toEqual([409, 'CONFLICT'])
   })
 
+  it('lets legacy duplicate chairs be repaired, but still refuses a new second chair', async () => {
+    const admin = await login('ACCS-ADMIN')
+    const legacy = repo.read().users.find((u) => u.id === 'QCU-PROF-OTHER')!
+    legacy.roles = ['professor', 'chair']; legacy.program = 'BSIT'
+    expect((await setRoles(admin, 'QCU-CHAIR-IT', { roles: ['chair', 'professor'], program: 'BSIT' })).status).toBe(200)
+    expect((await setRoles(admin, 'QCU-PROF-OTHER', { roles: ['professor'] })).status).toBe(200)
+    expect(problem(await setRoles(admin, 'QCU-PROF-OTHER', { roles: ['professor', 'chair'], program: 'BSIT' }))).toEqual([409, 'CONFLICT'])
+  })
+
   it('refuses moving a chair to a program that has one', async () => {
     const admin = await login('ACCS-ADMIN')
     expect(problem(await setRoles(admin, 'QCU-CHAIR-IT', { roles: ['professor', 'chair'], program: 'BSCS' }))).toEqual([409, 'CONFLICT'])
@@ -284,6 +293,22 @@ describe('A9: the activity of an account, newest first', () => {
 
 describe('A5: year level and section for many students at once', () => {
   const studentOf = (id: string) => repo.read().users.find((u) => u.id === id)!
+  const members = (spaceId: string) => repo.read().spaces.find((space) => space.id === spaceId)!.studentIds
+  it('moves a student from the old section space to the new one', async () => {
+    const admin = await login('ACCS-ADMIN')
+    expect((await admin.post('/api/accounts/students/enroll').send({ ids: ['QCU-STU-IT-A'], section: 'b' })).status).toBe(200)
+    await admin.get('/api/pages/P47?id=QCU-STU-IT-A')
+    expect(members('SPACE-IT-B')).toContain('QCU-STU-IT-A')
+    expect(members('SPACE-IT-A')).not.toContain('QCU-STU-IT-A')
+    expect(studentOf('QCU-STU-IT-A').spaceIds).toEqual(['SPACE-IT-B'])
+  })
+  it('updateRoles with a new section moves the student too', async () => {
+    const admin = await login('ACCS-ADMIN')
+    expect((await setRoles(admin, 'QCU-STU-IT-B', { roles: ['student'], section: 'a' })).status).toBe(200)
+    await admin.get('/api/pages/P47?id=QCU-STU-IT-B')
+    expect(members('SPACE-IT-A')).toContain('QCU-STU-IT-B')
+    expect(members('SPACE-IT-B')).not.toContain('QCU-STU-IT-B')
+  })
   it('sets all of them, or none when one fails', async () => {
     const admin = await login('ACCS-ADMIN')
     const ids = ['QCU-STU-IT-A', 'QCU-STU-IT-B']
