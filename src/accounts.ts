@@ -123,7 +123,7 @@ export function applyAccounts(db: Database, accounts: User[]) {
     const renamed = renameAccountIds(original)
     const newAddress = seedEmail(renamed.id)
     const stored = newAddress && formerSeedEmails(renamed.id).includes(renamed.email.toLowerCase()) ? { ...renamed, email: newAddress } : renamed
-    // A role that no longer exists (the President's Office, removed on 2026-11-10) is dropped; an account left with no
+    // A role that no longer exists is dropped; an account left with no
     // role cannot sign in.
     const knownRoles = stored.roles.filter((role) => (roles as readonly string[]).includes(role))
     let account = knownRoles.length === stored.roles.length ? stored : { ...stored, roles: knownRoles, active: stored.active && knownRoles.length > 0 }
