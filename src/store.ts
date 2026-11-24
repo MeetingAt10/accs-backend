@@ -198,11 +198,15 @@ export const seedRoster = env.SEED_ROSTER === 'true'
 const deanRosterId = 'QCU-FAC-PAULA-DELACRUZ'
 export function seed(includeRoster = seedRoster): Database {
   const users: User[] = [
-    user('QCU-STU-IT-A', 'Demo Student Foxtrot', ['student'], { campus: 'SB', program: 'BSIT', section: 'A', year: 3, studentId: '24-0101', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], organizationIds: ['ORG-COMPUTING'] }),
-    user('QCU-STU-IT-B', 'Demo Student Golf', ['student'], { campus: 'SB', program: 'BSIT', section: 'B', year: 3, studentId: '24-0102', adviserId: 'QCU-PROF-OTHER', spaceIds: ['SPACE-IT-B'] }),
-    user('QCU-STU-CS', 'Demo Student Hotel', ['student'], { campus: 'SB', program: 'BSCS', section: 'A', year: 2, studentId: '25-0201', adviserId: 'QCU-PROF-CS', spaceIds: ['SPACE-CS-A'] }),
+    user('QCU-STU-IT-A', 'Demo Student Foxtrot', ['student'], { campus: 'SB', program: 'BSIT', section: 'A', year: 3, studentId: '24-0101', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], organizationIds: ['ORG-COMPUTING', 'ORG-JPCS'] }),
+    user('QCU-STU-IT-B', 'Demo Student Golf', ['student'], { campus: 'SB', program: 'BSIT', section: 'B', year: 3, studentId: '24-0102', adviserId: 'QCU-PROF-OTHER', spaceIds: ['SPACE-IT-B'], organizationIds: ['ORG-LESIT', 'ORG-JPCS'] }),
+    user('QCU-STU-CS', 'Demo Student Hotel', ['student'], { campus: 'SB', program: 'BSCS', section: 'A', year: 2, studentId: '25-0201', adviserId: 'QCU-PROF-CS', spaceIds: ['SPACE-CS-A'], organizationIds: ['ORG-MSC', 'ORG-AWS'] }),
     user('QCU-STU-RESTRICTED', 'Demo Student India', ['student'], { campus: 'SB', program: 'BSIT', section: 'A', year: 3, studentId: '24-0103', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], restrictions: ['post.create', 'post.comment', 'report.anonymous'] }),
     user('QCU-ORG', 'Demo Organization Rep', ['organization'], { organizationId: 'ORG-COMPUTING', organizationIds: ['ORG-COMPUTING'], office: 'CCS Organizations', title: 'Organization representative' }),
+    user('QCU-ORG-LESIT', 'Demo LESIT Rep', ['organization'], { organizationId: 'ORG-LESIT', organizationIds: ['ORG-LESIT'], office: 'CCS Organizations', title: 'Organization representative' }),
+    user('QCU-ORG-JPCS', 'Demo JPCS QCU Rep', ['organization'], { organizationId: 'ORG-JPCS', organizationIds: ['ORG-JPCS'], office: 'CCS Organizations', title: 'Organization representative' }),
+    user('QCU-ORG-MSC', 'Demo MSC QCU Rep', ['organization'], { organizationId: 'ORG-MSC', organizationIds: ['ORG-MSC'], office: 'CCS Organizations', title: 'Organization representative' }),
+    user('QCU-ORG-AWS', 'Demo AWS SBG QCU Rep', ['organization'], { organizationId: 'ORG-AWS', organizationIds: ['ORG-AWS'], office: 'CCS Organizations', title: 'Organization representative' }),
     user('QCU-PROF-IT', 'Demo Professor Charlie', ['professor'], { program: 'BSIT', office: 'CCS Faculty Room', title: 'Faculty, BSIT adviser', bio: 'Teaches Data Structures and advises BSIT 3A.', officeHours: 'Thursdays, 10:00 AM to 12:00 PM, CCS Faculty Room', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'] }),
     user('QCU-PROF-OTHER', 'Demo Professor Delta', ['professor'], { program: 'BSIT', office: 'CCS Faculty Room', title: 'Faculty, BSIT', bio: 'Advises BSIT 3B.', officeHours: 'Thursdays, 9:00 AM to 11:00 AM, CCS Faculty Room', spaceIds: ['SPACE-IT-B'] }),
     user('QCU-PROF-CS', 'Demo Professor Echo', ['professor'], { program: 'BSCS', office: 'CCS Faculty Room', title: 'Faculty, BSCS', bio: 'Advises BSCS 2A.', officeHours: 'Thursdays, 11:00 AM to 1:00 PM, CCS Faculty Room', spaceIds: ['SPACE-CS-A'] }),
@@ -266,7 +270,11 @@ export function seed(includeRoster = seedRoster): Database {
     ? user(id, `Dr. ${name}`, ['dean', 'professor'], { email, title: 'Dean, College of Computer Studies', office: 'CCS Dean\'s Office' })
     : user(id, name, roles, { email, title, office: roles[0] === 'professor' ? 'CCS Faculty Room' : 'CCS Office', ...(program ? { program } : {}) })) : []
   return {
-    users: [...users, ...roster], spaces, organizations: [{ id: 'ORG-COMPUTING', name: 'CCS Computing Society', description: 'Student organization of the College of Computer Studies. Runs workshops and peer tutoring.', representativeId: 'QCU-ORG', memberIds: ['QCU-STU-IT-A'] }], posts, reports, drafts: {},
+    users: [...users, ...roster], spaces, organizations: [{ id: 'ORG-COMPUTING', name: 'CCS Computing Society', description: 'Student organization of the College of Computer Studies. Runs workshops and peer tutoring.', representativeId: 'QCU-ORG', memberIds: ['QCU-STU-IT-A'] },
+      { id: 'ORG-LESIT', name: 'League of Excellent Students in Information Technology', description: 'QCU CCS organization for BSIT students. Holds study sessions, IT seminars and competitions.', representativeId: 'QCU-ORG-LESIT', memberIds: ['QCU-STU-IT-B'] },
+      { id: 'ORG-JPCS', name: 'Junior Philippine Computer Society – QCU Chapter', description: 'QCU chapter of the national computing student society. Runs tech talks, hackathons and industry visits.', representativeId: 'QCU-ORG-JPCS', memberIds: ['QCU-STU-IT-A', 'QCU-STU-IT-B'] },
+      { id: 'ORG-MSC', name: 'Microsoft Student Community QCU', description: 'Student community on Microsoft technologies: Azure, .NET and Power Platform workshops and study jams.', representativeId: 'QCU-ORG-MSC', memberIds: ['QCU-STU-CS'] },
+      { id: 'ORG-AWS', name: 'AWS Student Builder Group QCU', description: 'Student builders learning cloud on AWS through hands-on labs and build days.', representativeId: 'QCU-ORG-AWS', memberIds: ['QCU-STU-CS'] }], posts, reports, drafts: {},
     threads: [
       {
         id: 'THREAD-IT-A',
