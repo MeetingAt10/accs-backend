@@ -3,23 +3,33 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { sendInvite, type Invite } from '../src/accounts.js'
-import { createSesInviteMailer, inviteText } from '../src/mail.js'
+import { createSesInviteMailer, inviteHtml, inviteText } from '../src/mail.js'
 
 const invite: Invite = { accountId: 'USR-01', to: 'ana.cruz@gmail.com', name: 'Ana Cruz', signInUrl: 'https://portal.access-ccs.com/sign-in', username: 'ana.cruz', temporaryPassword: 'Tq7#mPz9!kLw2x' }
 afterEach(() => { vi.restoreAllMocks() })
 
 describe('the invite email', () => {
-  it('sends the sign-in link and the temporary credentials, as plain text from MAIL_FROM', async () => {
+  it('sends the sign-in link and the temporary credentials, as HTML and plain text from MAIL_FROM', async () => {
     const commands: { input: unknown }[] = []
     const mailer = createSesInviteMailer('no-reply@access-ccs.com', { send: async (command: { input: unknown }) => { commands.push(command); return {} } } as never)
     expect(await sendInvite(invite, mailer)).toEqual({ sent: true })
     expect(commands[0]!.input).toEqual({
       FromEmailAddress: 'no-reply@access-ccs.com',
       Destination: { ToAddresses: ['ana.cruz@gmail.com'] },
-      Content: { Simple: { Subject: { Data: 'Your ACCS account', Charset: 'UTF-8' }, Body: { Text: { Data: inviteText(invite), Charset: 'UTF-8' } } } },
+      Content: {
+        Simple: {
+          Subject: { Data: 'Your ACCS account', Charset: 'UTF-8' },
+          Body: {
+            Text: { Data: inviteText(invite), Charset: 'UTF-8' },
+            Html: { Data: inviteHtml(invite), Charset: 'UTF-8' },
+          },
+        },
+      },
     })
     const text = inviteText(invite)
     for (const part of ['Hello Ana Cruz,', invite.signInUrl, 'Username: ana.cruz', `Temporary password: ${invite.temporaryPassword}`, 'choose your own username and password']) expect(text).toContain(part)
+    const html = inviteHtml(invite)
+    for (const part of ['Hello Ana Cruz,', invite.signInUrl, 'ana.cruz', invite.temporaryPassword, '#2F3BD6']) expect(html).toContain(part)
   })
 
   it('falls back to showing the invite when SES fails, and logs the failure without the credentials', async () => {
