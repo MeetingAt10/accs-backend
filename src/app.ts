@@ -143,7 +143,7 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     await throttle.clear(key);send(res,actionResponseSchema,{ok:true,message:'Password updated. Sign in with your new password.'})
   })
   app.post('/api/auth/sign-out',async(req,res)=>{emptyBodySchema.parse(req.body??{});const token=cookieValue(req);if(isWellFormedToken(token))await sessions.revoke(sessionIdOf(token));res.clearCookie('accs_session',cookieOptions);send(res,actionResponseSchema,{ok:true,message:'Signed out.'})})
-  app.use('/api',async(req,res,next)=>{const user=await sessionUser(req,res);if(!user)return send(res,errorResponseSchema,{error:'Sign in to continue.',code:'UNAUTHENTICATED'},401);res.locals.user=user
+  app.use('/api',async(req,res,next)=>{const user=await sessionUser(req,res);if(!user){/* A session cookie that no longer opens a session has ended: say so once and drop the cookie. No cookie at all is a first visit. */if(isWellFormedToken(cookieValue(req))){res.clearCookie('accs_session',cookieOptions);return send(res,errorResponseSchema,{error:'Your session ended. Sign in again.',code:'SESSION_EXPIRED'},401)}return send(res,errorResponseSchema,{error:'Sign in to continue.',code:'UNAUTHENTICATED'},401)}res.locals.user=user
     // Temporary credentials open only the call that replaces them, reading the session, and signing out (registered above).
     // Where the account switcher exists, its two calls stay open too, so a tester can leave an account that is still on temporary details.
     const setting=req.method==='GET'&&req.path==='/session'||req.method==='POST'&&req.path==='/auth/complete-first-login'||devToolbox&&isDevToolboxCall(req.method,req.path)
