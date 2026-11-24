@@ -169,6 +169,19 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       expect((await agent.post('/api/auth/complete-first-login').send({ currentPassword: secretaryPassword, username: 'maria.s', password: 'An0ther!Passw0rd' })).status).toBe(409)
     })
 
+    it('accepts only a new password and keeps the temporary username', async () => {
+      const { app } = setup()
+      const credentials = await activateSecretary(app)
+      const { agent } = await signIn(app, credentials.username, credentials.temporaryPassword)
+      const same = await agent.post('/api/auth/complete-first-login').send({ password: credentials.temporaryPassword })
+      expect([same.status, same.body.code]).toEqual([400, 'VALIDATION_ERROR'])
+      const done = await agent.post('/api/auth/complete-first-login').send({ password: secretaryPassword })
+      expect(done.status).toBe(200)
+      expect(done.body.user).toMatchObject({ username: credentials.username, mustChangeCredentials: false })
+      expect((await signIn(app, credentials.username, credentials.temporaryPassword)).response.status).toBe(401)
+      expect((await signIn(app, credentials.username, secretaryPassword)).response.status).toBe(200)
+    })
+
     it('reissues credentials on a second activation and requires the change again', async () => {
       const { app } = setup()
       const secretary = await secretarySession(app)

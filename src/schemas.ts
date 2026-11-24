@@ -36,7 +36,7 @@ export const resetPasswordSchema = z.object({ emailOrId, code: z.string().trim()
 export const changePasswordSchema = z.object({ currentPassword: z.string().min(1).max(200), password }).strict()
 // The first sign-in replaces the temporary username and password. A username is lower case and unique.
 export const usernameSchema = z.string().trim().toLowerCase().min(3, 'Use at least 3 characters.').max(32, 'Use at most 32 characters.').regex(/^[a-z0-9][a-z0-9._-]*$/, 'Use letters, numbers, dots, dashes, or underscores.')
-export const completeFirstLoginSchema = z.object({ currentPassword: z.string().min(1).max(200), username: usernameSchema, password }).strict()
+export const completeFirstLoginSchema = z.object({ currentPassword: z.string().min(1).max(200).optional(), username: usernameSchema.optional(), password }).strict()
 export const emptyBodySchema = z.object({}).strict()
 export const idParamsSchema = z.object({ pageId: pageIdSchema }).strict()
 export const healthResponseSchema = z.object({ status: z.literal('ok') })

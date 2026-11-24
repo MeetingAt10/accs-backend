@@ -154,16 +154,18 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     if(!user.mustChangeCredentials)throw new ApiError(409,'Your sign-in details are already set.','CONFLICT')
     await claim(key)
     const stored=credentialFor(user,await authStore.load())
-    if(!stored||!verifyPassword(currentPassword,stored))throw new ApiError(400,'Your current password is incorrect.','INVALID_CREDENTIALS')
+    // The session already proves the temporary password, so the first-login page sends only the new password. A current
+    // password, when sent, must still be right; a username, when sent, replaces the temporary one.
+    if(!stored||currentPassword!==undefined&&!verifyPassword(currentPassword,stored))throw new ApiError(400,'Your current password is incorrect.','INVALID_CREDENTIALS')
     // The temporary password was right, so the checks below are not guesses and must not use up attempts.
     await throttle.clear(key)
-    if(password===currentPassword)throw new ApiError(400,'Choose a password that is different from the temporary one.','VALIDATION_ERROR')
-    if(username===user.username?.toLowerCase())throw new ApiError(400,'Choose a username that is different from the temporary one.','VALIDATION_ERROR')
+    if(verifyPassword(password,stored))throw new ApiError(400,'Choose a password that is different from the temporary one.','VALIDATION_ERROR')
+    if(username!==undefined&&username===user.username?.toLowerCase())throw new ApiError(400,'Choose a username that is different from the temporary one.','VALIDATION_ERROR')
     await setOwnCredentials(authStore,await repository.view(unit=>unit.read().users,[]),user,username,hashPassword(password))
     // Keep this session; the temporary credentials may be on other devices.
     await sessions.revokeUser(user.id,res.locals.sessionId as string)
     await recordAudit(repository,user,[{action:'Sign-in details set',reference:user.id}])
-    await sessionOut(res,{...user,username,mustChangeCredentials:false})
+    await sessionOut(res,{...user,username:username??user.username,mustChangeCredentials:false})
   })
   app.post('/api/auth/change-password',async(req,res)=>{
     const user=res.locals.user as User;const {currentPassword,password}=changePasswordSchema.parse(req.body);const key=`change:${user.id}`
