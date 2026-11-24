@@ -185,12 +185,13 @@ function refreshAdvisers(data: AuthData, accounts: Map<string, User>) {
 // --- first sign-in ---------------------------------------------------------------------------------------------------
 
 /** Saves the username and password a person chose for the first time and clears the flag that forces the change. */
-export async function setOwnCredentials(authStore: AuthStore, users: User[], user: User, username: string, hash: string) {
+/** Replaces temporary sign-in details. Without a new username, the temporary username stays. */
+export async function setOwnCredentials(authStore: AuthStore, users: User[], user: User, username: string | undefined, hash: string) {
   await authStore.update((data) => {
     const accounts = merged(users, data)
-    if (takenBy(accounts.values(), user.id).has(username)) throw new ApiError(409, "That username isn't available.", 'CONFLICT')
+    if (username !== undefined && takenBy(accounts.values(), user.id).has(username)) throw new ApiError(409, "That username isn't available.", 'CONFLICT')
     const record = edit(data, accounts, user.id)
-    record.username = username
+    if (username !== undefined) record.username = username
     record.mustChangeCredentials = false
     data.credentials[user.id] = hash
   })
