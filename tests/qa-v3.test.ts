@@ -1,6 +1,6 @@
 // Decisions of 20 November 2026 answering the third round of the QA report of 17 November (QA_andrew_11_17, V3).
 import request from 'supertest'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createApp } from '../src/app.js'
 import { createMemoryRepository } from '../src/store.js'
@@ -105,7 +105,9 @@ describe('times for talking about a concern are still to come', () => {
 })
 
 describe('newest first', () => {
+  afterEach(() => { vi.setSystemTime(new Date('2026-10-21T00:00:00.000Z')) })
   it('lists conversations by their latest message, direct and group alike', async () => {
+    vi.setSystemTime(new Date('2026-11-26T00:00:00.000Z')) // the seed runs to late November, so a new item must be newer than the seeded ones
     const professor = await login('QCU-PROF-IT')
     const started = await act(professor, 'P11', 'createGroupThread', { title: 'Capstone team', body: 'Hello team', memberIds: ['QCU-STU-IT-A', 'QCU-STU-RESTRICTED'] })
     expect(started.status, JSON.stringify(started.body)).toBe(200)

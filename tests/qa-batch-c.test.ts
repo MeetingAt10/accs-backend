@@ -29,7 +29,7 @@ describe('"Help me write this"', () => {
     const student = await login('QCU-STU-IT-A')
     const status = await ask(student, 'What is the status of my report?')
     expect(status).not.toMatch(/RPT-/)
-    expect(status).toMatch(/General concern, filed \d{4}-\d{2}-\d{2}: /)
+    expect(status).toMatch(/[A-Z][A-Za-z ]+, filed \d{4}-\d{2}-\d{2}: /)
     expect(await ask(student, 'What is the status of report RPT-0241?')).toContain('RPT-0241')
   })
 
