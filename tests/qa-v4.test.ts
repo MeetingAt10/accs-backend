@@ -68,6 +68,8 @@ describe('direct chat from Guidance', () => {
 
 describe('deleted posts', () => {
   it('stay out of the home announcements', async () => {
+    // Home lists the first three announcements in stored order; clear the seeded ones so the new one is among them.
+    repo.read().posts = repo.read().posts.filter((p) => p.kind !== 'announcement')
     const dean = await login('QCU-FAC-PAULA-DELACRUZ')
     const made = await announce(dean, { title: 'Gone soon' })
     expect(made.status).toBe(200)
