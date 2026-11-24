@@ -5,7 +5,7 @@ import { campusYearProblem, mainCampus, sectionName } from './sections.js'
 import { materialFileTypes, materialMaxBytes, messageFileMaxBytes, messageFileTypes, safeFileName, uploadUrlSeconds, type MaterialStorage } from './material-storage.js'
 import { ulid } from './ids.js'
 import { appointmentCategories, appointmentProblem, concernFollowUp, purposeOf, type AppointmentChoice } from './appointments.js'
-import { reactionKinds, type ReactionKind, loadRowSchema, materialUploadSchema, messageUploadSchema, actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
+import { isRealDate, reactionKinds, type ReactionKind, loadRowSchema, materialUploadSchema, messageUploadSchema, actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
 import { refineAnswer, type AssistantReply } from './assistant-ai.js'
 import { allowedPages, ownOrganizationId, roleHas, lockedPermissions, setApprovedOverrides, canActCase, earlierConsent, canAudience, canReadCase, isEarlierHandler, overseesCase, canCountCase, canFacultyResult, canPage, canPublish, canReach, canSpace, canStudentRecord, canThread, canViewCase, hasPermission, hasRole, isOrganizationMember, pageTitles, permissionRoles, permissions, scopeLabel } from './access.js'
 import { consentWording } from './consent.js'
@@ -850,6 +850,11 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
       const clusterView=(c:Database['clusters'][number])=>clusterViewFor(db,user,c)
       const clusters=db.clusters.filter(c=>c.program===user.program);data.clusters=clusters.map(c=>({...clusterView(c),reportCount:db.reports.filter(r=>c.reportIds.includes(r.id)&&canViewCase(user,r)).length}));data.threshold=Math.round(escalationConfig.similarityThreshold*100);if(pageId==='P24'){const c=pick(clusters,query.id);if(c){data.record=clusterView(c);data.reports=db.reports.filter(r=>c.reportIds.includes(r.id)&&canViewCase(user,r)).map(r=>reportView(db,r,user))}}break}
     case 'P25': {
+      // A typed date must be a real calendar day before it can bound the range (QA 15 November).
+      for (const field of ['from', 'to'] as const) {
+        const value = query[field]
+        if (value && !(/^\d{4}-\d{2}-\d{2}$/.test(value) && isRealDate(value))) throw dateIssue(field, 'Enter a real date as YYYY-MM-DD.')
+      }
       if (query.from && query.to && query.from > query.to) throw dateIssue('from', 'The start date must be on or before the end date.')
       if (query.program && hasRole(user, 'chair') && query.program !== user.program) {
         throw unavailable()
@@ -897,7 +902,8 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
         const count = records.filter((report) => report.category === label).length
         return { label, value: count >= 5 ? count : null, suppressed: count < 5 }
       })
-      data.cases = records.filter((report) => canViewCase(user, report)).map((report) => ({
+      // Newest case first, so the table opens on the latest activity.
+      data.cases = records.filter((report) => canViewCase(user, report)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((report) => ({
         id: report.id,
         stage: report.stage,
         status: statusFor(report),
