@@ -10,15 +10,15 @@ export const permissionRoles: Record<string, Role[]> = {
   // anyone; to-dos are for every role that has a calendar.
   'message.send': ['student','organization','professor','chair','dean','guidance','osas','secretary'], 'roster.view': ['student','organization','professor','chair','dean'], 'calendar.view': ['student','organization','professor','chair','dean','guidance','osas','secretary'], 'todo.manage': ['student','organization','professor','chair','dean','guidance','osas','secretary'], 'consultation.request': ['student'], 'consultation.decide': ['professor'],
   'report.create': ['student'], 'report.viewOwn': ['student'], 'case.view': ['professor','chair','dean','guidance','osas'], 'case.act': ['professor','chair','dean','guidance','osas'], 'case.convert': ['guidance'], 'cluster.review': ['chair'], 'analytics.view': ['chair','dean'],
-  'evaluation.fill': ['student','professor'], 'evaluation.review': ['professor'], 'evaluation.configure': ['dean'], 'evaluation.results': ['professor','chair','dean'], 'offense.view': ['chair','dean','guidance','osas'], 'goodmoral.review': ['guidance','osas'], 'restriction.manage': ['administrator','guidance','osas'], 'strike.recommend': ['dean'], 'student.report': ['professor','chair'], 'clearance.view': ['secretary','chair','dean','osas'], 'load.manage': ['secretary'], 'strike.record': ['osas'], 'standing.viewOwn': ['student'], 'moderation.review': ['administrator'], 'moderation.referral': ['secretary'], 'moderation.osas': ['osas'], 'role.manage': ['administrator','secretary'], 'audit.view': ['administrator'],
+  'evaluation.fill': ['student','professor'], 'evaluation.review': ['professor'], 'evaluation.configure': ['dean'], 'evaluation.results': ['professor','chair','dean'], 'offense.view': ['chair','dean','guidance','osas'], 'goodmoral.review': ['guidance','osas'], 'restriction.manage': ['administrator','guidance','osas'], 'strike.recommend': ['dean'], 'student.report': ['professor','chair','dean'], 'clearance.view': ['secretary','chair','dean','osas'], 'load.manage': ['secretary'], 'strike.record': ['osas'], 'standing.viewOwn': ['student'], 'moderation.review': ['administrator'], 'moderation.referral': ['secretary'], 'moderation.osas': ['osas'], 'role.manage': ['administrator','secretary'], 'audit.view': ['administrator'],
   'directory.view': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'], 'self.manage': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'], 'assistant.use': ['student','organization','professor','chair','dean','administrator','guidance','osas','secretary'],
   // Account provisioning has no page; it is the /api/accounts routes. The Dean activates the secretary, who creates every other account.
   'account.activateSecretary': ['dean'], 'account.setupDean': ['administrator'], 'account.provision': ['secretary'],
   // The Secretary and the Dean create organizations and their accounts (decided 19 November 2026).
   'organization.create': ['secretary','dean'],
   // Decided 20 November 2026: the Secretary and the System Administrator both change roles, and the Secretary approves
-  // permission change requests. Nobody approves their own request, so the administrator approves the Secretary's.
-  'permission.review': ['secretary','administrator'],
+  // permission change requests. Only the Secretary decides them; her own changes apply directly (QA v5 D2).
+  'permission.review': ['secretary'],
 }
 
 /**

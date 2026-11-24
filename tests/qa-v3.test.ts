@@ -77,6 +77,17 @@ describe('times for talking about a concern are still to come', () => {
       vi.setSystemTime(new Date('2026-10-21T00:00:00.000Z'))
     }
   })
+
+  it('C12: a meeting time set by the office takes the handler\'s overlapping slot out of booking', async () => {
+    const student = await login('QCU-STU-IT-A')
+    expect((await act(student, 'P20', 'chooseTalkMode', { reportId: 'RPT-0241', mode: 'face_to_face', consent: { participate: true } })).status).toBe(200)
+    const adviser = await login('QCU-PROF-IT')
+    // 10:15 campus time falls inside SLOT-0101 (10:00-10:30).
+    expect((await act(adviser, 'P22', 'setTalkDetails', { reportId: 'RPT-0241', scheduledAt: '2026-10-29T02:15:00.000Z', place: 'Faculty room' })).status).toBe(200)
+    const other = await login('QCU-STU-RESTRICTED')
+    const booked = await act(other, 'P15', 'createConsultation', { slotId: 'SLOT-0101', purpose: 'Academic question' })
+    expect(booked.status, JSON.stringify(booked.body)).toBe(409)
+  })
 })
 
 describe('newest first', () => {
@@ -159,12 +170,22 @@ describe('permission change requests', () => {
     expect(await permissionsOf('QCU-OSAS')).toContain('post.create')
   })
 
-  it('never lets anyone approve their own request: the administrator decides the Secretary\'s', async () => {
+  it('applies the Secretary\'s own change at once, audited, with no request (QA v5 D2)', async () => {
     const secretary = await secretarySession(app)
-    expect((await propose(secretary, 'secretary', 'roster.view', true)).status).toBe(200)
-    expect((await decide(secretary, 'secretary:roster.view', 'approve')).status).toBe(403)
+    const saved = await propose(secretary, 'student', 'calendar.view', false)
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200)
+    expect(saved.body.message).toBe('Applied. The change is now in force.')
+    expect(await permissionsOf('QCU-STU-IT-A')).not.toContain('calendar.view')
+    expect(repo.read().audit.at(-1)?.action).toBe('Permission change applied')
+    expect((await secretary.get('/api/pages/P48')).body.data.permissionRequests).toEqual([])
+  })
+
+  it('does not let the administrator approve or reject requests (QA v5 D2)', async () => {
     const admin = await login('ACCS-ADMIN')
-    expect((await decide(admin, 'secretary:roster.view', 'approve')).status).toBe(200)
+    await propose(admin, 'osas', 'post.create', false)
+    expect((await decide(admin, 'osas:post.create', 'approve')).status).toBe(403)
+    expect((await decide(admin, 'osas:post.create', 'reject')).status).toBe(403)
+    expect(await permissionsOf('QCU-OSAS')).toContain('post.create')
   })
 
   it('keeps who manages roles, accounts, approvals and the audit trail out of reach of any request', async () => {
@@ -186,6 +207,8 @@ describe('permission change requests', () => {
 describe('role changes by the Secretary', () => {
   it('lets the Secretary change roles, like the administrator (decided 20 November 2026)', async () => {
     const secretary = await secretarySession(app)
+    // One chair per program (QA v5): the sitting BSIT chair steps down first.
+    expect((await act(secretary, 'P47', 'updateRoles', { roles: ['professor'] }, 'QCU-CHAIR-IT', 'Stepped down')).status).toBe(200)
     const saved = await act(secretary, 'P47', 'updateRoles', { roles: ['professor', 'chair'], program: 'BSIT' }, 'QCU-PROF-IT', 'Named BSIT chair')
     expect(saved.status, JSON.stringify(saved.body)).toBe(200)
     expect(repo.read().users.find((u) => u.id === 'QCU-PROF-IT')!.roles).toEqual(['professor', 'chair'])
@@ -245,9 +268,7 @@ describe('an approved permission change on every instance', () => {
     expect((await act(adminA, 'P48', 'updatePermission', { role: 'staff', permission: 'calendar.view', allowed: true }, undefined, 'QA check')).status).toBe(200)
     expect((await act(secretaryA, 'P48', 'decidePermission', { key: 'staff:calendar.view', decision: 'approve' }, undefined, 'Agreed')).status).toBe(200)
     const { agent: secretaryB } = await signIn(second, 'ccs.secretary', secretaryPassword)
-    const adminB = await signInTo(second, 'ACCS-ADMIN')
     expect((await act(secretaryB, 'P48', 'updatePermission', { role: 'secretary', permission: 'analytics.view', allowed: true }, undefined, 'QA check')).status).toBe(200)
-    expect((await act(adminB, 'P48', 'decidePermission', { key: 'secretary:analytics.view', decision: 'approve' }, undefined, 'Agreed')).status).toBe(200)
     expect((await authStore.load()).permissionGrants).toEqual({ 'staff:calendar.view': true, 'secretary:analytics.view': true })
   })
 })

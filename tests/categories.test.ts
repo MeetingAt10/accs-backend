@@ -40,7 +40,7 @@ describe('the category list', () => {
 
   it('checks a choice: category, sub-category, and the description for "Other"', () => {
     expect(categoryProblem({ category: 'Bullying', subcategory: 'Spreading rumours' })).toBeUndefined()
-    expect(categoryProblem({ category: 'Bullying' })).toEqual({ path: 'subcategory', message: 'Choose a sub-category.' })
+    expect(categoryProblem({ category: 'Bullying' })).toBeUndefined()
     expect(categoryProblem({ category: 'Bullying', subcategory: 'Grades' })).toEqual({ path: 'subcategory', message: 'Choose a sub-category from the list.' })
     expect(categoryProblem({ category: 'Bullying', subcategory: 'Spreading rumours', categoryDetail: 'x' })?.path).toBe('categoryDetail')
     expect(categoryProblem({ category: otherCategory, categoryDetail: 'Lost ID card' })).toBeUndefined()
@@ -74,11 +74,10 @@ describe('filing with a category and sub-category', () => {
     expect(filed.body.record).toMatchObject({ category: otherCategory, categoryDetail: 'Lost student ID card' })
   })
 
-  it('refuses a missing or wrong sub-category with a field error and stores nothing', async () => {
+  it('refuses a wrong sub-category with a field error and stores nothing', async () => {
     const student = await login('QCU-STU-CS')
     const before = repo.read().reports.length
     for (const [choice, path] of [
-      [{ category: 'Bullying' }, 'subcategory'],
       [{ category: 'Bullying', subcategory: 'Grades' }, 'subcategory'],
       [{ category: otherCategory }, 'categoryDetail'],
       [{ category: 'Gossip' }, 'category'],
@@ -87,6 +86,17 @@ describe('filing with a category and sub-category', () => {
       expect([JSON.stringify(choice), response.status, response.body.code, response.body.fields?.[0]?.path]).toEqual([JSON.stringify(choice), 400, 'VALIDATION_ERROR', path])
     }
     expect(repo.read().reports).toHaveLength(before)
+  })
+
+  it('accepts a report without a sub-category and routes it by category', async () => {
+    const filed = await file(await login('QCU-STU-CS'), { category: 'Bullying' })
+    expect(filed.status).toBe(200)
+    expect(filed.body.record.subcategory).toBeUndefined()
+    const stored = repo.read().reports.find((r) => r.id === filed.body.record.id)
+    expect(stored?.subcategory).toBeUndefined()
+    expect(stored?.ownerId).toBeTruthy()
+    const opened = (await (await login('QCU-PROF-CS')).get(`/api/pages/P22?id=${filed.body.record.id}`)).body.data.record
+    expect(opened).toMatchObject({ category: 'Bullying' })
   })
 
   it('still accepts the old categories from the current filing screen', async () => {

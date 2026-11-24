@@ -171,7 +171,7 @@ describe('what readers who are not handling the concern see (issue #31)', () => 
 describe('filing without the chair and Dean questions (issue #31)', () => {
   it('files with only the agreement and the about-the-adviser answer, and stores the new wording', async () => {
     const student = await login('QCU-STU-CS')
-    const response = await student.post('/api/pages/P19/actions').send({ action: 'createReport', payload: { ...statement, consent: { readStatement: true }, aboutAdvisor: false } })
+    const response = await student.post('/api/pages/P19/actions').send({ action: 'createReport', payload: { ...statement, occurredOn: '2026-10-15', consent: { readStatement: true }, aboutAdvisor: false } })
     expect(response.status).toBe(200)
     const stored = report(response.body.record.id)
     expect(stored.consent).toMatchObject({ version: consentWording.version, wording: consentWording.report })

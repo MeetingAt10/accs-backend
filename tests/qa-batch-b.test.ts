@@ -67,12 +67,28 @@ describe('times in the past', () => {
 describe('when something happened', () => {
   it('refuses a future date on a concern and on a faculty report', async () => {
     const student = await login('QCU-STU-IT-A')
-    const concern = await student.post('/api/pages/P19/actions').send({ action: 'createReport', payload: { narrative: 'Lab schedule changes are not announced.', category: 'General concern', severity: 'low', identity: 'named', occurredOn: '2026-10-22', ...concernChoices } })
+    const concern = await student.post('/api/pages/P19/actions').send({ action: 'createReport', payload: { narrative: 'Lab schedule changes are not announced.', category: 'General concern', severity: 'low', identity: 'named', ...concernChoices, occurredOn: '2026-10-22' } })
     expect(fields(concern.body).occurredOn).toBe('Choose today or an earlier date: it cannot be in the future.')
     const professor = await login('QCU-PROF-IT')
     const report = await professor.post('/api/pages/P21/actions').send({ action: 'reportStudent', payload: { studentId: 'QCU-STU-IT-A', narrative: 'Shouted at a classmate.', category: 'Bullying', subcategory: 'Intimidation or threats', severity: 'medium', occurredOn: '2026-11-02' } })
     expect(report.status).toBe(400)
     expect(fields(report.body).occurredOn).toBe('Choose today or an earlier date: it cannot be in the future.')
+  })
+})
+
+describe('ongoing incidents', () => {
+  it('accepts ongoing without a date, and refuses neither a date nor ongoing', async () => {
+    const student = await login('QCU-STU-IT-A')
+    const base = { narrative: 'The professor is always late to class.', category: 'General concern', severity: 'low', identity: 'named', ...concernChoices }
+    const file = (extra: object) => student.post('/api/pages/P19/actions').send({ action: 'createReport', payload: { ...base, occurredOn: undefined, ...extra } })
+    const ongoing = await file({ ongoing: true })
+    expect(ongoing.status).toBe(200)
+    expect(ongoing.body.record.occurredOn).toBeUndefined()
+    expect(ongoing.body.record.ongoing).toBe(true)
+    const neither = await file({})
+    expect(neither.status).toBe(400)
+    expect(fields(neither.body).occurredOn).toBe('Choose when it happened, or mark it as ongoing.')
+    expect(fields((await file({ ongoing: true, occurredOn: '2026-10-22' })).body).occurredOn).toBe('Choose today or an earlier date: it cannot be in the future.')
   })
 })
 

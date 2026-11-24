@@ -9,13 +9,13 @@ import { send } from './http.js'
 import { ulid } from './ids.js'
 import { renameAccountIds, renamedAccountIds } from './renames.js'
 import {
-  accountIdParamsSchema, accountListResponseSchema, accountsQuerySchema, accountTypesResponseSchema, actionResponseSchema, activateSecretarySchema, setupDeanSchema,
+  accountIdParamsSchema, accountListResponseSchema, enrollStudentsSchema, accountsQuerySchema, accountTypesResponseSchema, actionResponseSchema, activateSecretarySchema, setupDeanSchema,
   advisorsResponseSchema, createFacultySchema, createOrganizationSchema, facultyListResponseSchema, facultyQuerySchema, facultyRowSchema, importStudentsSchema, programParamsSchema,
   roles, setActiveSchema, setAdvisorsSchema, setChairSchema, studentRowSchema, yearLevelParamsSchema, type Role, type User,
 } from './schemas.js'
-import { ApiError, deny, unavailable, type AccountChange, type ProfileChange } from './services.js'
+import { ApiError, deny, rolesProblem, unavailable, type AccountChange, type ProfileChange } from './services.js'
 import type { SessionStore } from './sessions.js'
-import { mainCampus } from './sections.js'
+import { campusYearProblem, mainCampus } from './sections.js'
 import { demoUserIds, newUser, seed, type Database, type Repository, formerSeedEmails, seedEmail } from './store.js'
 
 // Account provisioning. The Dean activates the secretary; the secretary creates faculty and students, assigns advisers
@@ -181,10 +181,13 @@ export async function setOwnCredentials(authStore: AuthStore, users: User[], use
   })
 }
 
-/** Saves a role, program, section, or active change made on the administrator's pages, so every instance applies it. */
-export async function saveAccountChange(authStore: AuthStore, users: User[], { id, roles, active, program, section }: AccountChange) {
+/** Saves a role, program, section, year level, irregular flag, or active change made on the administrator's pages, so every instance applies it. */
+export async function saveAccountChange(authStore: AuthStore, users: User[], { id, roles, active, program, section, year, irregular }: AccountChange) {
   await authStore.update((data) => {
-    Object.assign(edit(data, merged(users, data), id), { roles, active, ...(program ? { program } : {}), ...(section ? { section } : {}) })
+    const accounts = merged(users, data)
+    Object.assign(edit(data, accounts, id), { roles, active, ...(program ? { program } : {}), ...(section ? { section } : {}), ...(year ? { year } : {}), ...(irregular === undefined ? {} : { irregular }) })
+    // Advisers go by year level, so a student who moved up has the adviser of the new year.
+    if (year) refreshAdvisers(data, accounts)
   })
 }
 
@@ -216,7 +219,7 @@ export async function recordAudit(repository: Repository, by: User, entries: { a
 export type AccountDeps = { repository: Repository; authStore: AuthStore; sessions: SessionStore; mailer: InviteMailer }
 
 const summary = (account: User) => ({
-  id: account.id, name: account.name, email: account.email, roles: account.roles, program: account.program, section: account.section, campus: account.campus, year: account.year,
+  id: account.id, name: account.name, email: account.email, roles: account.roles, program: account.program, section: account.section, campus: account.campus, year: account.year, irregular: account.irregular,
   studentId: account.studentId, adviserId: account.adviserId, active: account.active, mustChangeCredentials: account.mustChangeCredentials,
 })
 const byName = (a: User, b: User) => a.name.localeCompare(b.name)
@@ -438,6 +441,31 @@ export function accountRouter({ repository, authStore, sessions, mailer }: Accou
   })
 
   /**
+   * Sets the year level and/or section of many students in one action (QA v5, A5). Each student gets the checks the
+   * role page applies to one, and one failure refuses the whole batch. One audit entry per student.
+   */
+  router.post('/students/enroll', async (req, res) => {
+    const user = actor(res)
+    if (!hasPermission(user, 'account.provision') && !hasPermission(user, 'role.manage')) throw deny()
+    const { ids, year, section } = enrollStudentsSchema.parse(req.body)
+    const all = await users()
+    for (const id of new Set(ids)) {
+      const account = all.find((candidate) => candidate.id === id)
+      if (!account?.roles.includes('student')) throw unavailable()
+      const problem = (year !== undefined && campusYearProblem(account.campus ?? mainCampus, year)) || rolesProblem(account.roles, section, account.roles)
+      if (problem) throw new ApiError(400, `${account.name}: ${problem}`, 'VALIDATION_ERROR')
+    }
+    const unique = [...new Set(ids)]
+    await authStore.update((data) => {
+      const accounts = merged(all, data)
+      for (const id of unique) Object.assign(edit(data, accounts, id), { ...(year !== undefined ? { year } : {}), ...(section ? { section: section.toUpperCase() } : {}) })
+      if (year !== undefined) refreshAdvisers(data, accounts)
+    })
+    await audit(user, unique.map((id) => ({ action: 'Year level or section changed', reference: id })))
+    done(res, `${plural(unique.length, 'student')} updated.`, { ids: unique, year, section: section?.toUpperCase() })
+  })
+
+  /**
    * Creates an organization and the account that runs it (decided 19 November 2026). The account signs in with temporary
    * details like any new account; the chosen student joins as the organization's President.
    */
@@ -529,6 +557,9 @@ export function accountRouter({ repository, authStore, sessions, mailer }: Accou
       const accounts = merged(all, data)
       const chosen = accounts.get(facultyId)
       if (!chosen?.roles.includes('professor') || chosen.program !== program) throw new ApiError(400, 'Choose a faculty member from that program.', 'VALIDATION_ERROR')
+      // The chair role is added to the roles the person holds, so the shared role rules apply: a Dean cannot also be a chair.
+      const roleProblem = chosen.roles.includes('chair') ? undefined : rolesProblem([...chosen.roles, 'chair'], undefined, chosen.roles)
+      if (roleProblem) throw new ApiError(400, roleProblem, 'VALIDATION_ERROR')
       previousChairIds = [...accounts.values()].filter((account) => account.id !== facultyId && account.roles.includes('chair') && account.program === program).map((account) => account.id)
       for (const id of previousChairIds) {
         const holder = edit(data, accounts, id)

@@ -82,6 +82,15 @@ describe('a faculty member reports a student', () => {
     expect((await (await login('QCU-CHAIR-CS')).get(`/api/pages/P22?id=${id}`)).status).toBe(404)
   })
 
+  it('lists the reports a faculty member filed with their status, and not another professor\'s', async () => {
+    const professor = await login('QCU-PROF-IT')
+    const id = (await file(professor)).body.record.id as string
+    const filed = (await professor.get('/api/pages/P21')).body.data.filedReports
+    expect(filed).toEqual([expect.objectContaining({ id, category: 'Bullying', status: 'Submitted', office: expect.any(String), reportedStudent: expect.objectContaining({ name: expect.any(String) }) })])
+    expect(filed[0].narrative).toBeUndefined()
+    expect((await (await login('QCU-PROF-OTHER')).get('/api/pages/P21')).body.data.filedReports).toEqual([])
+  })
+
   it('can lead to a strike: the Dean recommends one against the reported student', async () => {
     const id = (await file(await login('QCU-PROF-IT'))).body.record.id as string
     await repo.transact((unit) => { unit.read().reports.find((r) => r.id === id)!.stage = 'dean' })
@@ -103,5 +112,18 @@ describe('a faculty member reports a student', () => {
     expect(page.categoryOptions.map((c: { label: string }) => c.label)).toContain('Bullying')
     expect(page.reportableStudents.map((s: { id: string }) => s.id)).toEqual(expect.arrayContaining(['QCU-STU-IT-A', 'QCU-STU-RESTRICTED']))
     expect((await (await login('QCU-GUIDANCE')).get('/api/pages/P21')).body.data.canReportStudent).toBeUndefined()
+  })
+
+  it('lets the Dean report any CCS student and a Chair only their program\'s', async () => {
+    const ids = async (agent: Agent) => (await agent.get('/api/pages/P21')).body.data.reportableStudents.map((s: { id: string }) => s.id)
+    const dean = await login('QCU-FAC-PAULA-DELACRUZ')
+    expect(await ids(dean)).toEqual(expect.arrayContaining(['QCU-STU-IT-A', 'QCU-STU-CS']))
+    expect((await file(dean, { studentId: 'QCU-STU-CS' })).status).toBe(200)
+    const chair = await login('QCU-CHAIR-IT')
+    const list = await ids(chair)
+    expect(list).toContain('QCU-STU-IT-A')
+    expect(list).not.toContain('QCU-STU-CS')
+    expect((await file(chair)).status).toBe(200)
+    expect((await file(chair, { studentId: 'QCU-STU-CS' })).status).toBe(404)
   })
 })
