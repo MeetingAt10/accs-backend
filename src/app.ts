@@ -67,7 +67,7 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   // An old account ID (QCU-DEAN) signs in as the renamed account (CCS-DEAN).
   const findUser=(ident:string)=>{const key=currentAccountId(ident.trim().toUpperCase()).toLowerCase();return repository.view(unit=>unit.read().users.find(u=>u.active&&(u.email.toLowerCase()===key||u.id.toLowerCase()===key||u.studentId?.toLowerCase()===key||u.username?.toLowerCase()===key)),[])}
   // A role change made on the administrator's pages is saved to the auth store too, so it holds on every instance.
-  const saveAccount=async(change:AccountChange)=>saveAccountChange(authStore,await repository.view(unit=>unit.read().users,[]),change)
+  const saveAccount=async(change:AccountChange)=>saveAccountChange(authStore,await repository.view(unit=>unit.read().users,[]),await repository.view(unit=>unit.read().spaces,[]),change)
   const saveProfile=async(id:string,change:ProfileChange)=>saveProfileChange(authStore,await repository.view(unit=>unit.read().users,[]),id,change)
   // Only the seeded demo accounts fall back to the shared seed password, until they set their own. Every other account has a stored credential.
   const credentialFor=(user:User,data:AuthData)=>data.credentials[user.id]??formerAccountIds(user.id).map(id=>data.credentials[id]).find(Boolean)??(demoUserIds.has(user.id)?defaultHash():undefined)
@@ -214,7 +214,7 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     // Only the decided key is written over what is stored, so a concurrent decision on another instance (another key) is
     // kept, and a store write retried after a conflict runs on the newer copy. Approved keys this instance's records hold
     // but the store lacks (an earlier write that failed after its decision was saved) are filled in too (code review, 23 November 2026).
-    if(body.action==='decidePermission'){const key=(result.record as {key:string}).key;const fresh=approvedOverrides({permissionOverrides:await repository.view(unit=>unit.read().permissionOverrides,['permissionOverrides'])});let grants:Record<string,boolean>={}
+    const appliedKey=(result.record as {key?:string}|undefined)?.key;if((body.action==='decidePermission'||body.action==='updatePermission')&&appliedKey){const key=appliedKey;const fresh=approvedOverrides({permissionOverrides:await repository.view(unit=>unit.read().permissionOverrides,['permissionOverrides'])});let grants:Record<string,boolean>={}
       await authStore.update(data=>{const stored=data.permissionGrants??{};grants={...Object.fromEntries(Object.entries(fresh).filter(([k])=>!(k in stored))),...stored,...(key in fresh?{[key]:fresh[key]!}:{})};data.permissionGrants=grants});setApprovedOverrides(grants)}
     send(res,actionResponseSchema,result)})
   // Invites go out by email when MAIL_FROM is set (#36); otherwise the screen shows them once.

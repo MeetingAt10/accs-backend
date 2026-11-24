@@ -39,8 +39,8 @@ export function categoryProblem({ category, subcategory, categoryDetail }: Categ
   }
   // "Facilities" without a sub-category is the old category, accepted until the screen switches.
   if (!subcategory && legacyCategories.includes(category) && !categoryDetail) return undefined
-  if (!subcategory) return { path: 'subcategory', message: 'Choose a sub-category.' }
-  if (!known.subcategories.includes(subcategory)) return { path: 'subcategory', message: 'Choose a sub-category from the list.' }
+  // Sub-category is optional (D4); when given it must belong to the category.
+  if (subcategory && !known.subcategories.includes(subcategory)) return { path: 'subcategory', message: 'Choose a sub-category from the list.' }
   if (categoryDetail) return { path: 'categoryDetail', message: 'Only "Other (please specify)" takes a description.' }
   return undefined
 }

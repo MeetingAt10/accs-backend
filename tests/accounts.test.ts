@@ -604,15 +604,15 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
     it('persists a role change made on the administrator pages', async () => {
       const context = setup()
       const { agent: admin } = await signIn(context.app, 'ACCS-ADMIN')
-      const change = await admin.post('/api/pages/P47/actions').send({ action: 'updateRoles', recordId: 'QCU-STU-IT-B', reason: 'Moved to the office', payload: { roles: ['guidance'] } })
+      const change = await admin.post('/api/pages/P47/actions').send({ action: 'updateRoles', recordId: 'QCU-STU-IT-B', reason: 'Named organization representative', payload: { roles: ['student', 'organization'] } })
       expect(change.status).toBe(200)
       const cold = context.another()
-      expect((await signIn(cold, 'QCU-STU-IT-B')).response.body.user.roles).toEqual(['guidance'])
+      expect((await signIn(cold, 'QCU-STU-IT-B')).response.body.user.roles).toEqual(['student', 'organization'])
       // Only the fields the action changed are stored over the seeded user.
       const stored = (await context.authStore.load()).users.find((account) => account.id === 'QCU-STU-IT-B')!
-      expect(stored).toMatchObject({ roles: ['guidance'], active: true, program: 'BSIT', section: 'B' })
+      expect(stored).toMatchObject({ roles: ['student', 'organization'], active: true, program: 'BSIT', section: 'B' })
       expect(stored).not.toHaveProperty('standing')
-      expect((await admin.post('/api/pages/P47/actions').send({ action: 'updateRoles', recordId: 'QCU-STU-IT-B', reason: 'Account closed', payload: { roles: ['guidance'], active: false } })).status).toBe(200)
+      expect((await admin.post('/api/pages/P47/actions').send({ action: 'updateRoles', recordId: 'QCU-STU-IT-B', reason: 'Account closed', payload: { roles: ['student', 'organization'], active: false } })).status).toBe(200)
       expect((await signIn(context.another(), 'QCU-STU-IT-B')).response.status).toBe(401)
     })
 

@@ -139,3 +139,18 @@ describe('student IDs stored in the old format (19 November 2026)', () => {
     expect(db.users.find((u) => u.id === 'NEW-ID-STUDENT')!.studentId).toBe('25-0999')
   })
 })
+
+describe('home dashboard report order (QA v5 C7)', () => {
+  it('lists open, high-severity, most recently updated reports first and closed last', async () => {
+    const db = repo.read()
+    const student = db.users.find((u) => u.roles.includes('student') && db.reports.some((r) => r.ownerId === u.id))!
+    const mine = db.reports.filter((r) => r.ownerId === student.id)
+    const base = mine[0]
+    const make = (id: string, status: string, severity: Report['severity'], updatedAt: string) => ({ ...base, id, status, severity, updatedAt, caseFileId: undefined })
+    mine.forEach((r) => { db.reports.splice(db.reports.indexOf(r), 1) })
+    db.reports.push(make('C7-closed', 'Closed', 'high', '2026-11-20T00:00:00Z'), make('C7-low', 'With adviser', 'low', '2026-11-20T00:00:00Z'), make('C7-old', 'With adviser', 'high', '2026-11-01T00:00:00Z'), make('C7-new', 'With adviser', 'high', '2026-11-10T00:00:00Z'))
+    const agent = await login(student.studentId ?? student.id)
+    const ids = (await agent.get('/api/pages/P03')).body.data.reports.map((r: { id: string }) => r.id)
+    expect(ids).toEqual(['C7-new', 'C7-old', 'C7-low', 'C7-closed'])
+  })
+})

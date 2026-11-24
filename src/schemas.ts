@@ -13,7 +13,7 @@ export const programs = ['BSIT', 'BSCS', 'BSIS'] as const
 /** The ways a student can choose to talk about a concern. */
 export const talkModes = ['chat', 'video', 'voice', 'face_to_face'] as const
 export type TalkMode = (typeof talkModes)[number]
-export const userSchema = z.object({ id: z.string(), name: z.string(), email: z.email(), roles: z.array(roleSchema), program: z.string().optional(), section: z.string().optional(), campus: z.string().optional(), office: z.string().optional(), organizationId: z.string().optional(), restrictions: z.array(z.string()), title: z.string(), bio: z.string(), education: z.string(), photo: z.string().optional(), officeHours: z.string(), year: z.number().optional(), studentId: z.string().optional(), spaceIds: z.array(z.string()), organizationIds: z.array(z.string()), adviserId: z.string().optional(), active: z.boolean(), username: z.string().optional(), mustChangeCredentials: z.boolean().optional() })
+export const userSchema = z.object({ id: z.string(), name: z.string(), email: z.email(), roles: z.array(roleSchema), program: z.string().optional(), section: z.string().optional(), campus: z.string().optional(), office: z.string().optional(), organizationId: z.string().optional(), restrictions: z.array(z.string()), title: z.string(), bio: z.string(), education: z.string(), photo: z.string().optional(), officeHours: z.string(), year: z.number().optional(), irregular: z.boolean().optional(), studentId: z.string().optional(), spaceIds: z.array(z.string()), organizationIds: z.array(z.string()), adviserId: z.string().optional(), active: z.boolean(), username: z.string().optional(), mustChangeCredentials: z.boolean().optional() })
 export type User = z.infer<typeof userSchema>
 export const pageIdSchema = z.string().regex(/^P(0[1-9]|[1-4][0-9]|5[0-4])$/)
 export const pageQuerySchema = z.object({ id: z.string().max(100).optional(), q: z.string().max(200).optional(), tab: z.string().max(50).optional(), status: z.string().max(50).optional(), program: z.string().max(20).optional(), year: z.string().max(4).optional(), section: z.string().max(20).optional(), clearance: z.enum(['clear','on_hold']).optional(), category: z.string().max(80).optional(), stage: z.string().max(40).optional(), period: z.string().max(40).optional(), from: z.string().max(40).optional(), to: z.string().max(40).optional(), severity: z.enum(['low','medium','high']).optional(), cycle: z.string().max(100).optional(), label: z.string().max(80).optional(), scope: z.string().max(100).optional(), space: z.string().max(100).optional(), priority: z.string().max(30).optional(), type: z.string().max(40).optional(), source: z.string().max(30).optional(), role: roleSchema.optional(), office: z.string().max(100).optional(), view: z.enum(['month','week','list']).optional(), date: z.string().max(40).optional(), layers: z.string().max(200).optional(), sort: z.string().max(40).optional(), received: z.string().max(40).optional(), unread: z.enum(['true','false']).optional(), standing: z.string().max(60).optional(), recipient: z.string().max(100).optional(), hasRestriction: z.enum(['true','false']).optional(), purpose: z.enum(['Case handling', 'Good Moral review', 'Restriction review', 'Program oversight']).optional(), page: z.coerce.number().int().min(1).max(10000).optional(), note: z.string().trim().max(500).optional() }).strict()
@@ -58,7 +58,8 @@ export const studentRowSchema = z.object({
     .refine((id) => !/^\d{2}-\d{4}$/.test(id) || Number(id.slice(0, 2)) <= new Date(Date.now() + 8 * 3_600_000).getUTCFullYear() % 100, 'The first two digits are the enrollment year; they cannot be a later year.'),
   program: accountProgram,
   year: z.coerce.number({ error: 'Choose a year level from 1 to 4.' }).int('Choose a year level from 1 to 4.').min(1, 'Choose a year level from 1 to 4.').max(4, 'Choose a year level from 1 to 4.'),
-  section: z.string({ error: 'Enter the section.' }).trim().toUpperCase().regex(/^[A-Z]{1,3}$/, 'Use the section letter, like A.'),
+  // One letter (QA v5: SBIT4ABC was accepted).
+  section: z.string({ error: 'Enter the section.' }).trim().toUpperCase().regex(/^[A-Z]$/, 'Use the section letter, like A.'),
   // SB, BAT or SF (src/sections.ts). Left out, the student is at San Bartolome, so the current import screen keeps working.
   campus: z.string().trim().toUpperCase().pipe(z.enum(campusCodes, { error: 'Choose SB (San Bartolome), BAT (Batasan) or SF (San Francisco).' })).default(mainCampus),
 }).superRefine((row, ctx) => {
@@ -78,6 +79,8 @@ export const createFacultySchema = z.object({ faculty: z.array(z.unknown()).min(
 export const importStudentsSchema = z.object({ students: z.array(z.unknown()).min(1).max(batchLimit) }).strict()
 export const accountIdParamsSchema = z.object({ id: z.string().trim().min(1).max(64) }).strict()
 export const setActiveSchema = z.object({ active: z.boolean() }).strict()
+/** Year level and/or section for many students at once (QA v5, A5); the section is checked as a single letter by the route. */
+export const enrollStudentsSchema = z.object({ ids: z.array(z.string().trim().min(1).max(64)).min(1).max(200), year: z.number().int().min(1).max(4).optional(), section: z.string().trim().max(50).optional() }).strict().refine((body) => body.year !== undefined || body.section, 'Choose a year level or a section.')
 export const activateSecretarySchema = z.object({ name: fullName.optional(), email: accountEmail.optional() }).strict()
 /** The real Dean's name and email; both are required, so the account stops being a sample one. */
 export const setupDeanSchema = z.object({ name: fullName, email: accountEmail }).strict()
@@ -88,7 +91,7 @@ export const programParamsSchema = z.object({ program: z.enum(programs) }).stric
 export const setChairSchema = z.object({ facultyId: z.string().trim().min(1).max(64) }).strict()
 export const accountsQuerySchema = z.object({ role: roleSchema.optional(), q: z.string().max(200).optional() }).strict()
 export const facultyQuerySchema = z.object({ q: z.string().max(200).optional(), program: z.enum(programs).optional() }).strict()
-const accountSummarySchema = z.object({ id: z.string(), name: z.string(), email: z.string(), roles: z.array(roleSchema), program: z.string().optional(), section: z.string().optional(), campus: z.string().optional(), year: z.number().optional(), studentId: z.string().optional(), adviserId: z.string().optional(), active: z.boolean(), mustChangeCredentials: z.boolean().optional() })
+const accountSummarySchema = z.object({ id: z.string(), name: z.string(), email: z.string(), roles: z.array(roleSchema), program: z.string().optional(), section: z.string().optional(), campus: z.string().optional(), year: z.number().optional(), irregular: z.boolean().optional(), studentId: z.string().optional(), adviserId: z.string().optional(), active: z.boolean(), mustChangeCredentials: z.boolean().optional() })
 export const accountTypesResponseSchema = z.object({
   types: z.array(z.object({ type: z.enum(['secretary', 'faculty', 'advisor', 'chair', 'student']), label: z.string(), active: z.number(), inactive: z.number(), canManage: z.boolean() })),
   secretary: accountSummarySchema.optional(),
@@ -186,7 +189,7 @@ export const reactionKinds = ['like', 'love', 'laugh', 'wow', 'sad', 'support'] 
 export type ReactionKind = typeof reactionKinds[number]
 export const actionPayloads = {
   // A faculty member reports a student (decided 12 November 2026). Same categories as a concern.
-  reportStudent: z.object({ studentId: z.string().min(1), narrative: z.string().trim().min(1).max(4000), category: z.string().trim().min(1).max(80), subcategory: z.string().trim().min(1).max(80).optional(), categoryDetail: z.string().trim().max(120).optional(), severity: z.enum(['low', 'medium', 'high']), location: z.string().trim().max(200).optional(), occurredOn: date.optional() }).strict(),
+  reportStudent: z.object({ studentId: z.string().min(1), narrative: z.string().trim().min(1).max(4000), category: z.string().trim().min(1).max(80), subcategory: z.string().trim().min(1).max(80).optional(), categoryDetail: z.string().trim().max(120).optional(), severity: z.enum(['low', 'medium', 'high']), location: z.string().trim().max(200).optional(), occurredOn: date.optional(), ongoing: z.boolean().optional() }).strict(),
   addMaterial: z.object({ spaceId: z.string().min(1), title: z.string().trim().min(1, 'Enter a title.').max(160, 'Use at most 160 characters.'), url: materialUrl, note: z.string().trim().max(1000, 'Use at most 1000 characters.').optional() }).strict(),
   // A link may change its address; a file keeps its file and changes only its title and note.
   updateMaterial: z.object({ title: z.string().trim().min(1, 'Enter a title.').max(160, 'Use at most 160 characters.'), url: materialUrl.optional(), note: z.string().trim().max(1000, 'Use at most 1000 characters.').optional() }).strict(),
@@ -203,7 +206,7 @@ export const actionPayloads = {
   reactComment: z.object({ commentId: z.string().min(1), reaction: z.enum(reactionKinds).default('like') }).strict(),
   flag: z.object({ reason, itemType: z.enum(['post', 'comment', 'message']).default('post'), itemId: z.string().optional() }).strict(),
   // The agreement and the three choices have no defaults: a concern is never sent on a guess about what the student allowed.
-  createReport: z.object({ narrative: text, category: text.max(80), subcategory: z.string().trim().min(1).max(80).optional(), categoryDetail: z.string().trim().max(120).optional(), severity: z.enum(['low', 'medium', 'high']), identity: z.enum(['named', 'anonymous']), involvedUserIds: z.array(z.string()).default([]), conflictedAdviser: z.boolean().default(false), sourcePostId: z.string().optional(), location: z.string().max(200).optional(), occurredOn: date.optional(), consent: z.object({ readStatement: z.literal(true, { error: agree }) }, { error: agree }).strict(), // The Program Chair and the Dean have access without the student's permission (baseline of 10 November 2026). The two
+  createReport: z.object({ narrative: text, category: text.max(80), subcategory: z.string().trim().min(1).max(80).optional(), categoryDetail: z.string().trim().max(120).optional(), severity: z.enum(['low', 'medium', 'high']), identity: z.enum(['named', 'anonymous']), involvedUserIds: z.array(z.string()).default([]), conflictedAdviser: z.boolean().default(false), sourcePostId: z.string().optional(), location: z.string().max(200).optional(), occurredOn: date.optional(), ongoing: z.boolean().optional(), consent: z.object({ readStatement: z.literal(true, { error: agree }) }, { error: agree }).strict(), // The Program Chair and the Dean have access without the student's permission (baseline of 10 November 2026). The two
   // answers are still accepted from clients that send them, and ignored.
   allowChair: z.boolean().optional(), allowDean: z.boolean().optional(), aboutAdvisor: z.boolean({ error: yesOrNo }) }).strict(),
   saveDraft: z.object({ narrative: z.string().max(4000), category: z.string().max(80).optional(), subcategory: z.string().max(80).optional(), categoryDetail: z.string().max(120).optional(), severity: z.enum(['low', 'medium', 'high']).optional(), identity: z.enum(['named', 'anonymous']).optional() }).strict(),
@@ -281,7 +284,7 @@ export const actionPayloads = {
   addOrganizationMember: z.object({ studentId: z.string().min(1), position: z.string().trim().max(60, 'Use at most 60 characters.').optional() }).strict(),
   removeOrganizationMember: z.object({ studentId: z.string().min(1) }).strict(),
   setMemberPosition: z.object({ memberId: z.string().min(1), position: z.string().trim().max(60, 'Use at most 60 characters.') }).strict(),
-  updateRoles: z.object({ roles: z.array(roleSchema).min(1), program: z.enum(programs).optional(), year: z.number().int().min(1).max(4).optional(), section: z.string().max(50).optional(), active: z.boolean().optional() }).strict(),
+  updateRoles: z.object({ roles: z.array(roleSchema).min(1), program: z.enum(programs).optional(), year: z.number().int().min(1).max(4).optional(), section: z.string().max(50).optional(), active: z.boolean().optional(), irregular: z.boolean().optional() }).strict(),
   updatePermission: z.object({ role: roleSchema, permission: z.string().min(1), allowed: z.boolean() }).strict(),
   decidePermission: z.object({ key: z.string().min(3).max(120), decision: z.enum(['approve', 'reject']) }).strict(),
   moderate: z.object({ decision: z.enum(['keep', 'remove', 'warn', 'refer', 'dismiss', 'osas']), notifyAuthor: z.boolean().default(true) }).strict(),

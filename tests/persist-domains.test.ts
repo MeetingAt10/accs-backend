@@ -213,10 +213,10 @@ describe('accounts across a restart', () => {
     const { instance } = stack()
     const { agent: admin } = await signIn(instance(), 'ACCS-ADMIN')
     // A faculty member takes on a second duty (at most two roles; an organization account keeps one, decided 19 November 2026).
-    const granted = await admin.post('/api/pages/P47/actions').send({ action: 'updateRoles', recordId: 'QCU-PROF-OTHER', reason: 'New duties', payload: { roles: ['professor', 'guidance'] } })
+    const granted = await admin.post('/api/pages/P47/actions').send({ action: 'updateRoles', recordId: 'QCU-PROF-OTHER', reason: 'New duties', payload: { roles: ['professor', 'dean'] } })
     expect(granted.status, JSON.stringify(granted.body)).toBe(200)
     const { agent: restarted } = await signIn(instance(), 'QCU-PROF-OTHER')
-    expect((await restarted.get('/api/session')).body.user.roles).toEqual(['professor', 'guidance'])
+    expect((await restarted.get('/api/session')).body.user.roles).toEqual(['professor', 'dean'])
   })
 })
 

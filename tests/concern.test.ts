@@ -75,6 +75,18 @@ describe('the concern flow', () => {
       for (const secret of [statement.narrative, consentWording.report, consentWording.report.slice(0, 40)]) expect(trail).not.toContain(secret)
     })
 
+    it('searches the case queue by the name the viewer may see, category and severity, never a hidden real name', async () => {
+      const student = await login('QCU-STU-CS')
+      const named = (await file(student, { identity: 'named', category: 'General concern', severity: 'low' })).body.record.id as string
+      const anon = (await file(student, { identity: 'anonymous', category: 'General concern', severity: 'low' })).body.record.id as string
+      const adviser = await login('QCU-PROF-CS')
+      const search = async (q: string) => (await adviser.get('/api/pages/P21').query({ q })).body.data.cases.map((c: { id: string }) => c.id) as string[]
+      expect(await search('demo student hotel')).toEqual([named])
+      expect(await search('General concern')).toEqual(expect.arrayContaining([named, anon]))
+      expect(await search('low')).toEqual(expect.arrayContaining([named, anon]))
+      expect(await search('Hotel')).not.toContain(anon)
+    })
+
     it('hides who agreed and who wrote from the people who read the audit trail', async () => {
       const student = await login('QCU-STU-CS')
       const id = (await file(student, { identity: 'anonymous' })).body.record.id as string
@@ -559,6 +571,17 @@ describe('the concern flow', () => {
     keep(await escalate(adviser, id))
     expect(texts.filter(Boolean).length).toBeGreaterThan(14)
     for (const text of texts) expect(text).not.toMatch(/\bD-\d\d\b|\bDOC\d{3}\b|\bTBD\b|\b[A-Z]{2,4}-\d{2}\b|\bP\d{2}\b/)
+  })
+
+  it('lists a chair-and-professor\'s advisee reports next to their program reports (QA v5 F13)', async () => {
+    await repo.transact((unit) => { unit.read().users.find((u) => u.id === 'QCU-STU-CS')!.adviserId = 'QCU-CHAIR-IT' })
+    const filed = await file(await login('QCU-STU-CS'))
+    expect(filed.status).toBe(200)
+    const id = filed.body.record.id as string
+    expect(stored(id).stage).toBe('adviser')
+    const row = ((await (await login('QCU-CHAIR-IT')).get('/api/pages/P21')).body.data.cases as Body[]).find((entry) => entry.id === id)!
+    expect(row).toMatchObject({ stage: 'adviser' })
+    expect([row.readOnly, row.statusOnly, row.historyOnly]).not.toContain(true)
   })
 })
 

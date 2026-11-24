@@ -38,8 +38,8 @@ describe('which roles one account may hold', () => {
   it('gives faculty at most two roles, like Dean and professor', async () => {
     const admin = await login('ACCS-ADMIN')
     expect((await setRoles(admin, 'QCU-PROF-IT', { roles: ['professor', 'chair', 'dean'], program: 'BSIT' })).status).toBe(400)
-    expect((await setRoles(admin, 'QCU-PROF-IT', { roles: ['professor', 'chair'], program: 'BSIT' })).status).toBe(200)
-    expect(rolesOf('QCU-PROF-IT')).toEqual(['professor', 'chair'])
+    expect((await setRoles(admin, 'QCU-PROF-IT', { roles: ['professor', 'dean'] })).status).toBe(200)
+    expect(rolesOf('QCU-PROF-IT')).toEqual(['professor', 'dean'])
   })
 
   it('gives a section to students only, and only as letters (QA: section 200 was accepted)', async () => {
@@ -56,7 +56,9 @@ describe('which roles one account may hold', () => {
     expect(rolesProblem(['organization', 'professor'])).toBe('An organization account can only be paired with the student role.')
     expect(rolesProblem(['student', 'organization', 'professor'])).toMatch(/at most two roles/)
     expect(rolesProblem(['dean', 'professor'])).toBeUndefined()
-    expect(rolesProblem(['student'], 'AB')).toBeUndefined()
+    // One letter (QA v5, A4): AB was accepted before.
+    expect(rolesProblem(['student'], 'A')).toBeUndefined()
+    expect(rolesProblem(['student'], 'AB')).toBe('Use the section letter, like A.')
   })
 })
 
@@ -194,6 +196,11 @@ describe('audit lists (QA 17 November: the oldest entry came first)', () => {
     expect(trail[0]!.action).toBe('Restriction applied')
     expect(trail.map((e) => e.at)).toEqual([...trail.map((e) => e.at)].sort().reverse())
   })
+
+  it('refuses a start date after the end date', async () => {
+    const wrong = await (await login('ACCS-ADMIN')).get('/api/pages/P51').query({ from: '2026-12-01', to: '2026-11-01' })
+    expect(wrong.status).toBe(400)
+  })
 })
 
 describe('monitoring trend (QA 17 November: only today was shown)', () => {
@@ -254,7 +261,16 @@ describe('saving a profile (QA 17 November: an all-blank profile was saved)', ()
     const prof = await login('QCU-PROF-IT')
     const save = (payload: object) => prof.post('/api/pages/P39/actions').send({ action: 'saveProfile', payload: { title: '', bio: '', education: '', officeHours: '', ...payload } })
     expect((await save({ title: '   ' })).status).toBe(400)
-    expect((await save({ bio: 'Teaches data structures.' })).status).toBe(200)
+    expect((await save({ bio: 'Teaches data structures.', title: 'Faculty', officeHours: 'Fridays' })).status).toBe(200)
+  })
+
+  it('refuses blanking About or Office hours once set (QA v5, E6)', async () => {
+    const prof = await login('QCU-PROF-IT')
+    const save = (payload: object) => prof.post('/api/pages/P39/actions').send({ action: 'saveProfile', payload: { title: 'Faculty', bio: 'Bio.', education: '', officeHours: 'Fridays', ...payload } })
+    expect((await save({})).status).toBe(200)
+    expect((await save({ officeHours: '   ' })).status).toBe(400)
+    expect((await save({ bio: '' })).status).toBe(400)
+    expect((await save({ officeHours: '' })).status).toBe(400)
   })
 })
 
