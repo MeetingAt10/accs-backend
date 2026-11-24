@@ -86,7 +86,7 @@ describe('program average release (D-08: 100% of assigned evaluations)', () => {
     const professor = await login('QCU-PROF-IT')
     const db = memory.read()
     const faculty = new Set(db.users.filter((u) => u.program === 'BSIT' && u.roles.some((r) => ['professor', 'chair', 'dean'].includes(r))).map((u) => u.id))
-    const population = db.assignments.filter((a) => faculty.has(a.facultyId) && a.cycleId === 'CYCLE-2026-1')
+    const population = db.assignments.filter((a) => faculty.has(a.facultyId) && a.cycleId === 'CYCLE-2026-1' && (a.relation === 'Student to faculty' || a.submittedAt))
     const average = await programAverage(professor)
     expect(average).toEqual({ program: 'BSIT', released: false, submitted: population.filter((a) => a.submittedAt).length, assigned: population.length, criteria: [] })
     expect(average.submitted).toBeLessThan(average.assigned)

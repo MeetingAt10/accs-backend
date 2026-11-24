@@ -5,10 +5,10 @@ import { campusCodes, campusYearProblem, mainCampus } from './sections.js'
 import { passwordProblem } from './auth.js'
 
 // The CCS Staff role was removed on 11 November 2026 (#45) and came back limited to the feed, the directory and the own profile.
-export const roles = ['student', 'organization', 'professor', 'staff', 'chair', 'dean', 'administrator', 'guidance', 'osas', 'secretary'] as const
+export const roles = ['student', 'organization', 'professor', 'staff', 'chair', 'dean', 'administrator', 'guidance', 'osas', 'president', 'secretary'] as const
 export const roleSchema = z.enum(roles)
 export type Role = z.infer<typeof roleSchema>
-export const roleLabels: Record<Role, string> = { student: 'Student', organization: 'CCS Student Organization', professor: 'Professor', staff: 'CCS Staff', chair: 'Program Chair', dean: 'Dean', administrator: 'System Administrator', guidance: 'Guidance', osas: 'OSAS', secretary: 'CCS Secretary' }
+export const roleLabels: Record<Role, string> = { student: 'Student', organization: 'CCS Student Organization', professor: 'Professor', staff: 'CCS Staff', chair: 'Program Chair', dean: 'Dean', administrator: 'System Administrator', guidance: 'Guidance', osas: 'OSAS', president: "President’s Office", secretary: 'CCS Secretary' }
 export const programs = ['BSIT', 'BSCS', 'BSIS'] as const
 /** The ways a student can choose to talk about a concern. */
 export const talkModes = ['chat', 'video', 'voice', 'face_to_face'] as const
@@ -227,7 +227,7 @@ export const actionPayloads = {
     place: z.string().trim().min(1).max(200).optional(),
   }).strict().refine(details => details.scheduledAt || details.meetingLink || details.place, { message: 'Add a time, a meeting link, or a place.' }),
   discloseIdentity: z.object({ office: z.string().min(1).optional() }).strict(),
-  caseAction: z.object({ type: z.enum(['respond', 'recordAction', 'escalate', 'transfer', 'resolve', 'close', 'convert', 'milestone']), update: text, nextStage: z.enum(['adviser', 'chair', 'dean', 'guidance', 'osas']).optional() }).strict(),
+  caseAction: z.object({ type: z.enum(['respond', 'recordAction', 'escalate', 'transfer', 'resolve', 'close', 'convert', 'milestone', 'return']), update: text, nextStage: z.enum(['adviser', 'chair', 'dean', 'guidance', 'osas', 'executive']).optional() }).strict(),
   addNote: z.object({ body: text }).strict(),
   reviewCluster: z.object({ decision: z.enum(['confirmed', 'dismissed']) }).strict(),
   // An appointment (called a consultation in the API). The current screen sends a free `purpose`; the new one sends
@@ -260,7 +260,7 @@ export const actionPayloads = {
   assistantAsk: z.object({ question: text.max(2000), draft: z.string().trim().max(4000).optional() }).strict(),
   submitEvaluation: z.object({ answers: z.record(z.string(), z.union([z.number().int().min(1).max(5), z.string().max(1000)])), comment: z.string().max(1000).default('') }).strict(),
   createCycle: z.object({ title: text.max(160), term: text.max(100), opens: date, closes: date }).strict(),
-  saveCycle: z.object({ title: text.max(160), instructions: text, opens: date, closes: date, questions: z.array(questionSchema).min(1), forms: z.array(z.literal('student', { error: 'Evaluation cycles use the student form only.' })).min(1).optional() }).strict(),
+  saveCycle: z.object({ title: text.max(160), instructions: text, opens: date, closes: date, questions: z.array(questionSchema).min(1), forms: z.array(z.enum(['student', 'peer', 'upward-chair', 'upward-dean'])).min(1).optional() }).strict(),
   cycleAction: z.object({ status: z.enum(['In review', 'Published', 'Closed']), publishResults: z.boolean().default(false) }).strict(),
   reviewQuestions: z.object({ decision: z.enum(['reviewed', 'changes']), note: z.string().max(2000).default('') }).strict(),
   saveFollowUp: z.object({ note: text }).strict(),
