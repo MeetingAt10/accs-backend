@@ -23,6 +23,11 @@ const schema = z.object({
   APP_URL: z.url().optional(),
   // Private S3 bucket for class material files (#44). Without it, materials can only be links.
   MATERIALS_BUCKET: z.string().min(1).optional(),
+  // The assistant's model layer (src/assistant-ai.ts). Without a key, the rule-based assistant answers alone.
+  // A secret: set it on the Lambda or in a local .env, never in the repository.
+  OPENAI_API_KEY: z.string().optional().transform((key) => key || undefined),
+  OPENAI_MODEL: z.string().min(1).default('gpt-5.4-mini'),
+  OPENAI_TIMEOUT_MS: z.coerce.number().int().positive().default(20000),
   // Comma-separated list: every ACCS site (portal, forums, ...) calls the same API with credentials.
   CORS_ORIGIN: z
     .string()

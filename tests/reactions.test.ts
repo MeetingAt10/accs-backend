@@ -4,13 +4,12 @@ import request from 'supertest'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { createApp } from '../src/app.js'
-import { createMemoryAuthStore } from '../src/auth.js'
 import { createMemoryRepository } from '../src/store.js'
-import { seedPassword } from './helpers.js'
+import { seedPassword, setUpAuthStore } from './helpers.js'
 
 let repo: ReturnType<typeof createMemoryRepository>
 let app: ReturnType<typeof createApp>
-beforeEach(() => { repo = createMemoryRepository(); app = createApp(repo, { authStore: createMemoryAuthStore() }) })
+beforeEach(() => { repo = createMemoryRepository(); app = createApp(repo, { authStore: setUpAuthStore() }) })
 
 async function login(id: string) {
   const agent = request.agent(app)
@@ -37,6 +36,8 @@ describe('reactions (issue #86)', () => {
     seen = await view(a)
     expect(seen).toMatchObject({ myReaction: null, reactionCount: 1, reacted: false })
     expect((await react(a, 'angry')).status).toBe(400)
+    // The record carries the react permission, so the feed list can show the button per post.
+    expect(seen.canReact).toBe(true)
   })
 
   it('reads a reaction stored before the choice as "like", and an empty payload as "like"', async () => {
@@ -55,6 +56,18 @@ describe('reactions (issue #86)', () => {
     expect((await admin.get('/api/pages/P06?id=POST-0101')).body.data.canReact).toBe(true)
     const reacted = await admin.post('/api/pages/P06/actions').send({ action: 'react', recordId: 'POST-0101', payload: { reaction: 'like' } })
     expect(reacted.status, JSON.stringify(reacted.body)).toBe(200)
+  })
+
+  it.each(['QCU-FAC-PAULA-DELACRUZ', 'QCU-CHAIR-IT', 'QCU-PROF-IT'])('lets %s react to a college post and to a comment (QA v5 F16)', async (id) => {
+    const student = await login('QCU-STU-IT-A')
+    const commented = await student.post('/api/pages/P06/actions').send({ action: 'comment', recordId: 'POST-0101', payload: { body: 'Noted, thank you.' } })
+    const commentId = (commented.body.record.comments as { id: string }[]).at(-1)!.id
+    const agent = await login(id)
+    expect((await agent.get('/api/pages/P06?id=POST-0101')).body.data).toMatchObject({ canReact: true, record: { canReact: true } })
+    const post = await agent.post('/api/pages/P06/actions').send({ action: 'react', recordId: 'POST-0101', payload: { reaction: 'like' } })
+    expect(post.status, JSON.stringify(post.body)).toBe(200)
+    const onComment = await agent.post('/api/pages/P06/actions').send({ action: 'reactComment', recordId: 'POST-0101', payload: { commentId, reaction: 'like' } })
+    expect(onComment.status, JSON.stringify(onComment.body)).toBe(200)
   })
 
   it('reacts to a comment', async () => {

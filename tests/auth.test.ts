@@ -228,6 +228,17 @@ describe('server-side sessions', () => {
     expect(await sessionStatus(app, cookie)).toBe(401)
   })
 
+  it('says a session ended only when an old session cookie is sent, and drops that cookie', async () => {
+    const app = newApp()
+    const first = await request(app).get('/api/session')
+    expect([first.status, first.body.code]).toEqual([401, 'UNAUTHENTICATED'])
+    const cookie = cookieOf(await signIn(app))
+    await request(app).post('/api/auth/sign-out').set('Cookie', cookie).send({})
+    const ended = await request(app).get('/api/session').set('Cookie', cookie)
+    expect([ended.status, ended.body.code]).toEqual([401, 'SESSION_EXPIRED'])
+    expect(String(ended.headers['set-cookie'])).toMatch(/accs_session=;/)
+  })
+
   it('rejects old signed-token cookies and malformed values', async () => {
     const app = newApp()
     const legacy = `${Buffer.from(JSON.stringify({ id: 'ACCS-ADMIN', roles: ['administrator'] })).toString('base64url')}.c2lnbmF0dXJl`

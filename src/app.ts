@@ -67,7 +67,7 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   // An old account ID (QCU-DEAN) signs in as the renamed account (CCS-DEAN).
   const findUser=(ident:string)=>{const key=currentAccountId(ident.trim().toUpperCase()).toLowerCase();return repository.view(unit=>unit.read().users.find(u=>u.active&&(u.email.toLowerCase()===key||u.id.toLowerCase()===key||u.studentId?.toLowerCase()===key||u.username?.toLowerCase()===key)),[])}
   // A role change made on the administrator's pages is saved to the auth store too, so it holds on every instance.
-  const saveAccount=async(change:AccountChange)=>saveAccountChange(authStore,await repository.view(unit=>unit.read().users,[]),change)
+  const saveAccount=async(change:AccountChange)=>saveAccountChange(authStore,await repository.view(unit=>unit.read().users,[]),await repository.view(unit=>unit.read().spaces,[]),change)
   const saveProfile=async(id:string,change:ProfileChange)=>saveProfileChange(authStore,await repository.view(unit=>unit.read().users,[]),id,change)
   // Only the seeded demo accounts fall back to the shared seed password, until they set their own. Every other account has a stored credential.
   const credentialFor=(user:User,data:AuthData)=>data.credentials[user.id]??formerAccountIds(user.id).map(id=>data.credentials[id]).find(Boolean)??(demoUserIds.has(user.id)?defaultHash():undefined)
@@ -143,7 +143,7 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     await throttle.clear(key);send(res,actionResponseSchema,{ok:true,message:'Password updated. Sign in with your new password.'})
   })
   app.post('/api/auth/sign-out',async(req,res)=>{emptyBodySchema.parse(req.body??{});const token=cookieValue(req);if(isWellFormedToken(token))await sessions.revoke(sessionIdOf(token));res.clearCookie('accs_session',cookieOptions);send(res,actionResponseSchema,{ok:true,message:'Signed out.'})})
-  app.use('/api',async(req,res,next)=>{const user=await sessionUser(req,res);if(!user)return send(res,errorResponseSchema,{error:'Sign in to continue.',code:'UNAUTHENTICATED'},401);res.locals.user=user
+  app.use('/api',async(req,res,next)=>{const user=await sessionUser(req,res);if(!user){/* A session cookie that no longer opens a session has ended: say so once and drop the cookie. No cookie at all is a first visit. */if(isWellFormedToken(cookieValue(req))){res.clearCookie('accs_session',cookieOptions);return send(res,errorResponseSchema,{error:'Your session ended. Sign in again.',code:'SESSION_EXPIRED'},401)}return send(res,errorResponseSchema,{error:'Sign in to continue.',code:'UNAUTHENTICATED'},401)}res.locals.user=user
     // Temporary credentials open only the call that replaces them, reading the session, and signing out (registered above).
     // Where the account switcher exists, its two calls stay open too, so a tester can leave an account that is still on temporary details.
     const setting=req.method==='GET'&&req.path==='/session'||req.method==='POST'&&req.path==='/auth/complete-first-login'||devToolbox&&isDevToolboxCall(req.method,req.path)
@@ -154,16 +154,18 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     if(!user.mustChangeCredentials)throw new ApiError(409,'Your sign-in details are already set.','CONFLICT')
     await claim(key)
     const stored=credentialFor(user,await authStore.load())
-    if(!stored||!verifyPassword(currentPassword,stored))throw new ApiError(400,'Your current password is incorrect.','INVALID_CREDENTIALS')
+    // The session already proves the temporary password, so the first-login page sends only the new password. A current
+    // password, when sent, must still be right; a username, when sent, replaces the temporary one.
+    if(!stored||currentPassword!==undefined&&!verifyPassword(currentPassword,stored))throw new ApiError(400,'Your current password is incorrect.','INVALID_CREDENTIALS')
     // The temporary password was right, so the checks below are not guesses and must not use up attempts.
     await throttle.clear(key)
-    if(password===currentPassword)throw new ApiError(400,'Choose a password that is different from the temporary one.','VALIDATION_ERROR')
-    if(username===user.username?.toLowerCase())throw new ApiError(400,'Choose a username that is different from the temporary one.','VALIDATION_ERROR')
+    if(verifyPassword(password,stored))throw new ApiError(400,'Choose a password that is different from the temporary one.','VALIDATION_ERROR')
+    if(username!==undefined&&username===user.username?.toLowerCase())throw new ApiError(400,'Choose a username that is different from the temporary one.','VALIDATION_ERROR')
     await setOwnCredentials(authStore,await repository.view(unit=>unit.read().users,[]),user,username,hashPassword(password))
     // Keep this session; the temporary credentials may be on other devices.
     await sessions.revokeUser(user.id,res.locals.sessionId as string)
     await recordAudit(repository,user,[{action:'Sign-in details set',reference:user.id}])
-    await sessionOut(res,{...user,username,mustChangeCredentials:false})
+    await sessionOut(res,{...user,username:username??user.username,mustChangeCredentials:false})
   })
   app.post('/api/auth/change-password',async(req,res)=>{
     const user=res.locals.user as User;const {currentPassword,password}=changePasswordSchema.parse(req.body);const key=`change:${user.id}`
@@ -214,7 +216,7 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
     // Only the decided key is written over what is stored, so a concurrent decision on another instance (another key) is
     // kept, and a store write retried after a conflict runs on the newer copy. Approved keys this instance's records hold
     // but the store lacks (an earlier write that failed after its decision was saved) are filled in too (code review, 23 November 2026).
-    if(body.action==='decidePermission'){const key=(result.record as {key:string}).key;const fresh=approvedOverrides({permissionOverrides:await repository.view(unit=>unit.read().permissionOverrides,['permissionOverrides'])});let grants:Record<string,boolean>={}
+    const appliedKey=(result.record as {key?:string}|undefined)?.key;if((body.action==='decidePermission'||body.action==='updatePermission')&&appliedKey){const key=appliedKey;const fresh=approvedOverrides({permissionOverrides:await repository.view(unit=>unit.read().permissionOverrides,['permissionOverrides'])});let grants:Record<string,boolean>={}
       await authStore.update(data=>{const stored=data.permissionGrants??{};grants={...Object.fromEntries(Object.entries(fresh).filter(([k])=>!(k in stored))),...stored,...(key in fresh?{[key]:fresh[key]!}:{})};data.permissionGrants=grants});setApprovedOverrides(grants)}
     send(res,actionResponseSchema,result)})
   // Invites go out by email when MAIL_FROM is set (#36); otherwise the screen shows them once.

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createApp } from '../src/app.js'
 import { createMemoryAuthStore } from '../src/auth.js'
-import { createNewConcernMailer, createSesNewConcernMailer, newConcernText, type MailChannel, type NewConcernEmail, type NewConcernMailer } from '../src/mail.js'
+import { createNewConcernMailer, createSesNewConcernMailer, newConcernHtml, newConcernText, type MailChannel, type NewConcernEmail, type NewConcernMailer } from '../src/mail.js'
 import { createMemoryRepository } from '../src/store.js'
 import { concernChoices, seedPassword } from './helpers.js'
 
@@ -48,10 +48,15 @@ describe('the new-concern email', () => {
   it('carries no details of the concern', async () => {
     const filed = await file()
     const text = newConcernText(sent[0]!)
+    const html = newConcernHtml(sent[0]!)
     const reporter = repo.read().users.find((u) => u.id === 'QCU-STU-IT-A')!
-    for (const detail of [statement.narrative, statement.category, statement.subcategory, reporter.name, reporter.studentId!, filed.body.record.alias, 'high']) expect(text, detail).not.toContain(detail)
+    for (const detail of [statement.narrative, statement.category, statement.subcategory, reporter.name, reporter.studentId!, filed.body.record.alias, 'high']) {
+      expect(text, detail).not.toContain(detail)
+      expect(html, detail).not.toContain(detail)
+    }
     expect(text).toContain('A new concern has been sent to you in ACCS.')
     expect(text).toContain(sent[0]!.link)
+    expect(html).toContain(sent[0]!.link)
   })
 
   it('goes to the Program Chair, not the adviser, for a concern about the adviser', async () => {
@@ -118,7 +123,7 @@ describe('the new-concern email', () => {
 })
 
 describe('the mail channels', () => {
-  it('sends plain text through SES from MAIL_FROM', async () => {
+  it('sends HTML and plain text through SES from MAIL_FROM', async () => {
     const commands: unknown[] = []
     const mailer = createSesNewConcernMailer('accs@example.edu', { send: async (command: unknown) => { commands.push(command); return {} } } as never)
     const message = { userId: 'CCS-PROF-REAL', to: 'real.adviser@example.edu', name: 'Real Adviser', link: 'https://accs.example.edu/cases/RPT-0300' }
@@ -126,7 +131,15 @@ describe('the mail channels', () => {
     expect((commands[0] as { input: unknown }).input).toEqual({
       FromEmailAddress: 'accs@example.edu',
       Destination: { ToAddresses: ['real.adviser@example.edu'] },
-      Content: { Simple: { Subject: { Data: 'New concern in ACCS', Charset: 'UTF-8' }, Body: { Text: { Data: newConcernText(message), Charset: 'UTF-8' } } } },
+      Content: {
+        Simple: {
+          Subject: { Data: 'New concern in ACCS', Charset: 'UTF-8' },
+          Body: {
+            Text: { Data: newConcernText(message), Charset: 'UTF-8' },
+            Html: { Data: newConcernHtml(message), Charset: 'UTF-8' },
+          },
+        },
+      },
     })
   })
 

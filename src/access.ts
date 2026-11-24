@@ -3,22 +3,22 @@ import type { Database, Report, Space, Thread } from './store.js'
 import { consentWording } from './consent.js'
 
 export const permissionRoles: Record<string, Role[]> = {
-  'feed.read': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'],
+  'feed.read': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','president','secretary'],
   // The Secretary posts too, announcements included: she is in charge of the college's announcements (decided 16 November 2026).
   'post.create': ['student','organization','professor','chair','dean','guidance','osas','secretary'], 'post.anonymous': ['student'], 'announcement.publish': ['organization','professor','chair','dean','secretary'],
   // The Organization representative (decided 16 November 2026) and the CCS Secretary (decided 20 November 2026) message
   // anyone; to-dos are for every role that has a calendar.
   'message.send': ['student','organization','professor','chair','dean','guidance','osas','secretary'], 'roster.view': ['student','organization','professor','chair','dean'], 'calendar.view': ['student','organization','professor','chair','dean','guidance','osas','secretary'], 'todo.manage': ['student','organization','professor','chair','dean','guidance','osas','secretary'], 'consultation.request': ['student'], 'consultation.decide': ['professor'],
-  'report.create': ['student'], 'report.viewOwn': ['student'], 'case.view': ['professor','chair','dean','guidance','osas'], 'case.act': ['professor','chair','dean','guidance','osas'], 'case.convert': ['guidance'], 'cluster.review': ['chair'], 'analytics.view': ['chair','dean'],
-  'evaluation.fill': ['student','professor'], 'evaluation.review': ['professor'], 'evaluation.configure': ['dean'], 'evaluation.results': ['professor','chair','dean'], 'offense.view': ['chair','dean','guidance','osas'], 'goodmoral.review': ['guidance','osas'], 'restriction.manage': ['administrator','guidance','osas'], 'strike.recommend': ['dean'], 'student.report': ['professor','chair'], 'clearance.view': ['secretary','chair','dean','osas'], 'load.manage': ['secretary'], 'strike.record': ['osas'], 'standing.viewOwn': ['student'], 'moderation.review': ['administrator'], 'moderation.referral': ['secretary'], 'moderation.osas': ['osas'], 'role.manage': ['administrator','secretary'], 'audit.view': ['administrator'],
-  'directory.view': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'], 'self.manage': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','secretary'], 'assistant.use': ['student','organization','professor','chair','dean','administrator','guidance','osas','secretary'],
+  'report.create': ['student'], 'report.viewOwn': ['student'], 'case.view': ['professor','chair','dean','guidance','osas','president'], 'case.act': ['professor','chair','dean','guidance','osas','president'], 'case.convert': ['guidance'], 'cluster.review': ['chair'], 'analytics.view': ['chair','dean'],
+  'evaluation.fill': ['student','professor'], 'evaluation.review': ['professor'], 'evaluation.configure': ['dean'], 'evaluation.results': ['professor','chair','dean'], 'offense.view': ['chair','dean','guidance','osas'], 'goodmoral.review': ['guidance','osas'], 'restriction.manage': ['administrator','guidance','osas'], 'strike.recommend': ['dean'], 'student.report': ['professor','chair','dean'], 'clearance.view': ['secretary','chair','dean','osas'], 'load.manage': ['secretary'], 'strike.record': ['osas'], 'standing.viewOwn': ['student'], 'moderation.review': ['administrator'], 'moderation.referral': ['secretary'], 'moderation.osas': ['osas'], 'role.manage': ['administrator','secretary'], 'audit.view': ['administrator'],
+  'directory.view': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','president','secretary'], 'self.manage': ['student','organization','professor','staff','chair','dean','administrator','guidance','osas','president','secretary'], 'assistant.use': ['student','organization','professor','chair','dean','administrator','guidance','osas','president','secretary'],
   // Account provisioning has no page; it is the /api/accounts routes. The Dean activates the secretary, who creates every other account.
   'account.activateSecretary': ['dean'], 'account.setupDean': ['administrator'], 'account.provision': ['secretary'],
   // The Secretary and the Dean create organizations and their accounts (decided 19 November 2026).
   'organization.create': ['secretary','dean'],
   // Decided 20 November 2026: the Secretary and the System Administrator both change roles, and the Secretary approves
-  // permission change requests. Nobody approves their own request, so the administrator approves the Secretary's.
-  'permission.review': ['secretary','administrator'],
+  // permission change requests. Only the Secretary decides them; her own changes apply directly (QA v5 D2).
+  'permission.review': ['secretary'],
 }
 
 /**
@@ -100,7 +100,7 @@ export function canReach(db: Database, user: User, target: User) {
   if (hasRole(user,'chair') && targetFaculty && user.program === target.program) return true
   if (hasRole(user,'dean') && targetFaculty) return true
   if (hasRole(user,'guidance','osas') && targetFaculty) {
-    const relevantPrograms = db.reports.filter(r => hasRole(user,'guidance') ? ['guidance','osas'].includes(r.stage) : r.stage === 'osas').map(r=>r.program)
+    const relevantPrograms = db.reports.filter(r => hasRole(user,'guidance') ? ['guidance','osas','executive'].includes(r.stage) : ['osas','executive'].includes(r.stage)).map(r=>r.program)
     return !!target.program && relevantPrograms.includes(target.program)
   }
   return false
@@ -110,8 +110,8 @@ export function canThread(db: Database, user: User, thread: Thread) {
   if (thread.spaceId) { const space = db.spaces.find(s=>s.id===thread.spaceId); return !!space && (hasRole(user,'student') && space.studentIds.includes(user.id) || hasRole(user,'professor') && space.professorIds.includes(user.id)) }
   // A group conversation someone started (decided 16 November 2026: anyone may) is open to its members.
   if (thread.group) return true
-  const other = db.users.find(u => thread.memberIds.includes(u.id) && u.id !== user.id)
-  return !!other && canReach(db,user,other)
+  // A member can always open a direct conversation, even when only the other side may start one (Guidance writes to a professor).
+  return true
 }
 // A concern about the adviser never reaches the adviser, whatever stage it is at.
 export function isConflicted(user: User, report: Report) { return report.involvedUserIds.includes(user.id) || (report.bypassed || report.aboutAdvisor) && report.adviserId === user.id }
@@ -128,13 +128,13 @@ export function overseesCase(user: User, report: Report) { return report.ownerId
 export function canReadCase(user: User, report: Report) { return overseesCase(user,report) && report.confidential !== true }
 export function canActCase(user: User, report: Report) {
   if (isConflicted(user,report) || report.ownerId === user.id) return false
-  return report.stage === 'adviser' && hasRole(user,'professor') && report.adviserId === user.id || report.stage === 'chair' && chairMay(user,report) || report.stage === 'dean' && deanMay(user,report) || report.stage === 'guidance' && hasRole(user,'guidance') || report.stage === 'osas' && hasRole(user,'osas')
+  return report.stage === 'adviser' && hasRole(user,'professor') && report.adviserId === user.id || report.stage === 'chair' && chairMay(user,report) || report.stage === 'dean' && deanMay(user,report) || report.stage === 'guidance' && hasRole(user,'guidance') || report.stage === 'osas' && hasRole(user,'osas') || report.stage === 'executive' && hasRole(user,'president')
 }
 /** For counts that span every stage (analytics): the reports this person's office may see, whichever stage they are at. */
 export function canCountCase(user: User, report: Report) { return overseesCase(user,report) }
 /** Who handles a stage: the adviser of the report, the Program Chair of its program, the Dean, Guidance, OSAS. */
 function handlesStage(user: User, report: Report, stage: Report['stage']) {
-  return stage === 'adviser' ? hasRole(user,'professor') && report.adviserId === user.id : stage === 'chair' ? chairMay(user,report) : stage === 'dean' ? deanMay(user,report) : hasRole(user,stage)
+  return stage === 'adviser' ? hasRole(user,'professor') && report.adviserId === user.id : stage === 'chair' ? chairMay(user,report) : stage === 'dean' ? deanMay(user,report) : stage === 'executive' ? hasRole(user,'president') : hasRole(user,stage)
 }
 /** An office the case has moved past: it handled a stage in the history that is not the current one. It keeps the status updates (#30). */
 export function isEarlierHandler(user: User, report: Report) {
@@ -142,6 +142,6 @@ export function isEarlierHandler(user: User, report: Report) {
   return report.history.some(entry => entry.stage !== report.stage && handlesStage(user,report,entry.stage))
 }
 export function canViewCase(user: User, report: Report) { return report.ownerId !== user.id && !isConflicted(user,report) && (canActCase(user,report) || overseesCase(user,report) || isEarlierHandler(user,report) || report.history.some(entry => entry.actorId === user.id && entry.actorRole !== 'student' && user.roles.includes(entry.actorRole as Role) && (entry.actorRole !== 'chair' || user.program === report.program))) }
-export function canStudentRecord(db: Database, user: User, student: User) { return hasRole(student,'student') && (hasRole(user,'dean') || hasRole(user,'chair') && user.program === student.program || hasRole(user,'guidance') && db.reports.some(r => (r.ownerId === student.id || r.involvedUserIds.includes(student.id)) && ['guidance','osas'].includes(r.stage)) || hasRole(user,'osas') && db.reports.some(r => (r.ownerId === student.id || r.involvedUserIds.includes(student.id)) && r.stage === 'osas')) }
+export function canStudentRecord(db: Database, user: User, student: User) { return hasRole(student,'student') && (hasRole(user,'dean') || hasRole(user,'chair') && user.program === student.program || hasRole(user,'guidance') && db.reports.some(r => (r.ownerId === student.id || r.involvedUserIds.includes(student.id)) && ['guidance','osas','executive'].includes(r.stage)) || hasRole(user,'osas') && db.reports.some(r => (r.ownerId === student.id || r.involvedUserIds.includes(student.id)) && ['osas','executive'].includes(r.stage))) }
 export function canFacultyResult(user: User, faculty: User) { return hasRole(user,'dean') || hasRole(user,'chair') && user.program === faculty.program || hasRole(user,'professor') && user.id === faculty.id }
 export function scopeLabel(user: User) { return hasRole(user,'administrator') ? 'Platform administration' : hasRole(user,'chair') ? `${user.program} program` : hasRole(user,'dean') ? 'College of Computer Studies' : user.office || [user.program,user.section && `Section ${user.section}`].filter(Boolean).join(' · ') || 'Your permitted workspace' }

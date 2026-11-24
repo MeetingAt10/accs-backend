@@ -71,7 +71,7 @@ describe('creating an organization', () => {
     expect([takenName.status, takenName.body.fields?.[0]?.path]).toEqual([400, 'name'])
     const takenEmail = await create(dean, { ...newOrganization, email: 'stu.it.a@access-ccs.com' })
     expect([takenEmail.status, takenEmail.body.fields?.[0]?.path]).toEqual([400, 'email'])
-    expect(repo.read().organizations).toHaveLength(1)
+    expect(repo.read().organizations).toHaveLength(5)
   })
 
   it('checks the name again inside the write, and removes the new account when the organization is not saved (code review, 23 November 2026)', async () => {

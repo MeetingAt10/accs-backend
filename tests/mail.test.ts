@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createApp } from '../src/app.js'
 import { createMemoryAuthStore, hashPassword } from '../src/auth.js'
-import { consoleResetMailer, createResetMailer, createSesResetMailer, noResetMailer, resetCodeText, type ResetCodeEmail, type ResetCodeMailer } from '../src/mail.js'
+import { consoleResetMailer, createResetMailer, createSesResetMailer, noResetMailer, resetCodeHtml, resetCodeText, type ResetCodeEmail, type ResetCodeMailer } from '../src/mail.js'
 import type { User } from '../src/schemas.js'
 import { createMemoryRepository } from '../src/store.js'
 
@@ -37,20 +37,26 @@ async function appWith(resetMailer: ResetCodeMailer) {
 const forgot = (app: Awaited<ReturnType<typeof appWith>>['app'], emailOrId: string) => request(app).post('/api/auth/forgot-password').send({ emailOrId })
 
 describe('reset code mailers', () => {
-  it('sends a plain-text SES email from MAIL_FROM to the account holder', async () => {
+  it('sends a branded HTML and plain-text SES email from MAIL_FROM with escaped fields', async () => {
     const commands: any[] = []
     const mailer = createSesResetMailer('no-reply@accs.example', { send: async (command: any) => { commands.push(command.input); return {} } } as never)
-    await mailer.send({ userId: 'U1', to: 'mira@example.com', name: 'Mira <b>Solis</b>', code: '123456', expiresInMinutes: 15 })
+    const msg = { userId: 'U1', to: 'mira@example.com', name: 'Mira <b>Solis</b>', code: '123456', expiresInMinutes: 15 }
+    await mailer.send(msg)
     expect(commands).toHaveLength(1)
     const input = commands[0]
     expect(input.FromEmailAddress).toBe('no-reply@accs.example')
     expect(input.Destination).toEqual({ ToAddresses: ['mira@example.com'] })
     expect(input.Content.Simple.Subject.Data).toBe('Your ACCS password reset code')
-    expect(input.Content.Simple.Body.Html).toBeUndefined()
     const text = input.Content.Simple.Body.Text.Data
     expect(text).toContain('123456')
     expect(text).toContain('15 minutes')
-    expect(text).toBe(resetCodeText({ userId: 'U1', to: 'mira@example.com', name: 'Mira <b>Solis</b>', code: '123456', expiresInMinutes: 15 }))
+    expect(text).toBe(resetCodeText(msg))
+    const html = input.Content.Simple.Body.Html.Data
+    expect(html).toBe(resetCodeHtml(msg))
+    expect(html).toContain('Mira &lt;b&gt;Solis&lt;/b&gt;')
+    expect(html).not.toContain('Mira <b>Solis</b>')
+    expect(html).toContain('123456')
+    expect(html).toContain('#2F3BD6')
   })
 
   it('lets an SES failure reach the caller', async () => {

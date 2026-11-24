@@ -110,7 +110,7 @@ describe('email once the Dean has a real address', () => {
     expect(resetEmails.map((m) => [m.userId, m.to])).toEqual([['CCS-DEAN', dean.email]])
     // A Program Chair reporting a student of their own program sends it to the Dean, who is now emailed.
     const { agent: chair } = await signIn(app, 'QCU-CHAIR-IT')
-    const filed = await chair.post('/api/pages/P21/actions').send({ action: 'reportStudent', payload: { studentId: 'QCU-STU-IT-A', narrative: 'Disrupted the exam.', category: 'Bullying', subcategory: 'Intimidation or threats', severity: 'medium' } })
+    const filed = await chair.post('/api/pages/P21/actions').send({ action: 'reportStudent', payload: { studentId: 'QCU-STU-IT-A', narrative: 'Disrupted the exam.', category: 'Bullying', subcategory: 'Intimidation or threats', severity: 'medium', occurredOn: '2026-10-15' } })
     expect(filed.status, JSON.stringify(filed.body)).toBe(200)
     expect(concernEmails.map((m) => [m.userId, m.to])).toEqual([['CCS-DEAN', dean.email]])
   })

@@ -6,8 +6,9 @@ import type { Decision } from './escalation/engine.js'
 import { formerAccountIds } from './renames.js'
 import type { ReactionKind, Role, TalkMode, User } from './schemas.js'
 
-// The President's Office stage was removed on 2026-11-10; a record stored with `executive` is read as `osas` (persist.ts).
-export type Stage = 'adviser' | 'chair' | 'dean' | 'guidance' | 'osas'
+// The President's Office stage (`executive`) was restored on 2026-11-24 to match the paper (Chapter 1, Significance): OSAS
+// forwards executive-level cases to the Office of the University President, which can return them to OSAS.
+export type Stage = 'adviser' | 'chair' | 'dean' | 'guidance' | 'osas' | 'executive'
 /** A file sent with a message. It lives in the files bucket under `key`, which only the server knows. */
 export type Attachment = { id: string; fileName: string; contentType: string; size: number; key: string }
 /** `editedAt` and `deleted`: the author changed or took back the message (decided 19 November 2026). */
@@ -32,7 +33,7 @@ export type Talk = { mode: TalkMode; consents: TalkConsent[]; slotId?: string; c
  * `routing` is the escalation engine's record of why the concern went where it did. Handlers see it; the student does not.
  */
 /** `readAt`: when an office handling the report first opened it (the "Read" step the student sees). */
-export type Report = { routing?: Decision['trace']; readAt?: string; id: string; ownerId: string; program: string; adviserId?: string; stage: Stage; status: string; narrative: string; category: string; subcategory?: string; categoryDetail?: string; severity: 'low' | 'medium' | 'high'; identity: 'named' | 'anonymous'; alias: string; disclosedTo: string[]; involvedUserIds: string[]; bypassed: boolean; aboutAdvisor: boolean; allowChair?: boolean; allowDean?: boolean; confidential?: boolean; consent?: ReportConsent; source?: 'student' | 'faculty'; reportedStudentId?: string; talk?: Talk; createdAt: string; updatedAt: string; caseFileId?: string; sourcePostId?: string; location?: string; occurredOn?: string; history: History[]; notes: Message[]; messages: Message[] }
+export type Report = { routing?: Decision['trace']; readAt?: string; id: string; ownerId: string; program: string; adviserId?: string; stage: Stage; status: string; narrative: string; category: string; subcategory?: string; categoryDetail?: string; severity: 'low' | 'medium' | 'high'; identity: 'named' | 'anonymous'; alias: string; disclosedTo: string[]; involvedUserIds: string[]; bypassed: boolean; aboutAdvisor: boolean; allowChair?: boolean; allowDean?: boolean; confidential?: boolean; consent?: ReportConsent; source?: 'student' | 'faculty'; reportedStudentId?: string; talk?: Talk; createdAt: string; updatedAt: string; caseFileId?: string; sourcePostId?: string; location?: string; occurredOn?: string; ongoing?: boolean; history: History[]; notes: Message[]; messages: Message[] }
 export type Post = {
   id: string
   authorId: string
@@ -197,11 +198,15 @@ export const seedRoster = env.SEED_ROSTER === 'true'
 const deanRosterId = 'QCU-FAC-PAULA-DELACRUZ'
 export function seed(includeRoster = seedRoster): Database {
   const users: User[] = [
-    user('QCU-STU-IT-A', 'Demo Student Foxtrot', ['student'], { campus: 'SB', program: 'BSIT', section: 'A', year: 3, studentId: '24-0101', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], organizationIds: ['ORG-COMPUTING'] }),
-    user('QCU-STU-IT-B', 'Demo Student Golf', ['student'], { campus: 'SB', program: 'BSIT', section: 'B', year: 3, studentId: '24-0102', adviserId: 'QCU-PROF-OTHER', spaceIds: ['SPACE-IT-B'] }),
-    user('QCU-STU-CS', 'Demo Student Hotel', ['student'], { campus: 'SB', program: 'BSCS', section: 'A', year: 2, studentId: '25-0201', adviserId: 'QCU-PROF-CS', spaceIds: ['SPACE-CS-A'] }),
+    user('QCU-STU-IT-A', 'Demo Student Foxtrot', ['student'], { campus: 'SB', program: 'BSIT', section: 'A', year: 3, studentId: '24-0101', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], organizationIds: ['ORG-COMPUTING', 'ORG-JPCS'] }),
+    user('QCU-STU-IT-B', 'Demo Student Golf', ['student'], { campus: 'SB', program: 'BSIT', section: 'B', year: 3, studentId: '24-0102', adviserId: 'QCU-PROF-OTHER', spaceIds: ['SPACE-IT-B'], organizationIds: ['ORG-LESIT', 'ORG-JPCS'] }),
+    user('QCU-STU-CS', 'Demo Student Hotel', ['student'], { campus: 'SB', program: 'BSCS', section: 'A', year: 2, studentId: '25-0201', adviserId: 'QCU-PROF-CS', spaceIds: ['SPACE-CS-A'], organizationIds: ['ORG-MSC', 'ORG-AWS'] }),
     user('QCU-STU-RESTRICTED', 'Demo Student India', ['student'], { campus: 'SB', program: 'BSIT', section: 'A', year: 3, studentId: '24-0103', adviserId: 'QCU-PROF-IT', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'], restrictions: ['post.create', 'post.comment', 'report.anonymous'] }),
     user('QCU-ORG', 'Demo Organization Rep', ['organization'], { organizationId: 'ORG-COMPUTING', organizationIds: ['ORG-COMPUTING'], office: 'CCS Organizations', title: 'Organization representative' }),
+    user('QCU-ORG-LESIT', 'Demo LESIT Rep', ['organization'], { organizationId: 'ORG-LESIT', organizationIds: ['ORG-LESIT'], office: 'CCS Organizations', title: 'Organization representative' }),
+    user('QCU-ORG-JPCS', 'Demo JPCS QCU Rep', ['organization'], { organizationId: 'ORG-JPCS', organizationIds: ['ORG-JPCS'], office: 'CCS Organizations', title: 'Organization representative' }),
+    user('QCU-ORG-MSC', 'Demo MSC QCU Rep', ['organization'], { organizationId: 'ORG-MSC', organizationIds: ['ORG-MSC'], office: 'CCS Organizations', title: 'Organization representative' }),
+    user('QCU-ORG-AWS', 'Demo AWS SBG QCU Rep', ['organization'], { organizationId: 'ORG-AWS', organizationIds: ['ORG-AWS'], office: 'CCS Organizations', title: 'Organization representative' }),
     user('QCU-PROF-IT', 'Demo Professor Charlie', ['professor'], { program: 'BSIT', office: 'CCS Faculty Room', title: 'Faculty, BSIT adviser', bio: 'Teaches Data Structures and advises BSIT 3A.', officeHours: 'Thursdays, 10:00 AM to 12:00 PM, CCS Faculty Room', spaceIds: ['SPACE-IT-A', 'SUBJECT-IT-DS'] }),
     user('QCU-PROF-OTHER', 'Demo Professor Delta', ['professor'], { program: 'BSIT', office: 'CCS Faculty Room', title: 'Faculty, BSIT', bio: 'Advises BSIT 3B.', officeHours: 'Thursdays, 9:00 AM to 11:00 AM, CCS Faculty Room', spaceIds: ['SPACE-IT-B'] }),
     user('QCU-PROF-CS', 'Demo Professor Echo', ['professor'], { program: 'BSCS', office: 'CCS Faculty Room', title: 'Faculty, BSCS', bio: 'Advises BSCS 2A.', officeHours: 'Thursdays, 11:00 AM to 1:00 PM, CCS Faculty Room', spaceIds: ['SPACE-CS-A'] }),
@@ -212,6 +217,7 @@ export function seed(includeRoster = seedRoster): Database {
     user('ACCS-ADMIN', 'Demo Administrator', ['administrator'], { email: 'admin@access-ccs.com', office: 'ACCS system administration', title: 'ACCS System Administrator' }),
     user('QCU-GUIDANCE', 'Demo Guidance Officer', ['guidance'], { office: 'Guidance Office', title: 'Guidance officer', officeHours: 'Weekdays, 9:00 AM to 4:00 PM' }),
     user('QCU-OSAS', 'Demo OSAS Officer', ['osas'], { office: 'Office of Student Affairs and Services', title: 'OSAS officer', officeHours: 'Weekdays, 9:00 AM to 4:00 PM' }),
+    user('QCU-PRESIDENT', 'Demo President’s Office Staff', ['president'], { office: 'Office of the University President', title: 'Staff, Office of the University President' }),
     // Inactive until the Dean activates it. The email is a placeholder: activation can replace it.
     user('QCU-SECRETARY', 'CCS Secretary', ['secretary'], { active: false, email: 'secretary@example.invalid', office: 'CCS Office', title: 'CCS secretary', officeHours: 'Monday to Friday, 8:00 AM to 5:00 PM' }),
   ]
@@ -227,15 +233,15 @@ export function seed(includeRoster = seedRoster): Database {
   posts[4]!.private = false
   posts.push(post('POST-0106', 'QCU-PROF-IT', 'Faculty meeting items', 'Add items for the semester coordination meeting before Monday.', 'faculty'))
   posts[1]!.comments.push({ id: 'COMMENT-0101', authorId: 'QCU-STU-IT-B', body: 'Same problem in BSIT 3B. A posted lab schedule would help us plan.', anonymous: false, at })
-  const stageRoles: Record<Stage, string> = { adviser: 'professor', chair: 'chair', dean: 'dean', guidance: 'guidance', osas: 'osas' }
-  const actorIds: Record<Stage, string> = { adviser: 'QCU-PROF-IT', chair: 'QCU-CHAIR-IT', dean: 'CCS-DEAN', guidance: 'QCU-GUIDANCE', osas: 'QCU-OSAS' }
-  const stages: Stage[] = ['adviser', 'chair', 'dean', 'guidance', 'osas']
+  const stageRoles: Record<Stage, string> = { adviser: 'professor', chair: 'chair', dean: 'dean', guidance: 'guidance', osas: 'osas', executive: 'president' }
+  const actorIds: Record<Stage, string> = { adviser: 'QCU-PROF-IT', chair: 'QCU-CHAIR-IT', dean: 'CCS-DEAN', guidance: 'QCU-GUIDANCE', osas: 'QCU-OSAS', executive: 'QCU-PRESIDENT' }
+  const stages: Stage[] = ['adviser', 'chair', 'dean', 'guidance', 'osas', 'executive']
   function report(id: string, ownerId: string, stage: Stage, bypassed = false, converted = false): Report {
     const owner = users.find(u => u.id === ownerId)!
     const history = stages.slice(0, stages.indexOf(stage) + 1).filter(s => !bypassed || s !== 'adviser').map((s, index): History => ({ id: `H-${id}-${index}`, at, actorId: s === 'adviser' ? owner.adviserId! : s === 'chair' && owner.program === 'BSCS' ? 'QCU-CHAIR-CS' : actorIds[s], actorRole: stageRoles[s], action: index === 0 ? 'Submitted' : 'Transferred', reason: 'Routine routing', update: 'The office is reviewing your report.', public: true, stage: s }))
     return { id, ownerId, program: owner.program!, adviserId: owner.adviserId!, stage, status: stage === 'guidance' && converted ? 'Case File at Guidance' : `With ${stage}`, narrative: 'The IC 301 lab timetable changed on Monday and nobody told us. Our group missed a scheduled activity. Please look into how lab schedule changes are announced.', category: 'General concern', severity: 'medium', identity: 'anonymous', alias: `Reporter A-${id.slice(-2)}`, disclosedTo: [], involvedUserIds: bypassed ? [owner.adviserId!] : [], bypassed, aboutAdvisor: bypassed, allowChair: true, allowDean: true, consent: { readStatement: true, at, userId: ownerId, version: consentWording.version, wording: consentWording.report }, talk: { mode: 'chat', consents: [{ mode: 'chat', participate: true, wording: consentWording.talk.chat, at }], updatedAt: at }, createdAt: at, updatedAt: at, ...(converted ? { caseFileId: `CF-${id.slice(-4)}` } : {}), history, notes: [{ id: `NOTE-${id}`, authorId: actorIds[stage], body: 'Asked the lab coordinator about the Monday timetable change. Waiting for a reply.', at }], messages: [{ id: `MSG-${id}`, authorId: actorIds[stage], body: 'We received your report. Reply here if you have more details.', at }] }
   }
-  const reports = [report('RPT-0241', 'QCU-STU-IT-A', 'adviser'), report('RPT-0242', 'QCU-STU-IT-A', 'chair', true), report('RPT-0243', 'QCU-STU-IT-B', 'dean'), report('RPT-0244', 'QCU-STU-RESTRICTED', 'guidance'), report('RPT-0245', 'QCU-STU-IT-A', 'guidance', false, true), report('RPT-0246', 'QCU-STU-IT-A', 'osas', false, true), report('RPT-0247', 'QCU-STU-IT-B', 'osas', false, true), report('RPT-0248', 'QCU-STU-CS', 'chair')]
+  const reports = [report('RPT-0241', 'QCU-STU-IT-A', 'adviser'), report('RPT-0242', 'QCU-STU-IT-A', 'chair', true), report('RPT-0243', 'QCU-STU-IT-B', 'dean'), report('RPT-0244', 'QCU-STU-RESTRICTED', 'guidance'), report('RPT-0245', 'QCU-STU-IT-A', 'guidance', false, true), report('RPT-0246', 'QCU-STU-IT-A', 'osas', false, true), report('RPT-0247', 'QCU-STU-IT-B', 'executive', false, true), report('RPT-0248', 'QCU-STU-CS', 'chair')]
   reports[0]!.sourcePostId = 'POST-0102'
   // For testers (QA 17 November 2026): a BSCS report that skipped the adviser because the adviser may be involved, so the
   // Program Chair sees the conflict notice, and a second BSCS report so the BSCS chair has a group of similar reports.
@@ -246,12 +252,15 @@ export function seed(includeRoster = seedRoster): Database {
   similar.narrative = 'The BSCS lab schedule changed again this week and the notice came after our class had started.'
   reports.push(conflicted, similar)
   const questions: Question[] = [{ id: 'Q1', criterion: 'Clarity', text: 'Explains concepts and requirements clearly.', type: 'rating', required: true }, { id: 'Q2', criterion: 'Support', text: 'Helps students who ask for support.', type: 'rating', required: true }, { id: 'Q3', criterion: 'Fairness', text: 'Explains how work will be graded and grades it the same way each time.', type: 'rating', required: true }]
-  const cycles: Cycle[] = [{ id: 'CYCLE-2026-1', title: '1st Semester AY 2026-2027', term: '1st Semester', opens: '2026-10-01', closes: '2026-11-30', status: 'Published', instructions: 'Rate each statement from 1 to 5 based on this semester.', questions, forms: ['student'], resultsPublished: true, reviews: [{ userId: 'QCU-PROF-IT', decision: 'reviewed', note: 'Questions fit the listed duties.', at }] }, { id: 'CYCLE-2026-2', title: '2nd Semester AY 2026-2027 draft', term: '2nd Semester', opens: '2027-01-10', closes: '2027-03-30', status: 'In review', instructions: 'Read the proposed questions. Tell the Dean\'s Office if any do not fit your duties.', questions: structuredClone(questions), forms: ['student'], resultsPublished: false, reviews: [] }]
+  const cycles: Cycle[] = [{ id: 'CYCLE-2026-1', title: '1st Semester AY 2026-2027', term: '1st Semester', opens: '2026-10-01', closes: '2026-11-30', status: 'Published', instructions: 'Rate each statement from 1 to 5 based on this semester.', questions, forms: ['student', 'peer', 'upward-chair', 'upward-dean'], resultsPublished: true, reviews: [{ userId: 'QCU-PROF-IT', decision: 'reviewed', note: 'Questions fit the listed duties.', at }] }, { id: 'CYCLE-2026-2', title: '2nd Semester AY 2026-2027 draft', term: '2nd Semester', opens: '2027-01-10', closes: '2027-03-30', status: 'In review', instructions: 'Read the proposed questions. Tell the Dean\'s Office if any do not fit your duties.', questions: structuredClone(questions), forms: ['student'], resultsPublished: false, reviews: [] }]
   const assignments: Assignment[] = [
     { id: 'EVAL-STU-IT-1', evaluatorId: 'QCU-STU-IT-A', facultyId: 'QCU-PROF-IT', cycleId: 'CYCLE-2026-1', relation: 'Student to faculty', subject: 'Data Structures · BSIT 3A' },
     { id: 'EVAL-STU-IT-2', evaluatorId: 'QCU-STU-RESTRICTED', facultyId: 'QCU-PROF-IT', cycleId: 'CYCLE-2026-1', relation: 'Student to faculty', subject: 'Data Structures · BSIT 3A' },
     { id: 'EVAL-STU-B-1', evaluatorId: 'QCU-STU-IT-B', facultyId: 'QCU-PROF-OTHER', cycleId: 'CYCLE-2026-1', relation: 'Student to faculty', subject: 'BSIT 3B class' },
     { id: 'EVAL-STU-CS-1', evaluatorId: 'QCU-STU-CS', facultyId: 'QCU-PROF-CS', cycleId: 'CYCLE-2026-1', relation: 'Student to faculty', subject: 'BSCS 2A class' },
+    { id: 'EVAL-PEER-1', evaluatorId: 'QCU-PROF-IT', facultyId: 'QCU-PROF-OTHER', cycleId: 'CYCLE-2026-1', relation: 'Peer', subject: 'Faculty peer review' },
+    { id: 'EVAL-UPWARD-1', evaluatorId: 'QCU-PROF-IT', facultyId: 'QCU-CHAIR-IT', cycleId: 'CYCLE-2026-1', relation: 'Upward: Program Chair', subject: 'Program leadership' },
+    { id: 'EVAL-UPWARD-2', evaluatorId: 'QCU-PROF-IT', facultyId: 'CCS-DEAN', cycleId: 'CYCLE-2026-1', relation: 'Upward: Dean', subject: 'College leadership' },
   ]
   assignments.push({ id: 'EVAL-REVIEW-IT', evaluatorId: 'QCU-STU-IT-A', facultyId: 'QCU-PROF-IT', cycleId: 'CYCLE-2026-2', relation: 'Student to faculty', subject: 'Draft form for 2nd Semester' }, { id: 'EVAL-REVIEW-OTHER', evaluatorId: 'QCU-STU-IT-B', facultyId: 'QCU-PROF-OTHER', cycleId: 'CYCLE-2026-2', relation: 'Student to faculty', subject: 'Draft form for 2nd Semester' })
   for (const faculty of users.filter(u => u.roles.some(r => ['professor', 'chair', 'dean'].includes(r)))) for (let n = 0; n < 5; n++) assignments.push({ id: `EVAL-SAMPLE-${faculty.id}-${n}`, evaluatorId: `SAMPLE-EVALUATOR-${n}`, facultyId: faculty.id, cycleId: 'CYCLE-2026-1', relation: 'Student to faculty', subject: 'Course evaluation', answers: { Q1: n % 2 ? 4 : 5, Q2: 4, Q3: n % 2 ? 5 : 4 }, submittedAt: at, comment: '' })
@@ -261,7 +270,11 @@ export function seed(includeRoster = seedRoster): Database {
     ? user(id, `Dr. ${name}`, ['dean', 'professor'], { email, title: 'Dean, College of Computer Studies', office: 'CCS Dean\'s Office' })
     : user(id, name, roles, { email, title, office: roles[0] === 'professor' ? 'CCS Faculty Room' : 'CCS Office', ...(program ? { program } : {}) })) : []
   return {
-    users: [...users, ...roster], spaces, organizations: [{ id: 'ORG-COMPUTING', name: 'CCS Computing Society', description: 'Student organization of the College of Computer Studies. Runs workshops and peer tutoring.', representativeId: 'QCU-ORG', memberIds: ['QCU-STU-IT-A'] }], posts, reports, drafts: {},
+    users: [...users, ...roster], spaces, organizations: [{ id: 'ORG-COMPUTING', name: 'CCS Computing Society', description: 'Student organization of the College of Computer Studies. Runs workshops and peer tutoring.', representativeId: 'QCU-ORG', memberIds: ['QCU-STU-IT-A'] },
+      { id: 'ORG-LESIT', name: 'League of Excellent Students in Information Technology', description: 'QCU CCS organization for BSIT students. Holds study sessions, IT seminars and competitions.', representativeId: 'QCU-ORG-LESIT', memberIds: ['QCU-STU-IT-B'] },
+      { id: 'ORG-JPCS', name: 'Junior Philippine Computer Society – QCU Chapter', description: 'QCU chapter of the national computing student society. Runs tech talks, hackathons and industry visits.', representativeId: 'QCU-ORG-JPCS', memberIds: ['QCU-STU-IT-A', 'QCU-STU-IT-B'] },
+      { id: 'ORG-MSC', name: 'Microsoft Student Community QCU', description: 'Student community on Microsoft technologies: Azure, .NET and Power Platform workshops and study jams.', representativeId: 'QCU-ORG-MSC', memberIds: ['QCU-STU-CS'] },
+      { id: 'ORG-AWS', name: 'AWS Student Builder Group QCU', description: 'Student builders learning cloud on AWS through hands-on labs and build days.', representativeId: 'QCU-ORG-AWS', memberIds: ['QCU-STU-CS'] }], posts, reports, drafts: {},
     threads: [
       {
         id: 'THREAD-IT-A',

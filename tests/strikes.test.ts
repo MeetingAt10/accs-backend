@@ -68,6 +68,8 @@ describe('the Dean recommends a strike and OSAS confirms it', () => {
     expect(recommended.body.record).toMatchObject({ status: 'recommended', kind: 'report', recommendedBy: expect.objectContaining({ id: 'QCU-FAC-PAULA-DELACRUZ' }) })
     expect((await dean.get('/api/pages/P22?id=RPT-0243')).body.data.record).toMatchObject({ canRecommendStrike: true, canDecideStrike: false })
     expect((await record(dean)).clearance).toEqual({ onHold: false, unsettledStrikes: 0, totalStrikes: 0, limit: 3 })
+    // C15: a recommended strike is already on the student record, marked as awaiting OSAS.
+    expect((await record(dean)).strikes).toEqual([expect.objectContaining({ id: recommended.body.record.id, status: 'recommended' })])
     // OSAS sees the recommendation on the case once it arrives, and confirms it there.
     await moveTo('RPT-0243', 'osas')
     const seen = (await osas.get('/api/pages/P22?id=RPT-0243')).body.data.record

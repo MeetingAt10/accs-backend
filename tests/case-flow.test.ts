@@ -1,5 +1,6 @@
-// Issue #29: the President's Office is removed, and cases move Adviser → Program Chair → Dean → Guidance → OSAS in a fixed
-// order, with OSAS as the last stage (team baseline "ACCS: Features and Flows", 10 November 2026).
+// Cases move Adviser → Program Chair → Dean → Guidance → OSAS → President's Office in a fixed order (issue #29). The
+// President's Office stage was removed on 2026-11-10 and restored on 2026-11-24 to match the paper (Chapter 1,
+// Significance of the Study): it receives only executive-level cases from OSAS and can return them to OSAS.
 import request from 'supertest'
 import { beforeEach, describe, expect, it } from 'vitest'
 
@@ -26,15 +27,21 @@ const act = (agent: Agent, recordId: string, type: string, extra: object = {}) =
 const report = (id: string) => repo.read().reports.find((r) => r.id === id)!
 
 describe('fixed case order (issue #29)', () => {
-  it('offers OSAS no way to forward or escalate: it is the last stage', async () => {
+  it('lets OSAS transfer a case to the President\'s Office, which can return it to OSAS', async () => {
     const osas = await login('QCU-OSAS')
     const view = (await osas.get('/api/pages/P22?id=RPT-0246')).body.data.record
     expect(view.stage).toBe('osas')
-    expect(view.allowedActions).toEqual(['respond', 'recordAction', 'milestone', 'resolve'])
-    for (const type of ['transfer', 'escalate']) {
-      expect((await act(osas, 'RPT-0246', type)).status).toBe(409)
-      expect(report('RPT-0246').stage).toBe('osas')
-    }
+    expect(view.allowedActions).toEqual(['respond', 'recordAction', 'milestone', 'resolve', 'transfer'])
+    expect((await act(osas, 'RPT-0246', 'escalate')).status).toBe(409)
+    expect((await act(osas, 'RPT-0246', 'transfer')).status).toBe(200)
+    expect(report('RPT-0246').stage).toBe('executive')
+
+    const president = await login('QCU-PRESIDENT')
+    const atPresident = (await president.get('/api/pages/P22?id=RPT-0246')).body.data.record
+    expect(atPresident.allowedActions).toEqual(['respond', 'recordAction', 'resolve', 'return'])
+    expect((await act(president, 'RPT-0246', 'transfer')).status).toBe(409)
+    expect((await act(president, 'RPT-0246', 'return')).status).toBe(200)
+    expect(report('RPT-0246').stage).toBe('osas')
   })
 
   it('passes over an office whose every member is involved in the report', async () => {
@@ -47,7 +54,7 @@ describe('fixed case order (issue #29)', () => {
   })
 
   it('refuses an escalation when no office further on can take the report', async () => {
-    const offices = repo.read().users.filter((u) => u.roles.some((r) => ['dean', 'guidance', 'osas'].includes(r))).map((u) => u.id)
+    const offices = repo.read().users.filter((u) => u.roles.some((r) => ['dean', 'guidance', 'osas', 'president'].includes(r))).map((u) => u.id)
     report('RPT-0242').involvedUserIds.push(...offices)
     const refused = await act(await login('QCU-CHAIR-IT'), 'RPT-0242', 'escalate')
     expect([refused.status, report('RPT-0242').stage]).toEqual([409, 'chair'])
@@ -74,57 +81,48 @@ describe('fixed case order (issue #29)', () => {
     expect(report('RPT-0243').stage).toBe('osas')
   })
 
-  it('no longer accepts a "return" action or a President\'s Office stage', async () => {
+  it('refuses a return from OSAS and a jump from the Dean to the President\'s Office', async () => {
     const osas = await login('QCU-OSAS')
-    expect((await act(osas, 'RPT-0246', 'return')).status).toBe(400)
+    expect((await act(osas, 'RPT-0246', 'return')).status).toBe(409)
     const dean = await login('QCU-FAC-PAULA-DELACRUZ')
-    expect((await act(dean, 'RPT-0243', 'transfer', { nextStage: 'executive' })).status).toBe(400)
+    expect((await act(dean, 'RPT-0243', 'transfer', { nextStage: 'executive' })).status).toBe(409)
   })
 })
 
-describe('the President\'s Office role is gone (issue #29)', () => {
-  it('has no president role, label, permission or sample account', async () => {
-    expect(roles).not.toContain('president')
-    expect(repo.read().users.some((u) => u.id === 'QCU-PRESIDENT')).toBe(false)
-    const session = (await (await login('QCU-FAC-PAULA-DELACRUZ')).get('/api/session')).body
-    expect(Object.keys(session.roleLabels)).not.toContain('president')
-    expect((await request(app).post('/api/auth/sign-in').send({ emailOrId: 'QCU-PRESIDENT', password: seedPassword })).status).toBe(401)
+describe('the President\'s Office role (restored 2026-11-24)', () => {
+  it('has a president role, label and sample account that can sign in', async () => {
+    expect(roles).toContain('president')
+    expect(repo.read().users.some((u) => u.id === 'QCU-PRESIDENT' && u.roles.includes('president'))).toBe(true)
+    const session = (await (await login('QCU-PRESIDENT')).get('/api/session')).body
+    expect(Object.keys(session.roleLabels)).toContain('president')
   })
 
-  it('drops a stored president role, and deactivates an account left with no role', () => {
+  it('keeps a stored president role', () => {
     const db = repo.read()
     const base = db.users.find((u) => u.id === 'QCU-OSAS')!
     const presidentOnly = { ...structuredClone(base), id: 'OLD-PRESIDENT', email: 'old.president@example.com', roles: ['president'], active: true } as unknown as User
-    const both = { ...structuredClone(base), id: 'OLD-BOTH', email: 'old.both@example.com', roles: ['osas', 'president'], active: true } as unknown as User
-    applyAccounts(db, [presidentOnly, both])
-    expect(db.users.find((u) => u.id === 'OLD-PRESIDENT')).toMatchObject({ roles: [], active: false })
-    expect(db.users.find((u) => u.id === 'OLD-BOTH')).toMatchObject({ roles: ['osas'], active: true })
+    applyAccounts(db, [presidentOnly])
+    expect(db.users.find((u) => u.id === 'OLD-PRESIDENT')).toMatchObject({ roles: ['president'], active: true })
   })
 })
 
-describe('reports stored at the removed stage (issue #29)', () => {
-  it('reads a report stored with stage executive as being with OSAS, and OSAS can act on it', async () => {
+describe('reports stored at the President\'s Office stage', () => {
+  it('reads a report stored with stage executive as still being with the President\'s Office', async () => {
     const store = createMemoryRecordStore()
-    // A report saved before the change: at the President's Office, with that stage in its history and disclosures.
     await createRecordRepository(store).transact((unit) => {
       const r = unit.read().reports.find((item) => item.id === 'RPT-0246')! as unknown as Record<string, unknown> & Report
       ;(r as { stage: string }).stage = 'executive'
-      r.history.push({ ...r.history.at(-1)!, id: 'H-OLD', actorId: 'QCU-PRESIDENT', actorRole: 'president', stage: 'executive' as never })
-      ;(r as { disclosedTo: string[] }).disclosedTo = ['osas', 'executive']
     })
-
     const fresh = createRecordRepository(store)
     const stored = await fresh.view((unit) => unit.read().reports.find((r) => r.id === 'RPT-0246')!)
-    expect(stored.stage).toBe('osas')
-    expect(stored.history.map((h) => h.stage)).not.toContain('executive')
-    expect(stored.disclosedTo).toEqual(['osas'])
+    expect(stored.stage).toBe('executive')
 
     app = createApp(fresh, { authStore: setUpAuthStore() })
-    const osas = await login('QCU-OSAS')
-    const view = await osas.get('/api/pages/P22?id=RPT-0246')
+    const president = await login('QCU-PRESIDENT')
+    const view = await president.get('/api/pages/P22?id=RPT-0246')
     expect(view.status).toBe(200)
-    expect(view.body.data.record).toMatchObject({ status: 'Escalated', office: 'OSAS' })
-    expect((await act(osas, 'RPT-0246', 'resolve')).status).toBe(200)
+    expect(view.body.data.record).toMatchObject({ office: "President's Office" })
+    expect((await act(president, 'RPT-0246', 'resolve')).status).toBe(200)
   })
 })
 
@@ -137,5 +135,20 @@ describe('student IDs stored in the old format (19 November 2026)', () => {
     applyAccounts(db, [old, current])
     expect(db.users.find((u) => u.id === 'OLD-ID-STUDENT')!.studentId).toBe('23-0456')
     expect(db.users.find((u) => u.id === 'NEW-ID-STUDENT')!.studentId).toBe('25-0999')
+  })
+})
+
+describe('home dashboard report order (QA v5 C7)', () => {
+  it('lists open, high-severity, most recently updated reports first and closed last', async () => {
+    const db = repo.read()
+    const student = db.users.find((u) => u.roles.includes('student') && db.reports.some((r) => r.ownerId === u.id))!
+    const mine = db.reports.filter((r) => r.ownerId === student.id)
+    const base = mine[0]
+    const make = (id: string, status: string, severity: Report['severity'], updatedAt: string) => ({ ...base, id, status, severity, updatedAt, caseFileId: undefined })
+    mine.forEach((r) => { db.reports.splice(db.reports.indexOf(r), 1) })
+    db.reports.push(make('C7-closed', 'Closed', 'high', '2026-11-20T00:00:00Z'), make('C7-low', 'With adviser', 'low', '2026-11-20T00:00:00Z'), make('C7-old', 'With adviser', 'high', '2026-11-01T00:00:00Z'), make('C7-new', 'With adviser', 'high', '2026-11-10T00:00:00Z'))
+    const agent = await login(student.studentId ?? student.id)
+    const ids = (await agent.get('/api/pages/P03')).body.data.reports.map((r: { id: string }) => r.id)
+    expect(ids).toEqual(['C7-new', 'C7-old', 'C7-low', 'C7-closed'])
   })
 })
