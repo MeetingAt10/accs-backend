@@ -105,7 +105,13 @@ const messageContent = z.object({ body: z.string().trim().max(4000).default(''),
 const hasMessageContent = (p: { body: string; attachments: unknown[] }) => p.body.length > 0 || p.attachments.length > 0
 const noMessageContent = { path: ['body'], message: 'Write a message or attach a file.' }
 const reason = z.string().trim().min(1).max(2000)
-const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+/** A real calendar day as YYYY-MM-DD. 2027-02-31 is refused rather than quietly read as another day (QA 24 November). */
+export const isRealDate = (value: string) => {
+  const [year, month, day] = value.split('-').map(Number)
+  const parsed = new Date(Date.UTC(year, month - 1, day))
+  return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day
+}
+const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isRealDate, "That date doesn't exist.")
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)
 // A date and time as a browser gives it, with or without a time zone: 2026-11-06T10:00 or 2026-11-06T02:00:00Z.
 const when = z.iso.datetime({ offset: true, local: true })
@@ -180,7 +186,7 @@ export const reactionKinds = ['like', 'love', 'laugh', 'wow', 'sad', 'support'] 
 export type ReactionKind = typeof reactionKinds[number]
 export const actionPayloads = {
   // A faculty member reports a student (decided 12 November 2026). Same categories as a concern.
-  reportStudent: z.object({ studentId: z.string().min(1), narrative: z.string().trim().min(1).max(4000), category: z.string().trim().min(1).max(80), subcategory: z.string().trim().min(1).max(80).optional(), categoryDetail: z.string().trim().max(120).optional(), severity: z.enum(['low', 'medium', 'high']), location: z.string().trim().max(200).optional(), occurredOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).strict(),
+  reportStudent: z.object({ studentId: z.string().min(1), narrative: z.string().trim().min(1).max(4000), category: z.string().trim().min(1).max(80), subcategory: z.string().trim().min(1).max(80).optional(), categoryDetail: z.string().trim().max(120).optional(), severity: z.enum(['low', 'medium', 'high']), location: z.string().trim().max(200).optional(), occurredOn: date.optional() }).strict(),
   addMaterial: z.object({ spaceId: z.string().min(1), title: z.string().trim().min(1, 'Enter a title.').max(160, 'Use at most 160 characters.'), url: materialUrl, note: z.string().trim().max(1000, 'Use at most 1000 characters.').optional() }).strict(),
   // A link may change its address; a file keeps its file and changes only its title and note.
   updateMaterial: z.object({ title: z.string().trim().min(1, 'Enter a title.').max(160, 'Use at most 160 characters.'), url: materialUrl.optional(), note: z.string().trim().max(1000, 'Use at most 1000 characters.').optional() }).strict(),

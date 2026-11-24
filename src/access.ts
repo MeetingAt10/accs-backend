@@ -110,8 +110,8 @@ export function canThread(db: Database, user: User, thread: Thread) {
   if (thread.spaceId) { const space = db.spaces.find(s=>s.id===thread.spaceId); return !!space && (hasRole(user,'student') && space.studentIds.includes(user.id) || hasRole(user,'professor') && space.professorIds.includes(user.id)) }
   // A group conversation someone started (decided 16 November 2026: anyone may) is open to its members.
   if (thread.group) return true
-  const other = db.users.find(u => thread.memberIds.includes(u.id) && u.id !== user.id)
-  return !!other && canReach(db,user,other)
+  // A member can always open a direct conversation, even when only the other side may start one (Guidance writes to a professor).
+  return true
 }
 // A concern about the adviser never reaches the adviser, whatever stage it is at.
 export function isConflicted(user: User, report: Report) { return report.involvedUserIds.includes(user.id) || (report.bypassed || report.aboutAdvisor) && report.adviserId === user.id }

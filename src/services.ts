@@ -136,7 +136,7 @@ function toggleReaction(item: { reactions?: string[]; reactionsBy?: Record<strin
 function postView(db: Database, post: Post, user: User) {
   return {
     id: post.id,
-    title: post.title,
+    title: post.removed ? 'This content was removed.' : post.title,
     body: post.removed ? 'This content was removed.' : post.body,
     audience: post.audience,
     kind: post.kind,
@@ -195,7 +195,7 @@ function reportView(db:Database,report:Report,user:User,owner=false) {
     const status={progress:progressFor(report),id:report.id,caseFileId:report.caseFileId,status:statusFor(report),stage:report.stage,office:offices[report.stage],program:report.program,createdAt:report.createdAt,updatedAt:report.updatedAt,statusOnly:true,timeline:report.history.filter(h=>h.public).map(h=>({at:h.at,action:h.action,office:offices[h.stage]}))}
     if(overseesCase(user,report)) return {...status,confidential:true,statusNotice:'The adviser marked this concern confidential. You can see its status only.'}
     if(isEarlierHandler(user,report)) return {...status,confidential:report.confidential===true,statusNotice:`This concern is now with ${offices[report.stage]}. You can follow its status here.`}
-    return {id:report.id,caseFileId:report.caseFileId,category:report.category,severity:report.severity,status:statusFor(report),stage:report.stage,office:offices[report.stage],program:report.program,createdAt:report.createdAt,updatedAt:report.updatedAt,historyOnly:true,history:report.history.filter(h=>h.actorId===user.id).map(h=>({...h,actor:author(db,h.actorId)})),historyNotice:'You can see only your own entries on this report.'}
+    return {id:report.id,caseFileId:report.caseFileId,status:statusFor(report),stage:report.stage,office:offices[report.stage],program:report.program,createdAt:report.createdAt,updatedAt:report.updatedAt,historyOnly:true,history:report.history.filter(h=>h.actorId===user.id).map(h=>({...h,actor:author(db,h.actorId)})),historyNotice:'You can see only your own entries on this report.'}
   }
   // A reader who is not the current handler sees the name only if the student shared it with the reader's own office.
   const viewerStage=current?report.stage:hasRole(user,'dean')?'dean':'chair'
@@ -214,7 +214,8 @@ function consultationView(db:Database,c:Database['consultations'][number],user:U
   return {...c,student:who(c.studentId),faculty:who(c.facultyId),slot:slot?slotView(user,slot):{id:c.slotId,facultyId:c.facultyId,date:c.slotDate??'',start:c.slotStart??'',end:c.slotEnd??'',state:'removed'}}
 }
 function assignmentView(db:Database,a:Assignment,receipt=false) { const cycle=find(db.cycles,a.cycleId); return {id:a.id,faculty:person(find(db.users,a.facultyId)),cycleId:a.cycleId,cycleTitle:cycle.title,relation:a.relation,subject:a.subject,due:cycle.closes,status:a.submittedAt?'Submitted':'Not started',submittedAt:a.submittedAt,questions:receipt?cycle.questions:undefined,instructions:receipt?cycle.instructions:undefined,cycleStatus:cycle.status,answers:receipt?a.answers:undefined,comment:receipt?a.comment:undefined} }
-function resultViews(db:Database,user:User,cycleId?:string) { return db.users.filter(u=>hasRole(u,'professor','chair','dean')&&canFacultyResult(user,u)).map(faculty=>{const entries=db.assignments.filter(a=>a.facultyId===faculty.id&&a.submittedAt&&(!cycleId||a.cycleId===cycleId)&&find(db.cycles,a.cycleId).resultsPublished);const ratings=entries.flatMap(a=>Object.values(a.answers??{}).filter((v):v is number=>typeof v==='number'));const criteria=['Q1','Q2','Q3'].map((id,index)=>{const values=entries.map(a=>a.answers?.[id]).filter((v):v is number=>typeof v==='number');return {label:['Clarity','Support','Fairness'][index],value:values.length?Number((values.reduce((s,n)=>s+n,0)/values.length).toFixed(2)):0}});return {id:faculty.id,faculty:person(faculty),responses:entries.length,average:ratings.length?Number((ratings.reduce((s,n)=>s+n,0)/ratings.length).toFixed(2)):0,completion:entries.length?100:0,criteria,themes:entries.length?[{title:'Clear guidance',count:entries.length,summary:'Students describe the requirements as clear and say they get help when they ask.'}]:[]}}) }
+function resultViews(db:Database,user:User,cycleId?:string) { return db.users.filter(u=>hasRole(u,'professor','chair','dean')&&canFacultyResult(user,u)).map(faculty=>{// Assigned evaluations in published cycles, and the submitted ones among them; completion is the share submitted (QA 24 November: it was 100 or 0).
+const assigned=db.assignments.filter(a=>a.facultyId===faculty.id&&(!cycleId||a.cycleId===cycleId)&&find(db.cycles,a.cycleId).resultsPublished);const entries=assigned.filter(a=>a.submittedAt);const ratings=entries.flatMap(a=>Object.values(a.answers??{}).filter((v):v is number=>typeof v==='number'));const criteria=['Q1','Q2','Q3'].map((id,index)=>{const values=entries.map(a=>a.answers?.[id]).filter((v):v is number=>typeof v==='number');return {label:['Clarity','Support','Fairness'][index],value:values.length?Number((values.reduce((s,n)=>s+n,0)/values.length).toFixed(2)):0}});return {id:faculty.id,faculty:person(faculty),responses:entries.length,assigned:assigned.length,average:ratings.length?Number((ratings.reduce((s,n)=>s+n,0)/ratings.length).toFixed(2)):0,completion:assigned.length?Math.round(entries.length/assigned.length*100):0,criteria,themes:entries.length?[{title:'Clear guidance',count:entries.length,summary:'Students describe the requirements as clear and say they get help when they ask.'}]:[]}}) }
 /** Every evaluation assigned to the program's faculty in the published cycles in scope, submitted or not. */
 function programAssignments(db:Database,program?:string,cycleId?:string) {
   const facultyIds = db.users
@@ -656,7 +657,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
       const consultations=visibleConsultations(db,user);const assignments=db.assignments.filter(a=>a.evaluatorId===user.id&&['Published','Closed'].includes(find(db.cycles,a.cycleId).status))
       // Only cards for pages the role can open (QA 17 November: CCS Staff saw reports, appointments and evaluations).
       data.stats=([{page:hasRole(user,'student')?'P18':'P21',label:hasRole(user,'student')?'Active reports':'Reports in your queue',value:(hasRole(user,'student')?ownReports:cases).filter(r=>!['Resolved','Closed'].includes(r.status)).length,note:'Reports you can see'},{page:'P14',label:'Appointments',value:consultations.filter(c=>!['Completed','Declined','Cancelled'].includes(c.status)).length,note:'Requests and booked times'},{page:'P26',label:'Evaluations due',value:assignments.filter(a=>!a.submittedAt).length,note:'Forms assigned to you'},{page:'P40',label:'Unread updates',value:db.notifications.filter(n=>n.recipientId===user.id&&!n.read).length,note:'In your notifications'}]).filter(stat=>canPage(user,stat.page)).map(({page:_page,...stat})=>stat)
-      Object.assign(data,{announcements:posts.filter(p=>p.kind==='announcement').slice(0,3).map(p=>postView(db,p,user)),posts:posts.slice(0,3).map(p=>postView(db,p,user)),events:visibleEvents(db,user), reports:hasRole(user,'student')?ownReports.slice(0,4).map(r=>reportView(db,r,user,true)):[],cases:cases.slice(0,4).map(r=>reportView(db,r,user)),consultations:consultations.map(c=>consultationView(db,c,user)),assignments:assignments.map(a=>assignmentView(db,a)),todos:db.todos.filter(t=>t.ownerId===user.id),notifications:db.notifications.filter(n=>n.recipientId===user.id).slice(0,5),sections:spaces.filter(s=>s.subject==='Section group').map(s=>({id:s.id,title:s.title,program:s.program,subject:s.subject})),roleSections:internalRole?[]:user.roles.map(role=>({role,title:roleLabels[role],description:scopeLabel({...user,roles:[role]}),...readPage(repo,{...user,roles:[role]},'P03',{},true).data}))});break}
+      Object.assign(data,{announcements:posts.filter(p=>p.kind==='announcement'&&!p.removed).slice(0,3).map(p=>postView(db,p,user)),posts:posts.filter(p=>!p.removed).slice(0,3).map(p=>postView(db,p,user)),events:visibleEvents(db,user), reports:hasRole(user,'student')?ownReports.slice(0,4).map(r=>reportView(db,r,user,true)):[],cases:cases.slice(0,4).map(r=>reportView(db,r,user)),consultations:consultations.map(c=>consultationView(db,c,user)),assignments:assignments.map(a=>assignmentView(db,a)),todos:db.todos.filter(t=>t.ownerId===user.id),notifications:db.notifications.filter(n=>n.recipientId===user.id).slice(0,5),sections:spaces.filter(s=>s.subject==='Section group').map(s=>({id:s.id,title:s.title,program:s.program,subject:s.subject})),roleSections:internalRole?[]:user.roles.map(role=>({role,title:roleLabels[role],description:scopeLabel({...user,roles:[role]}),...readPage(repo,{...user,roles:[role]},'P03',{},true).data}))});break}
     case'P04':Object.assign(data,{posts:posts.map(p=>postView(db,p,user)),spaces:spaces.map(s=>({id:s.id,title:s.title})),canPost:hasPermission(user,'post.create')});break
     case 'P05':
       Object.assign(data, {
@@ -805,7 +806,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
     case'P19':Object.assign(data,{categories:['General concern','Academic process','Facilities','Communication'],categoryOptions:concernCategories,adviser:user.adviserId?person(find(db.users,user.adviserId)):null,anonymityAllowed:!user.restrictions.includes('report.anonymous'),consentWording,draft:db.drafts[user.id]??null,sourcePost:query.from?(()=>{const p=posts.find(p=>p.id===query.from&&p.authorId===user.id);if(!p)throw unavailable();return postView(db,p,user)})():null});break
     case'P20':{const r=pick(ownReports,reportIdOf(db,query.id));if(r)data.record=reportView(db,r,user,true);data.consentWording=consentWording;break}
     // Every handler gets the full category list, so the queue can filter by any category and sub-category.
-    case'P21':data.categoryOptions=concernCategories;if(hasPermission(user,'student.report'))Object.assign(data,{canReportStudent:true,categoryOptions:concernCategories,reportableStudents:db.users.filter(u=>u.active&&hasRole(u,'student')&&db.spaces.some(sp=>sp.professorIds.includes(user.id)&&sp.studentIds.includes(u.id))).map(u=>({id:u.id,name:u.name,studentId:u.studentId,program:u.program,section:u.section}))});data.cases=cases.filter(r=>(!query.q||r.id.toLowerCase().includes(query.q.toLowerCase()))&&(!query.status||r.status===query.status)&&(!query.category||r.category===query.category)&&(!query.severity||r.severity===query.severity)).map(r=>reportView(db,r,user));break
+    case'P21':data.categoryOptions=concernCategories;if(hasPermission(user,'student.report'))Object.assign(data,{canReportStudent:true,categoryOptions:concernCategories,reportableStudents:db.users.filter(u=>u.active&&hasRole(u,'student')&&db.spaces.some(sp=>sp.professorIds.includes(user.id)&&sp.studentIds.includes(u.id))).map(u=>({id:u.id,name:u.name,studentId:u.studentId,program:u.program,section:u.section}))});data.cases=cases.filter(r=>(!query.q||r.id.toLowerCase().includes(query.q.toLowerCase()))&&(!query.status||r.status===query.status)).map(r=>reportView(db,r,user)).filter(r=>(!query.category||('category' in r&&r.category===query.category))&&(!query.severity||('severity' in r&&r.severity===query.severity)));break
     // The first time an office that handles the report opens it, the student's progress moves to Read.
     case'P22':{const r=pick(cases,reportIdOf(db,query.id));if(r){if(!r.readAt&&canActCase(user,r))r.readAt=now();data.record=reportView(db,r,user)}break}
     case'P23':case'P24':{
@@ -880,6 +881,7 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
         .filter(result => !query.program || result.faculty.program === query.program)
       data.results = results
       data.cycles = db.cycles.filter(cycle => cycle.resultsPublished)
+      const answered = results.filter(result => result.responses > 0)
       data.stats = [
         {
           label: 'Responses',
@@ -893,8 +895,8 @@ function readPage(repo:UnitOfWork,user:User,pageId:string,query:PageQuery={},int
         },
         {
           label: 'Overall average',
-          value: results.length
-            ? Number((results.reduce((total,result) => total + result.average,0) / results.length).toFixed(2))
+          value: answered.length
+            ? Number((answered.reduce((total,result) => total + result.average,0) / answered.length).toFixed(2))
             : 0,
           note: 'Out of 5',
         },
@@ -1194,7 +1196,7 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
   switch(request.action){
     case 'createPost': {
       const payload = actionPayloads.createPost.parse(request.payload)
-      if (payload.eventDate && payload.eventDate < campusNow().date) throw dateIssue('eventDate', 'Choose today or a later date for the event.')
+      if (payload.eventDate && (payload.eventTime ? hasBegun(payload.eventDate, payload.eventTime) : payload.eventDate < campusNow().date)) throw dateIssue('eventDate', 'Choose today or a later date for the event.')
       if (!canPublish(db, user, payload.audience, payload.kind === 'announcement')) throw deny()
       if (payload.anonymous && (!hasRole(user, 'student') || payload.kind === 'announcement' || user.restrictions.includes('post.create'))) throw deny()
       const { attachments: postFiles, ...postFields } = payload
