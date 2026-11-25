@@ -2,7 +2,8 @@ import { findFlaggedWord } from './profanity.js'
 import { z } from 'zod'
 import { categoryProblem, concernCategories } from './categories.js'
 import { campusYearProblem, mainCampus, sectionName } from './sections.js'
-import { materialFileTypes, materialMaxBytes, messageFileMaxBytes, messageFileTypes, safeFileName, uploadUrlSeconds, type MaterialStorage } from './material-storage.js'
+import { attachedFileRule, isPostMedia, materialFileTypes, materialMaxBytes, safeFileName, uploadUrlSeconds, type MaterialStorage } from './material-storage.js'
+import { mediaPictureUrlSeconds, mediaVideoUrlSeconds, type MediaSigner } from './media-cdn.js'
 import { ulid } from './ids.js'
 import { appointmentCategories, appointmentProblem, concernFollowUp, purposeOf, type AppointmentChoice } from './appointments.js'
 import { isRealDate, reactionKinds, type ReactionKind, loadRowSchema, materialUploadSchema, messageUploadSchema, actionPayloads, announcementPriorities, postLabels, programs, roleLabels, roles, type ActionRequest, type PageQuery, type User } from './schemas.js'
@@ -1940,8 +1941,11 @@ function runAction(repo:UnitOfWork,user:User,pageId:string,request:ActionRequest
 // --- files in Messages -----------------------------------------------------------------------------------------------
 /** Actions that can carry uploaded files: messages and posts. */
 const fileActions=['sendMessage','createThread','createPost','updatePost']
-/** A short-lived link to a file on a post, for people who can read the post. Pictures can open in the browser. */
-export async function postFileUrl(repo:Repository,user:User,postId:string,fileId:string,inline:boolean,storage?:MaterialStorage){
+/**
+ * A short-lived link to a file on a post, for people who can read the post. Pictures and videos can open in the browser:
+ * from the media CDN (a CloudFront signed URL) when it is set up, otherwise from S3.
+ */
+export async function postFileUrl(repo:Repository,user:User,postId:string,fileId:string,inline:boolean,storage?:MaterialStorage,media?:MediaSigner){
   const file=await repo.view(unit=>{
     const db=unit.read()
     // A reviewer of this post's moderation item (a moderator, or the Secretary once it is referred) may open its files.
@@ -1952,17 +1956,20 @@ export async function postFileUrl(repo:Repository,user:User,postId:string,fileId
     return file
   })
   if(!storage)throw filesNotSetUp()
-  return storage.downloadUrl(file.key,file.fileName,inline&&file.contentType.startsWith('image/'))
+  const shown=inline&&isPostMedia(file.contentType)
+  if(shown&&media)return media.url(file.key,file.contentType.startsWith('video/')?mediaVideoUrlSeconds:mediaPictureUrlSeconds)
+  return storage.downloadUrl(file.key,file.fileName,shown)
 }
 /** Checks a file for a message or a post and returns a signed upload for exactly that type and size. */
-export async function startMessageUpload(user:User,payload:unknown,storage?:MaterialStorage){
+/** `onPost`: the file is for a forum post, which may also be an MP4 or WebM video of up to 100 MB. */
+export async function startMessageUpload(user:User,payload:unknown,storage?:MaterialStorage,onPost=false){
   if(!hasPermission(user,'message.send')&&!hasPermission(user,'post.create'))throw deny()
   const p=messageUploadSchema.parse(payload)
-  const allowed=messageFileTypes[p.contentType]
+  const rule=attachedFileRule(p.contentType,onPost)
   const extension=p.fileName.toLowerCase().split('.').pop()??''
-  if(!allowed)throw new z.ZodError([{code:'custom',path:['contentType'],message:'Send a picture (PNG, JPG, WebP or GIF), a PDF, or a Word, PowerPoint, Excel or text file.',input:undefined}])
-  if(!allowed.includes(extension))throw new z.ZodError([{code:'custom',path:['fileName'],message:`A ${allowed.map(e=>'.'+e).join(' or ')} file name is expected for this type.`,input:undefined}])
-  if(p.size>messageFileMaxBytes)throw new z.ZodError([{code:'custom',path:['size'],message:'Send a file of at most 10 MB.',input:undefined}])
+  if(!rule)throw new z.ZodError([{code:'custom',path:['contentType'],message:`Send a picture (PNG, JPG, WebP or GIF), ${onPost?'a video (MP4 or WebM), ':''}a PDF, or a Word, PowerPoint, Excel or text file.`,input:undefined}])
+  if(!rule.extensions.includes(extension))throw new z.ZodError([{code:'custom',path:['fileName'],message:`A ${rule.extensions.map(e=>'.'+e).join(' or ')} file name is expected for this type.`,input:undefined}])
+  if(p.size>rule.maxBytes)throw new z.ZodError([{code:'custom',path:['size'],message:`Send a ${p.contentType.startsWith('video/')?'video':'file'} of at most ${rule.maxBytes/(1024*1024)} MB.`,input:undefined}])
   if(!storage)throw filesNotSetUp()
   const id=ulid()
   const url=await storage.uploadUrl(messageFileKey(user.id,id,p.fileName),p.contentType,p.size)
@@ -1979,14 +1986,14 @@ async function checkMessageFiles(repo:Repository,user:User,request:ActionRequest
   if(!Array.isArray(files)||!files.length)return keys
   const parsed=((actionPayloads[request.action as keyof typeof actionPayloads] as z.ZodType).parse(request.payload) as {attachments?:{id:string;fileName:string;contentType:string;size:number}[]}).attachments??[]
   if(!storage)throw filesNotSetUp()
+  const post=request.action==='createPost'||request.action==='updatePost'
   for(const f of parsed){
-    const allowed=messageFileTypes[f.contentType]
-    if(!allowed||!allowed.includes(f.fileName.toLowerCase().split('.').pop()??'')||f.size>messageFileMaxBytes)throw conflict('That file cannot be sent. Choose it again.')
+    const rule=attachedFileRule(f.contentType,post)
+    if(!rule||!rule.extensions.includes(f.fileName.toLowerCase().split('.').pop()??'')||f.size>rule.maxBytes)throw conflict('That file cannot be sent. Choose it again.')
     const stored=await storage.head(messageFileKey(user.id,f.id,f.fileName))
     if(!stored)throw conflict(`${f.fileName} has not finished uploading. Try again.`)
     if(stored.size!==f.size||stored.contentType!==undefined&&stored.contentType!==f.contentType)throw conflict(`${f.fileName} does not match what was uploaded. Choose it again.`)
   }
-  const post=request.action==='createPost'||request.action==='updatePost'
   const kept=request.action==='updatePost'?await repo.view(unit=>unit.read().posts.find(p=>p.id===request.recordId)?.attachments?.map(a=>a.id)??[]):[]
   try {
     for(const f of parsed.filter(file=>!kept.includes(file.id))){
