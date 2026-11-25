@@ -21,6 +21,7 @@ Node 22 or later. Environment variables are parsed in `src/env.ts`:
 - `AUTH_STORE_BUCKET`, `AUTH_STORE_KEY`, `AUTH_STORE_FILE`: where accounts live; see Accounts and sign-in.
 - `MAIL_FROM`: verified Amazon SES sender of password reset codes, new-concern emails and account invites; see Password reset codes, New-concern emails and Account provisioning.
 - `MATERIALS_BUCKET`: private S3 bucket for class material files; see Subjects and class materials.
+- `MEDIA_CDN_DOMAIN`, `MEDIA_KEY_PAIR_ID`, `MEDIA_PRIVATE_KEY_PARAMETER`: CloudFront media CDN for pictures and videos on posts; see Pictures and videos on posts.
 - `APP_URL`: address of the portal, for links in emails (default: the first `CORS_ORIGIN`).
 - `SEED_PASSWORD` (at least 10 characters): the shared sign-in password of the seeded demo accounts. Deployed stacks set it. Without it, production disables seeded sign-in, and local runs and tests use a built-in default. On Lambda with any other `NODE_ENV` (including an unset one, which defaults to `development`), the API fails at startup rather than accept the built-in password. It is not in `.env.example`.
 
@@ -193,6 +194,11 @@ A section space (P08, `subject: 'Section group'`) lists `subjects`: the subject 
 4. `GET /api/materials/:id/file` checks that the user is one of the subject's professors or students, then redirects (302) to a signed download valid for 5 minutes, under the original file name.
 
 Students never see pending files, and the storage key is never sent. Removing a file material deletes its file once the removal is saved. The files live in the private bucket `MATERIALS_BUCKET` (accs-architecture); without it, an upload answers 409 "File uploads are not set up yet. Share a link instead." and links still work.
+
+## Pictures and videos on posts
+Posts take up to 10 attachments, uploaded with `POST /api/uploads` (same flow as message files: signed PUT, then the post names each file by `id`). Besides the message types (pictures PNG, JPG, WebP, GIF up to 10 MB; PDF, Office and text files up to 10 MB), a post may carry **MP4 and WebM videos up to 100 MB** each, uploaded straight to S3 and never transcoded. `POST /api/messages/uploads` still refuses videos.
+
+`GET /api/posts/:postId/files/:fileId?inline=1` checks that the user can read the post (or reviews it), then for a picture or video answers a **CloudFront signed URL** (canned policy, `src/media-cdn.ts`): 5 minutes for pictures, 1 hour for videos so seeking keeps working. The distribution sits in front of the private `MATERIALS_BUCKET` with Origin Access Control and only serves `materials/posts/*` (accs-architecture `api.yaml`). The private key is read once per Lambda instance from the SSM SecureString named by `MEDIA_PRIVATE_KEY_PARAMETER` and is never logged or returned. Without the three `MEDIA_*` variables, or for a download without `inline`, or for other files, the link is a signed S3 GET as before.
 
 ## Campuses and section names
 CCS runs on three campuses (#46, `src/sections.ts`): **SB** San Bartolome (1st to 4th year), **BAT** Batasan and **SF** San Francisco (1st and 2nd year only; their students move to San Bartolome for 3rd year). A section is named campus + program code + year + letter: `SBIT1A`, `BATIT1A`, `SFIT1A`, `SBCS3B`, `SFIS2A`. Section spaces carry `campus` and `year`, and their title is the section name.
