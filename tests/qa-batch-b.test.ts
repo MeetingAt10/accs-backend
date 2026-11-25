@@ -94,12 +94,12 @@ describe('ongoing incidents', () => {
 
 describe('reporting your own content', () => {
   it('refuses reporting your own post, comment or message, and still lets others report them', async () => {
-    const professor = await login('QCU-PROF-IT')
-    const own = await professor.post('/api/pages/P06/actions').send({ action: 'flag', recordId: 'POST-0103', payload: { reason: 'Test', itemType: 'post' } })
+    const professor = await login('QCU-ORG-AWS')
+    const own = await professor.post('/api/pages/P06/actions').send({ action: 'flag', recordId: 'POST-0109', payload: { reason: 'Test', itemType: 'post' } })
     expect(own.status).toBe(400)
     expect(own.body.error).toBe('You cannot report your own post, comment or message.')
     const student = await login('QCU-STU-IT-A')
-    expect((await student.post('/api/pages/P06/actions').send({ action: 'flag', recordId: 'POST-0103', payload: { reason: 'Wrong date', itemType: 'post' } })).status).toBe(200)
+    expect((await student.post('/api/pages/P06/actions').send({ action: 'flag', recordId: 'POST-0109', payload: { reason: 'Wrong date', itemType: 'post' } })).status).toBe(200)
     const ownMessage = await student.post('/api/pages/P12/actions').send({ action: 'flag', recordId: 'THREAD-DIRECT-1', payload: { reason: 'Test', itemType: 'message', itemId: 'MESSAGE-0102' } })
     expect(ownMessage.status).toBe(400)
   })

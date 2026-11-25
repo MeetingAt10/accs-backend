@@ -81,7 +81,7 @@ describe('P25 timing from report history', () => {
     resetTimelines(daysAgo(3))
     const resolved = report('RPT-0241'); resolved.status = 'Resolved'; resolved.history.push(entry(resolved, daysAgo(1), 'Resolved'))
     const adviser = (await analytics()).waitingByStage.find((s: { label: string }) => s.label === 'Adviser')
-    expect(adviser.count).toBe(repo.read().reports.filter((r) => r.stage === 'adviser' && r.status !== 'Resolved').length)
+    expect(adviser.count).toBe(repo.read().reports.filter((r) => r.stage === 'adviser' && !['Resolved', 'Closed'].includes(r.status)).length)
     expect(adviser.value).toBe(adviser.count ? 3 : 0)
   })
 
