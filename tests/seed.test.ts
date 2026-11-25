@@ -2,12 +2,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { facultyRoster } from '../src/faculty-roster.js'
-import { demoUserIds, isSampleAddress, seed } from '../src/store.js'
+import { demoUserIds, forumStudents, isSampleAddress, seed } from '../src/store.js'
 
 const base = seed(false)
 const withRoster = seed(true)
 const rosterIds = new Set(facultyRoster.map((p) => p.id))
 const accounts = withRoster.users.filter((u) => rosterIds.has(u.id))
+const realPeople = new Set([...rosterIds, ...forumStudents.map((u) => u.id)])
 
 describe('CCS personnel seed', () => {
   it('adds 58 accounts: 50 faculty, 7 staff and the secretary', () => {
@@ -37,16 +38,31 @@ describe('CCS personnel seed', () => {
       expect(demoUserIds.has(u.id), u.id).toBe(false)
     }
     expect(withRoster.users.some((u) => u.adviserId && rosterIds.has(u.adviserId))).toBe(false)
-    expect(withRoster.spaces.some((s) => s.professorIds.some((id) => rosterIds.has(id)))).toBe(false)
+    // Only John Kenny Reyes's four 4th-year subjects are taught by roster faculty.
+    expect(withRoster.spaces.filter((s) => s.professorIds.some((id) => rosterIds.has(id))).map((s) => s.id)).toEqual(['SUBJECT-IT4-AL102', 'SUBJECT-IT4-CAP101', 'SUBJECT-IT4-IAS102', 'SUBJECT-IT4-PRC101'])
   })
 
-  it('has no demo account under its old name and only generic Demo names', () => {
+  it('has no demo account under its old name and only generic Demo names, besides the Dean and the organizations', () => {
     const old = ['Mira Solis', 'Luca Reed', 'Noa Vale', 'Tess Finch', 'Rina Cole', 'Robin Elm', 'Rowan Quill', 'Sena Brook', 'Morgan Ash', 'Ellis Wren', 'Sage Linden', 'Casey Hart', 'Alex Fern', 'Jamie Alder']
+    const named = ['QCU-SECRETARY', 'CCS-DEAN', 'QCU-ORG', 'QCU-ORG-LESIT', 'QCU-ORG-JPCS', 'QCU-ORG-MSC', 'QCU-ORG-AWS']
     for (const db of [base, withRoster]) {
-      const demo = db.users.filter((u) => !rosterIds.has(u.id))
+      const demo = db.users.filter((u) => !realPeople.has(u.id))
       expect(demo.filter((u) => old.some((n) => u.name.includes(n)))).toEqual([])
-      expect(demo.filter((u) => u.id !== 'QCU-SECRETARY' && !u.name.startsWith('Demo ')).map((u) => u.id)).toEqual([])
+      expect(demo.filter((u) => !named.includes(u.id) && !u.name.startsWith('Demo ')).map((u) => u.id)).toEqual([])
     }
+    expect(base.users.find((u) => u.id === 'CCS-DEAN')?.name).toBe('Dr. Paula Joy L. Dela Cruz')
+    expect(base.users.find((u) => u.id === 'QCU-ORG-AWS')?.name).toBe('AWS Student Builder Group QCU')
+  })
+
+  // Forum posts and comments are never by a "Demo" account: the Dean, roster faculty, real students, offices and organizations.
+  it('has no forum content by a Demo account and no Demo name in it, with the roster', () => {
+    const names = new Map(withRoster.users.map((u) => [u.id, u.name]))
+    const named = (x: { anonymous: boolean, authorId: string }) => (x.anonymous ? [] : [x.authorId])
+    const authors = withRoster.posts.flatMap((p) => [...named(p), ...p.comments.flatMap(named)])
+    expect(authors.filter((id) => !names.has(id) || names.get(id)!.startsWith('Demo '))).toEqual([])
+    expect(JSON.stringify(withRoster.posts)).not.toContain('Demo ')
+    expect(withRoster.posts.filter((p) => p.authorId === 'QCU-FAC-PAULA-DELACRUZ').length).toBeGreaterThan(0)
+    for (const u of forumStudents) expect([demoUserIds.has(u.id), base.users.some((b) => b.id === u.id)], u.id).toEqual([false, true])
   })
 
   it('has Dr. Paula as the one active Dean with the roster, and the demo Dean on production', () => {

@@ -15,6 +15,7 @@ import { send } from './http.js'
 import { createRepository } from './persist.js'
 import { ApiError, approvedOverrides, completeMaterialUpload, getPage, materialDownloadUrl, performAction, refreshRestrictions, sessionView, startMaterialUpload, unavailable, type AccountChange, type AfterCommit, type ProfileChange, startMessageUpload, messageFileUrl, postFileUrl, search } from './services.js'
 import { createS3MaterialStorage, type MaterialStorage } from './material-storage.js'
+import { createMediaSigner, ssmPrivateKey, type MediaSigner } from './media-cdn.js'
 import { createResetStore, resetPolicy, type ResetStore } from './resets.js'
 import { createThrottleStore, type ThrottleStore } from './throttle.js'
 import { createSessionStore, isWellFormedToken, newSessionToken, sessionIdOf, sessionPolicy, sessionState, type SessionStore } from './sessions.js'
@@ -22,7 +23,7 @@ import { demoUserIds, isSampleAddress, rosterUserIds, type Repository } from './
 import { recordException, requestTelemetry } from './telemetry.js'
 import { currentAccountId, formerAccountIds } from './renames.js'
 
-export function createApp(repository:Repository=createRepository({nodeEnv:env.NODE_ENV,tableName}),options:{authStore?:AuthStore;sessionStore?:SessionStore;resetStore?:ResetStore;throttleStore?:ThrottleStore;mailer?:InviteMailer;resetMailer?:ResetCodeMailer;concernMailer?:NewConcernMailer;materialStorage?:MaterialStorage;stack?:Stack}={}){
+export function createApp(repository:Repository=createRepository({nodeEnv:env.NODE_ENV,tableName}),options:{authStore?:AuthStore;sessionStore?:SessionStore;resetStore?:ResetStore;throttleStore?:ThrottleStore;mailer?:InviteMailer;resetMailer?:ResetCodeMailer;concernMailer?:NewConcernMailer;materialStorage?:MaterialStorage;mediaSigner?:MediaSigner;stack?:Stack}={}){
   const app=express()
   // The account switcher for testers exists only on the development stack and on local runs (src/dev.ts).
   const devToolbox=devToolboxEnabled(options.stack??{tablePrefix:env.TABLE_PREFIX,nodeEnv:env.NODE_ENV})
@@ -105,6 +106,8 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   const appUrl=(env.APP_URL??env.CORS_ORIGIN[0]??'').replace(/\/+$/,'')
   // Class material files live in a private bucket when MATERIALS_BUCKET is set (#44); otherwise materials are links only.
   const materialStorage=options.materialStorage??(env.MATERIALS_BUCKET?createS3MaterialStorage(env.MATERIALS_BUCKET):undefined)
+  // Pictures and videos on posts come from the media CDN when all three are set; otherwise from signed S3 links.
+  const mediaSigner=options.mediaSigner??(env.MEDIA_CDN_DOMAIN&&env.MEDIA_KEY_PAIR_ID&&env.MEDIA_PRIVATE_KEY_PARAMETER?createMediaSigner(env.MEDIA_CDN_DOMAIN,env.MEDIA_KEY_PAIR_ID,ssmPrivateKey(env.MEDIA_PRIVATE_KEY_PARAMETER)):undefined)
   const sendMail=async(work:AfterCommit[])=>{
     // A removed material's file is deleted once the removal is saved; a failure leaves an orphan file, never a broken page.
     await Promise.all(work.flatMap(w=>w.kind==='deleteFile'&&materialStorage?[materialStorage.remove(w.key).catch(error=>console.error(JSON.stringify({level:'error',message:'Material file not deleted',key:w.key,error:error instanceof Error?error.name:'Unknown'})))]:[]))
@@ -205,9 +208,9 @@ export function createApp(repository:Repository=createRepository({nodeEnv:env.NO
   app.post('/api/materials/:id/complete',async(req,res)=>{emptyBodySchema.parse(req.body??{});send(res,actionResponseSchema,{ok:true,message:'Material added.',record:await completeMaterialUpload(repository,res.locals.user as User,materialId.parse(req.params.id),materialStorage)})})
   app.get('/api/materials/:id/file',async(req,res)=>{res.redirect(302,await materialDownloadUrl(repository,res.locals.user as User,materialId.parse(req.params.id),materialStorage))})
   // Files in Messages: a signed upload straight to S3; the message is checked against the stored file when it is sent.
-  // Files for posts use the same upload; /api/uploads is the general name.
-  app.post('/api/uploads',async(req,res)=>{send(res,actionResponseSchema,{ok:true,message:'Upload the file to the address given, then save.',record:await startMessageUpload(res.locals.user as User,req.body,materialStorage)})})
-  app.get('/api/posts/:postId/files/:fileId',async(req,res)=>{const url=await postFileUrl(repository,res.locals.user as User,materialId.parse(req.params.postId),materialId.parse(req.params.fileId),req.query.inline==='1',materialStorage);if(req.query.format==='json'){send(res,actionResponseSchema,{ok:true,message:'File link ready.',record:{url}});return}res.redirect(302,url)})
+  // Files for posts use the same upload; /api/uploads is the general name and also takes MP4 and WebM videos.
+  app.post('/api/uploads',async(req,res)=>{send(res,actionResponseSchema,{ok:true,message:'Upload the file to the address given, then save.',record:await startMessageUpload(res.locals.user as User,req.body,materialStorage,true)})})
+  app.get('/api/posts/:postId/files/:fileId',async(req,res)=>{const url=await postFileUrl(repository,res.locals.user as User,materialId.parse(req.params.postId),materialId.parse(req.params.fileId),req.query.inline==='1',materialStorage,mediaSigner);if(req.query.format==='json'){send(res,actionResponseSchema,{ok:true,message:'File link ready.',record:{url}});return}res.redirect(302,url)})
   app.post('/api/messages/uploads',async(req,res)=>{send(res,actionResponseSchema,{ok:true,message:'Upload the file to the address given, then send the message.',record:await startMessageUpload(res.locals.user as User,req.body,materialStorage)})})
   app.get('/api/threads/:threadId/messages/:messageId/files/:fileId',async(req,res)=>{const url=await messageFileUrl(repository,res.locals.user as User,materialId.parse(req.params.threadId),materialId.parse(req.params.messageId),materialId.parse(req.params.fileId),req.query.inline==='1',materialStorage);if(req.query.format==='json'){send(res,actionResponseSchema,{ok:true,message:'File link ready.',record:{url}});return}res.redirect(302,url)})
   app.post('/api/pages/:pageId/actions',async(req,res)=>{const {pageId}=idParamsSchema.parse(req.params);const body=actionRequestSchema.parse(req.body)

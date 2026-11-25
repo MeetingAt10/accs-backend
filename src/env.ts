@@ -23,6 +23,11 @@ const schema = z.object({
   APP_URL: z.url().optional(),
   // Private S3 bucket for class material files (#44). Without it, materials can only be links.
   MATERIALS_BUCKET: z.string().min(1).optional(),
+  // Media CDN for pictures and videos on posts (src/media-cdn.ts): the CloudFront domain, the ID of its public key, and the
+  // name of the SSM SecureString holding the private key. All three or none; without them, posts use signed S3 links.
+  MEDIA_CDN_DOMAIN: z.string().min(1).optional(),
+  MEDIA_KEY_PAIR_ID: z.string().min(1).optional(),
+  MEDIA_PRIVATE_KEY_PARAMETER: z.string().min(1).optional(),
   // The assistant's model layer (src/assistant-ai.ts). Without a key, the rule-based assistant answers alone.
   // A secret: set it on the Lambda or in a local .env, never in the repository.
   OPENAI_API_KEY: z.string().optional().transform((key) => key || undefined),

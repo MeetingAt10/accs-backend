@@ -61,7 +61,7 @@ describe('P25 timing from report history', () => {
     const a = report('RPT-0241'); a.history.push(entry(a, '2026-11-04T02:00:00.000Z', 'Resolved'))
     const trend = (await analytics()).trend
     expect(trend).toEqual([
-      { label: '19 Oct', opened: 9, resolved: 0 },
+      { label: '19 Oct', opened: repo.read().reports.length - 1, resolved: 0 },
       { label: '26 Oct', opened: 0, resolved: 0 },
       { label: '2 Nov', opened: 1, resolved: 1 },
     ])
@@ -69,6 +69,8 @@ describe('P25 timing from report history', () => {
 
   it('measures waiting from when a report entered its stage, not from its latest response', async () => {
     resetTimelines(daysAgo(30))
+    // The seed has more than one report with the Dean; only RPT-0243 is measured here.
+    for (const r of repo.read().reports) if (r.stage === 'dean' && r.id !== 'RPT-0243') r.stage = 'chair'
     const dean = report('RPT-0243')
     dean.history.push(entry(dean, daysAgo(10), 'Transferred', 'chair'), entry(dean, daysAgo(6), 'Transferred', 'dean'), entry(dean, daysAgo(1), 'Response sent', 'dean'))
     const waiting = (await analytics()).waitingByStage.find((s: { label: string }) => s.label === 'Dean')
@@ -79,7 +81,7 @@ describe('P25 timing from report history', () => {
     resetTimelines(daysAgo(3))
     const resolved = report('RPT-0241'); resolved.status = 'Resolved'; resolved.history.push(entry(resolved, daysAgo(1), 'Resolved'))
     const adviser = (await analytics()).waitingByStage.find((s: { label: string }) => s.label === 'Adviser')
-    expect(adviser.count).toBe(repo.read().reports.filter((r) => r.stage === 'adviser' && r.status !== 'Resolved').length)
+    expect(adviser.count).toBe(repo.read().reports.filter((r) => r.stage === 'adviser' && !['Resolved', 'Closed'].includes(r.status)).length)
     expect(adviser.value).toBe(adviser.count ? 3 : 0)
   })
 

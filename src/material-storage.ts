@@ -23,6 +23,17 @@ export const materialFileTypes: Readonly<Record<string, readonly string[]>> = {
 export const messageFileTypes: Readonly<Record<string, readonly string[]>> = { ...materialFileTypes, 'image/webp': ['webp'], 'image/gif': ['gif'] }
 export const messageFileMaxBytes = 10 * 1024 * 1024
 export const messageFilesPerMessage = 5
+/** Forum posts also take MP4 and WebM videos, up to 100 MB each, uploaded straight to S3 and never transcoded. */
+export const postVideoTypes: Readonly<Record<string, readonly string[]>> = { 'video/mp4': ['mp4'], 'video/webm': ['webm'] }
+export const postVideoMaxBytes = 100 * 1024 * 1024
+/** Pictures and videos on posts play from the media CDN when it is set up (src/media-cdn.ts). */
+export const isPostMedia = (contentType: string) => contentType.startsWith('image/') || contentType in postVideoTypes
+/** The extensions and size limit for a file on a post or a message, or undefined when the type is not accepted. */
+export function attachedFileRule(contentType: string, onPost: boolean) {
+  if (onPost && postVideoTypes[contentType]) return { extensions: postVideoTypes[contentType]!, maxBytes: postVideoMaxBytes }
+  const extensions = messageFileTypes[contentType]
+  return extensions ? { extensions, maxBytes: messageFileMaxBytes } : undefined
+}
 export const uploadUrlSeconds = 600
 export const downloadUrlSeconds = 300
 

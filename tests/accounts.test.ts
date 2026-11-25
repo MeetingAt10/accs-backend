@@ -9,7 +9,7 @@ import { facultyRoster } from '../src/faculty-roster.js'
 import { createRecordRepository } from '../src/persist.js'
 import { createMemoryRecordStore } from '../src/records.js'
 import { createMemorySessionStore } from '../src/sessions.js'
-import { createMemoryRepository, type Database, type Repository } from '../src/store.js'
+import { createMemoryRepository, forumStudents, type Database, type Repository } from '../src/store.js'
 import { activateSecretary, concernChoices, secretaryPassword, secretarySession, seedPassword, signIn, setUpAuthStore } from './helpers.js'
 
 // The unsent-invite mailer logs once per account; the tests that look at the log spy on it again.
@@ -428,7 +428,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       // Sending the same list again changes nothing: every row is a duplicate.
       const again = await importStudents(secretary, [student(1), student(9)])
       expect(again.map((row) => row.code)).toEqual(['DUPLICATE_EMAIL', 'DUPLICATE_EMAIL'])
-      expect((await secretary.get('/api/accounts').query({ role: 'student' })).body.total).toBe(4 + 2)
+      expect((await secretary.get('/api/accounts').query({ role: 'student' })).body.total).toBe(4 + forumStudents.length + 2)
     })
 
     // Hashing 25 passwords takes about 3 seconds alone, more when the whole suite runs in parallel.
@@ -447,7 +447,7 @@ describe.each(backends)('accounts, %s', (_name, backend) => {
       const secretary = await secretarySession(app)
       await importStudents(secretary, [student(1), student(2)])
       const students = await secretary.get('/api/accounts').query({ role: 'student' })
-      expect(students.body.total).toBe(4 + 2)
+      expect(students.body.total).toBe(4 + forumStudents.length + 2)
       expect(students.body.accounts.every((account: { roles: string[] }) => account.roles.includes('student'))).toBe(true)
       expect(JSON.stringify(students.body)).not.toMatch(/scrypt|username|password/i)
       expect((await secretary.get('/api/accounts').query({ q: '26-1002' })).body.accounts.map((a: { email: string }) => a.email)).toEqual(['student.2@gmail.com'])

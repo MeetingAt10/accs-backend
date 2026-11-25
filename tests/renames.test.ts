@@ -19,7 +19,7 @@ const signIn = (app: ReturnType<typeof createApp>, emailOrId: string, password =
 describe('the renamed Dean account (issue #41)', () => {
   it('is CCS-DEAN in the seed, has dean@access-ccs.com, and no QCU-DEAN remains', () => {
     const users = seed().users
-    expect(users.find((u) => u.id === 'CCS-DEAN')).toMatchObject({ name: 'Demo Dean', roles: ['dean'], email: 'dean@access-ccs.com' })
+    expect(users.find((u) => u.id === 'CCS-DEAN')).toMatchObject({ name: 'Dr. Paula Joy L. Dela Cruz', roles: ['dean'], email: 'dean@access-ccs.com' })
     expect(JSON.stringify(seed())).not.toContain('QCU-DEAN')
   })
 

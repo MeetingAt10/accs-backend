@@ -1,6 +1,6 @@
 // Fixes from the QA report of 15 November 2026 (QA_andrew_11_15), batch A: bugs.
 import request from 'supertest'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createApp } from '../src/app.js'
 import { createMemoryAuthStore } from '../src/auth.js'
@@ -105,7 +105,9 @@ describe('opening a student record with a note', () => {
 })
 
 describe('notification order (QA 17 November)', () => {
+  afterEach(() => { vi.setSystemTime(new Date('2026-10-21T00:00:00.000Z')) })
   it('lists notifications newest first, so the bell, which shows the first five, shows the new ones', async () => {
+    vi.setSystemTime(new Date('2026-11-26T00:00:00.000Z')) // the seed runs to late November, so a new item must be newer than the seeded ones
     const student = await login('QCU-STU-IT-A')
     const admin = await login('ACCS-ADMIN')
     const until = new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10)

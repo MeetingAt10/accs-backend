@@ -7,7 +7,7 @@ import { createRecordRepository, createRepository, persisted } from '../src/pers
 import { createDynamoRecordStore, createMemoryRecordStore, RecordConflict, writeLimit, type RecordStore, type RecordWrite } from '../src/records.js'
 import { ApiError } from '../src/services.js'
 import { createMemorySessionStore } from '../src/sessions.js'
-import type { Database, Notification } from '../src/store.js'
+import { seed, type Database, type Notification } from '../src/store.js'
 import { concernChoices, signIn, setUpAuthStore } from './helpers.js'
 
 const tick = () => new Promise((resolve) => setImmediate(resolve))
@@ -243,7 +243,7 @@ describe('the record repository', () => {
     expect(store.all()).toMatchObject([{ id: 'SLOT-0104', version: 1, data: undefined }])
     const slots = (r: ReturnType<typeof createRecordRepository>) => r.view((unit) => unit.read().slots.map((entry) => entry.id))
     expect(await slots(repo)).not.toContain('SLOT-0104')
-    expect(await slots(createRecordRepository(store))).toEqual(['SLOT-0101', 'SLOT-0102', 'SLOT-0103', 'SLOT-0105', 'SLOT-0106'])
+    expect(await slots(createRecordRepository(store))).toEqual(seed().slots.map((entry) => entry.id).filter((id) => id !== 'SLOT-0104'))
     await repo.transact((unit) => { unit.read().slots.push({ id: unit.nextId('SLOT'), facultyId: 'QCU-PROF-IT', date: '2026-11-06', start: '09:00', end: '09:30', state: 'open' }) })
     expect(store.all().filter((item) => item.id === 'SLOT-0104')).toHaveLength(1)
   })
